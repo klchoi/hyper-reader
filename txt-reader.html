@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
+  <title>Text Reader</title>
+  <style>
+    @font-face {
+      font-family: Reader;
+      src: local('LMRoman12-Regular'), url('https://mirror.kku.ac.th/CTAN/fonts/lm/fonts/opentype/public/lm/lmroman12-regular.otf') format('opentype');
+    }
+
+    /** reset **/
+    * {
+      box-sizing: border-box;
+      padding: 0;
+      margin: 0;
+      border: 0;
+      outline: 0;
+      transform-origin: 50% 50%;
+    }
+    p {
+      margin: 1em 0;
+    }
+    hr {
+      border: 0;
+      height: 1px;
+      background: rgba(0, 0, 0, .2);
+    }
+    a,
+    a:any-link {
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+      text-decoration-thickness: 2px;
+      text-decoration-skip-ink: none;
+      text-underline-offset: 4px;
+      cursor: pointer;
+    }
+    small {
+      font-size: 0.875em;
+    }
+
+    /** variables **/
+    :root {
+      --nav-width: 300px;
+      --aside-width: 60px;
+      --gap: 1rem;
+    }
+    .settings .colors button.white,
+    :root[data-color=white] {
+      --body-font-color: rgb(27, 27, 27);
+      --body-background-color: rgb(230, 230, 230);
+      --paper-background-color: rgb(255, 255, 255);
+      --paper-shadow-color: rgba(0, 0, 0, .2);
+      --link-color: rgb(65, 110, 210);
+      --horizontal-line-color: rgb(220, 220, 220);
+    }
+    .settings .colors button.sepia,
+    :root[data-color=sepia] {
+      --body-font-color: rgb(79, 50, 28);
+      --body-background-color: rgb(225, 216, 200);
+      --paper-background-color: rgb(248, 241, 227);
+      --paper-shadow-color: rgba(0, 0, 0, .2);
+      --link-color: rgb(209, 150, 0);
+      --horizontal-line-color: rgb(230, 218, 201);
+    }
+    .settings .colors button.gray,
+    :root[data-color=gray] {
+      --body-font-color: rgba(255, 255, 255, 0.78);
+      --body-background-color: rgb(50, 50, 51);
+      --paper-background-color: rgb(74, 74, 77);
+      --paper-shadow-color: rgba(0, 0, 0, .24);
+      --link-color: rgb(90, 200, 250);
+      --horizontal-line-color: rgb(111, 111, 111);
+    }
+    .settings .colors button.night,
+    :root[data-color=night] {
+      --body-font-color: rgb(176, 176, 176);
+      --body-background-color: rgb(0, 0, 0);
+      --paper-background-color: rgb(18, 18, 18);
+      --paper-outline-color: #272727;
+      --link-color: rgb(90, 200, 250);
+      --horizontal-line-color: rgb(62, 62, 62);
+    }
+
+    /** layout **/
+    body { display: flex; }
+    body > * { flex: 1 }
+    nav { flex: 0 0 var(--nav-width); }
+    aside { flex: 0 0 var(--aside-width); }
+
+    /** global **/
+    html,
+    body {
+      font: 16pt/1.4 Reader;
+      color: var(--body-font-color);
+      background: var(--body-background-color);
+    }
+    a {
+      color: var(--link-color);
+    }
+
+    /** nav **/
+    nav {
+      height: 100vh;
+      overflow-y: auto;
+      overscroll-behavior-y: contain;
+      position: sticky;
+      top: 0;
+      padding: calc(var(--gap) * 0.75) var(--gap);
+      font-size: 0.875rem;
+      line-height: 1.2;
+    }
+    nav ol {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5em;
+      align-items: start;
+    }
+    nav li {
+      /**/
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      /**/
+      padding-top: 0.1ex;
+      padding-bottom: 0.1ex;
+    }
+    nav li.active {
+      background: yellow;
+      outline: 0.3ch solid yellow;
+    }
+    nav li.active a {
+      pointer-events: none;
+      color: black;
+    }
+    nav a {
+      color: var(--body-font-color);
+    }
+    nav a:hover {
+      color: var(--link-color);
+    }
+    nav li:first-child a {
+      font-weight: bold;
+    }
+
+    /** aside **/
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding-top: var(--gap);
+      padding-bottom: var(--gap);
+      padding-left: var(--gap);
+      padding-right: var(--gap);
+    }
+    aside .colors {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: calc(var(--gap) * .75);
+      padding-top: calc(var(--gap) / 2);
+    }
+    aside .colors button {
+      appearance: none;
+      width: 100%;
+      min-width: 25px;
+      aspect-ratio: 1;
+      background: var(--paper-background-color);
+      outline: 0.5px solid rgba(255, 255, 255, .5);
+      border-radius: 50%;
+      display: grid;
+      place-content: center;
+    }
+    aside .colors button.checked::before {
+      content: '✓';
+      color: var(--body-font-color);
+      font-size: .7rem;
+    }
+    aside a.close {
+      display: block;
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      position: relative;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
+      background: var(--paper-background-color);
+    }
+    aside a.close::before,
+    aside a.close::after {
+      content: '';
+      display: block;
+      width: 50%;
+      height: 1px;
+      transform: translate3d(-50%, -50%, 0) rotateZ(var(--rotate, 45deg));
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      background: var(--body-font-color);
+    }
+    aside a.close::after {
+      --rotate: -45deg;
+    }
+
+    /** main **/
+    main {
+      /**
+      padding-top: var(--gap);
+      padding-bottom: var(--gap);
+      /**/
+      display: flex;
+    }
+    main article {
+      flex: 1;
+      background: var(--paper-background-color);
+      padding: 1rem 3rem;
+      outline: 1px solid var(--paper-outline-color, transparent);
+      box-shadow: 0px 6px 12px 3px var(--paper-shadow-color, transparent);
+    }
+    main article p:first-child {
+      line-height: 1.2;
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+    main article hr {
+      background: var(--horizontal-line-color);
+    }
+
+    /** table **/
+    .table {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto auto;
+      row-gap: var(--gap);
+      column-gap: calc(var(--gap) * 2);
+      padding: 0 var(--gap) var(--gap);
+      background: var(--paper-background-color);
+      box-shadow: 0px 6px 12px 3px var(--paper-shadow-color);
+      outline: 1px solid var(--paper-outline-color);
+      line-height: 1.2;
+      align-self: stretch;
+      align-items: start;
+    }
+    .table .name {
+      font-weight: bold;
+    }
+    .table .th {
+      white-space: nowrap;
+      padding: calc(var(--gap)/2) 0;
+      position: sticky;
+      top: 0;
+      background: var(--paper-background-color);
+    }
+    .table .th::before {
+      content: '';
+      display: block;
+      border-bottom: 1px solid var(--horizontal-line-color);
+      width: calc(100% + 1ex);
+      height: calc(2ex + 2px);
+      box-shadow: 0 calc(1ex - 5px) 1.4ex -1ex rgba(0, 0, 0, .5);
+      position: absolute;
+      bottom: -1px;
+      left: calc(-1ex / 2);
+    }
+    .table .th span {
+      display: inline-block;
+      position: relative;
+    }
+    .table .th span::after {
+      position: absolute;
+      bottom: calc(1ex/4);
+      right: -1.8ex;
+      color: var(--body-font-color);
+    }
+    .table .th[data-sort=asc] span::after { content: '↑'; }
+    .table .th[data-sort=desc] span::after { content: '↓'; }
+    .table .text-left { text-align: left; }
+    .table .text-right { text-align: right; }
+    .table .desc { display: block; }
+    .table .delete { color: inherit; }
+    .table .delete:hover { color: var(--link-color); }
+
+    /** disable scroll when mouse is not over **/
+    /**
+    nav,
+    main {
+      height: 100%;
+      overflow-y: hidden;
+    }
+    nav:hover,
+    main:hover {
+      overflow-y: auto;
+    }
+    /**/
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { h, text, app } from 'https://cdn.jsdelivr.net/npm/hyperapp/+esm';
+    import { openDB } from 'https://cdn.jsdelivr.net/npm/idb/+esm';
+
+    class HashRouter extends EventTarget {
+      parse(hash) {
+        return [...(new URLSearchParams(hash)).entries()].reduce((route, [k, v]) => (route[k] = v, route), {});
+      }
+      get(key) {
+        return new URLSearchParams(location.hash.slice(1)).get(key);
+      }
+      current() {
+        return this.parse(location.hash.slice(1));
+      }
+      route(route) {
+        let hash = new URLSearchParams(Object.entries(route).filter(([k, v]) => v !== '' && v != null)).toString();
+        if (hash) hash = '#' + hash;
+        return hash;
+      }
+      push(to) {
+        let from = this.current();
+        let allKeys = Object.keys({ ...from, ...to });
+        let changed = allKeys.some(key => from[key] != to[key]);
+        if (changed) {
+          let url = new URL(location.href);
+          url.hash = this.route(to);
+          history.pushState(null, null, url);
+        }
+      }
+      replace(to) {
+        let from = this.current();
+        let allKeys = Object.keys({ ...from, ...to });
+        let changed = allKeys.some(key => from[key] != to[key]);
+        if (changed) {
+          let url = new URL(location.href);
+          url.hash = this.route(to);
+          history.replaceState(null, null, url);
+        }
+      }
+    }
+
+    let InitDbDone = (state, { db }) => [
+      { ...state, db },
+      (dispatch) => {
+        window.db = db;
+        dispatch(LoadSettings);
+        dispatch(LoadProgress);
+        dispatch(LoadRecentBooks);
+        dispatch(LoadRecentBook);
+      }
+    ];
+    let InitDb = (state) => [
+      state,
+      async (dispatch) => {
+        let db = await openDB('text-reader', 20, {
+          upgrade(db, oldVersion, newVersion, transaction) {
+            let schemas = {
+              files: {},
+              fileContents: {},
+              settings: {},
+              progress: {},
+            };
+            for (let [store, keyOptions] of Object.entries(schemas)) {
+              if (!db.objectStoreNames.contains(store)) {
+                db.createObjectStore(store, keyOptions);
+              }
+            }
+            //for(let store of db.objectStoreNames) {
+            //  if (!(store in schemas)) {
+            //    console.warn('Delete store', store);
+            //    db.deleteObjectStore(store);
+            //  }
+            //}
+          }
+        });
+
+        dispatch(InitDbDone, { db });
+      }
+    ];
+
+    let InitTheme = (state) => [
+      state,
+      (dispatch) => {
+        let color = 'white';
+        if (matchMedia('(prefers-color-scheme: dark)').matches) color = 'night';
+        dispatch(ApplySettings, { color });
+      }
+    ];
+
+    let InitRouter = (state) => [
+      state,
+      (dispatch) => {
+        addEventListener('hashchange', (event) => {
+          let from = state.router.parse(new URL(event.oldURL).hash.slice(1));
+          let to = state.router.parse(new URL(event.newURL).hash.slice(1));
+          if (!to.book) {
+            dispatch(ShowRecentBooks);
+          } else {
+            dispatch(OpenBook, { bookId: to.book, chapterId: to.chapter });
+          }
+        });
+      }
+    ];
+
+    let InitKeyboardNavigator = (state) => [
+      state,
+      (dispatch) => {
+        addEventListener('keydown', (event) => {
+          switch(event.key) {
+            case 'ArrowRight': dispatch(OpenNextChapter, +1); break;
+            case 'ArrowLeft': dispatch(OpenNextChapter, -1); break;
+            case 'Backspace': dispatch(ShowRecentBooks); break;
+            default: break;
+          }
+        });
+      }
+    ];
+
+    let LoadSettings = (state) => [
+      state,
+      async (dispatch) => {
+        let settings = {};
+        let cursor = await state.db.transaction('settings').store.openCursor();
+        while (cursor) {
+          settings[cursor.key] = cursor.value;
+          cursor = await cursor.continue();
+        }
+        dispatch(ApplySettings, settings);
+      }
+    ];
+    let ApplySettings = (state, settings) => [
+      { ...state, settings: { ...state.settings, ...settings } },
+      () => {
+        for (let [key, value] of Object.entries(settings)) {
+          document.documentElement.dataset[key] = (value ?? '');
+        }
+      }
+    ];
+    let SaveSettings = (state, settings) => [
+      state,
+      async (dispatch) => {
+        dispatch(ApplySettings, settings);
+
+        let transaction = await state.db.transaction('settings', 'readwrite');
+        for (let [key, value] of Object.entries(settings)) {
+          transaction.store.put(value, key);
+          document.documentElement.dataset[key] = (value || '');
+        }
+        await transaction.done;
+      }
+    ];
+
+    let LoadRecentBooksDone = (state, { files }) => ({ ...state, files });
+    let LoadRecentBooks = (state) => [
+      state,
+      async (dispatch) => {
+        let files = await state.db.getAll('files');
+        files.sort((a, z) => a.name.localeCompare(z.name));
+        dispatch(LoadRecentBooksDone, { files });
+      }
+    ];
+
+    let LoadProgressDone = (state, { progress }) => ({ ...state, progress });
+    let LoadProgress = (state) => [state, async (dispatch) => {
+      let progress = {};
+      let cursor = await state.db.transaction('progress').store.openCursor();
+      while (cursor) {
+        progress[cursor.key] = cursor.value;
+        cursor = await cursor.continue();
+      }
+      dispatch(LoadProgressDone, { progress });
+    }];
+
+    let LoadRecentBook = (state) => [
+      state,
+      (dispatch) => {
+        let bookId = state.router.get('book');
+        let chapterId = state.router.get('chapter');
+        if (bookId) {
+          dispatch(OpenBook, { bookId, chapterId })
+        }
+      }
+    ];
+
+    let OpenBookDone = (state, { book, chapter }) => [
+      { ...state, book, chapter },
+      (dispatch) => {
+        if (state.book?.id == book.id)
+          state.router.replace({ book: book.id, chapter: chapter.id });
+        else
+          state.router.push({ book: book.id, chapter: chapter.id });
+
+        document.title = [...new Set([book.name, chapter.title])].join(' | ');
+
+        requestAnimationFrame(() => {
+          scroll(0, 0);
+
+          //scroll bookmark into view
+          let bookmark = document.querySelector('nav .active');
+          let nav = document.querySelector('nav');
+          let bookmarkRect = bookmark.getBoundingClientRect();
+          let isOutOfView = bookmarkRect.top < 0 || nav.clientHeight < bookmarkRect.bottom;
+          if (isOutOfView) bookmark.scrollIntoView({ block: 'center' });
+        });
+      }
+    ];
+    let OpenBook = (state, { bookId, chapterId }) => [
+      state,
+      async (dispatch) => {
+        if (!bookId) {
+          console.info('Failed to load file:', { bookId, chapterId });
+          return;
+        }
+
+        let { book } = state;
+        if (book?.id != bookId) {
+          let file = await state.db.get('files', bookId);
+          let fileContent = await state.db.get('fileContents', bookId);
+          if (!file || !fileContent) {
+            console.info('File not found:', { file, fileContent, bookId });
+            return;
+          }
+          book = Book(file, fileContent);
+        }
+
+        let chapter = book.chapters.find(chapter => chapter.id == chapterId);
+        if (!chapter) chapter = book.chapters[0];
+
+        dispatch(OpenBookDone, { book, chapter });
+        dispatch(SaveProgress, { book, chapter });
+      }
+    ];
+
+    let OpenNextChapter = (state, indexDelta = 1) => [
+      state,
+      (dispatch) => {
+        let chapter = state.book.chapters.find((chapter, i, chapters) => chapters[i - indexDelta] == state.chapter);
+        if (chapter) {
+          dispatch(OpenBook, { bookId: state.book.id, chapterId: chapter.id });
+        }
+      }
+    ];
+
+    let SaveProgressDone = (state, { book, progress }) => ({ ...state, progress: { ...state.progress, [book.id]: progress } });
+    let SaveProgress = (state, { book, chapter }) => {
+      return [
+        state,
+        async (dispatch) => {
+          let progress = (await state.db.get('progress', book.id) || {});
+          progress.chapterId = chapter.id;
+          progress.chapterIndex = book.chapters.indexOf(chapter) + (book.chapters[0].id ? 1 : 0);
+          progress.chapterCount = (book.chapters[0].id ? book.chapters.length : book.chapters.length - 1);
+          progress.updatedAt = new Date().toISOString();
+          await state.db.put('progress', progress, book.id);
+          dispatch(SaveProgressDone, { book, progress });
+        }
+      ];
+    };
+
+    let InitDropzone = (state) => [
+      state,
+      (dispatch) => {
+        addEventListener('dragenter', event => { event.preventDefault(); });
+        addEventListener('dragover', event => { event.preventDefault(); });
+        addEventListener('drop', event => {
+          event.preventDefault();
+          let files = [...event.dataTransfer.files].filter(file => file.type == 'text/plain');
+          dispatch(StoreFiles, { files });
+        });
+      }
+    ];
+
+    let StoreFiles = (state, { files: localFiles }) => [
+      state,
+      (dispatch) =>  {
+        let files = [];
+        let fileContents = [];
+        let updated = [];
+        let storedCount = 0;
+        for (let i = 0; i < localFiles.length; i++) {
+          let reader = new FileReader();
+          reader.addEventListener('load', async event => {
+            fileContents[i] = event.target.result;
+            files[i] = {
+              name: localFiles[i].name,
+              size: localFiles[i].size,
+            };
+
+            let book = Book(files[i]);
+            let existingFile = await state.db.get('files', book.id);
+            if (existingFile?.size != files[i].size) {
+              book = Book(files[i], fileContents[i]);
+              dispatch(SaveProgress, { book, chapter: book.chapters[0] });
+
+              let transaction = state.db.transaction(['files', 'fileContents'], 'readwrite');
+              transaction.objectStore('files').put(files[i], book.id);
+              transaction.objectStore('fileContents').put(fileContents[i], book.id);
+              await transaction.done;
+
+              updated[i] = true;
+            }
+
+            storedCount++;
+
+            if (storedCount == localFiles.length) {
+              dispatch(LoadRecentBooks);
+              if (files.length == 1) {
+                let book = Book(files[0]);
+                let chapterId;
+                if (!updated[0]) {
+                  //file is not updated, continue at the saved chapter
+                  chapterId = (await state.db.get('progress', book.id))?.chapterId;
+                }
+                state.router.push({ book: book.id, chapterId });
+                dispatch(OpenBook, { bookId: book.id, chapterId });
+              } else {
+                state.router.push({});
+                dispatch(ShowRecentBooks);
+              }
+            }
+          });
+          reader.readAsText(localFiles[i]);
+        }
+      },
+    ];
+
+    let DeleteBookDone = (state, { bookId }) => ({ ...state, files: state.files.filter(file => Book(file).id != bookId) });
+    let DeleteBook = (state, { bookId }) => [
+      state,
+      async (dispatch) => {
+        let transaction = state.db.transaction(['files', 'fileContents'], 'readwrite');
+        transaction.objectStore('files').delete(bookId);
+        transaction.objectStore('fileContents').delete(bookId);
+        await transaction.done;
+        dispatch(DeleteBookDone, { bookId });
+      }
+    ];
+
+    let ShowRecentBooks = (state) => {
+      if (!state.book) return state;
+      return [
+        { ...state, book: null, chapter: null },
+        () => {
+          state.router.push({});
+          document.title = 'Text Reader';
+          requestAnimationFrame(() => {
+            scroll(0, 0);
+          });
+        }
+      ];
+    };
+
+    let sizeFormatter = new Intl.NumberFormat(undefined, { notation: 'compact', style: 'unit', unit: 'byte', unitDisplay: 'narrow' });
+    let formatSize = sizeFormatter.format.bind(sizeFormatter);
+
+    let dateFormatter = new Intl.RelativeTimeFormat();
+    let formatDate = (iso) => {
+      if(!iso) return;
+      let diff = (Date.now () - new Date(iso)) / 1000;
+      for (let [unit, seconds] of Object.entries({
+        months: 30 * 24 * 60 * 60,
+        days: 24 * 60 * 60,
+        hours: 60 * 60,
+        minutes: 60,
+        seconds: 0,
+      })) {
+        if (diff >= seconds) return dateFormatter.format(-Math.round(diff / (seconds || 1)), unit);
+      }
+    };
+
+    app({
+      init: [
+        {
+          router: new HashRouter(),
+          db: null,
+          files: [],
+          book: null,
+          chapter: null,
+          progress: {},
+          settings: {
+            sort: {
+              field: 'updatedAt',
+              direction: 'desc'
+            }
+          },
+        },
+        (dispatch) => {
+          dispatch(InitRouter);
+          dispatch(InitTheme);
+          dispatch(InitDb);
+          dispatch(InitDropzone);
+          dispatch(InitKeyboardNavigator);
+        }
+      ],
+      dispatch: (dispatch) => {
+        return (action, payload) => {
+          if (typeof action == 'function') {
+            let log = [action.name];
+            if (payload !== undefined) log.push(payload);
+            console.warn(...log);
+          } else if (Array.isArray(action)) {
+            //console.dir(action[0]);
+          }
+
+          dispatch(action, payload);
+        };
+      },
+      node: document.body,
+      view: ({ router, files, book, chapter, progress, settings }) => (
+        h('body', {}, [
+          !book && (
+            h('div', { class: 'table' }, [
+              h('a', {
+                class: 'th text-left',
+                'data-sort': settings.sort.field == 'name' && settings.sort.direction,
+                href: '#',
+                onclick: (_, event) => {
+                  event.preventDefault();
+                  let field = 'name', direction = 'asc';
+                  if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
+                  return [SaveSettings, { sort: { field, direction } }];
+                }
+              }, h('span', {}, text('File'))),
+              h('a', {
+                class: 'th text-right',
+                'data-sort': settings.sort.field == 'size' && settings.sort.direction,
+                href: '#',
+                onclick: (_, event) => {
+                  event.preventDefault();
+                  let field = 'size', direction = 'asc';
+                  if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
+                  return [SaveSettings, { sort: { field, direction } }];
+                }
+              }, h('span', {}, text('Size'))),
+              h('a', {
+                class: 'th text-right',
+                'data-sort': settings.sort.field == 'chapterCount' && settings.sort.direction,
+                href: '#',
+                onclick: (_, event) => {
+                  event.preventDefault();
+                  let field = 'chapterCount', direction = 'asc';
+                  if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
+                  return [SaveSettings, { sort: { field, direction } }];
+                }
+              }, h('span', {}, text('Chapters'))),
+              h('a', {
+                class: 'th text-right',
+                'data-sort': settings.sort.field == 'updatedAt' && settings.sort.direction,
+                href: '#',
+                onclick: (_, event) => {
+                  event.preventDefault();
+                  let field = 'updatedAt', direction = 'desc';
+                  if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
+                  return [SaveSettings, { sort: { field, direction } }];
+                }
+              }, h('span', {}, text('Date'))),
+              h('span', { class: 'th' }, h('span', {})),
+              ...files.sort((a, z) => {
+                let { field, direction } = settings.sort;
+                let A = Book(a), Z = Book(z);
+                let result;
+                if (field == 'name') {
+                  result = A.name.localeCompare(Z.name);
+                } else if (field == 'size') {
+                  result = a[field] - z[field];
+                } else if (field == 'updatedAt') {
+                  a = new Date(progress[A.id]?.[field] || 0);
+                  z = new Date(progress[Z.id]?.[field] || 0);
+                  result = a - z;
+                } else if (field == 'chapterCount') {
+                  result = (progress[A.id]?.[field] || 1) - (progress[Z.id]?.[field] || 1);
+                }
+                if ((direction == 'desc') && (result != 0)) result = -result;
+                return result;
+              }).flatMap(file => {
+                let book = Book(file);
+                let { chapterId, chapterIndex, chapterCount, updatedAt } = (progress[book.id] || {});
+                return [
+                  h('div', { class: 'td' }, [
+                    h('a', {
+                      class: 'name',
+                      href: router.route({ book: book.id, chapter: chapterId }),
+                      onclick: (_, event) => {
+                        event.preventDefault();
+                        return [OpenBook, { bookId: book.id, chapterId }];
+                      }
+                    }, [
+                      text(book.name)
+                    ]),
+                    book.description && (
+                      h('small', { class: 'desc' }, text(book.description))
+                    )
+                  ]),
+                  h('div', { class: 'td text-right' }, [
+                    h('small', {}, text(formatSize(file.size)))
+                  ]),
+                  h('div', { class: 'td text-right' }, [
+                    h('small', {}, text(!chapterCount ? '-' : `${chapterIndex}/${chapterCount}`))
+                  ]),
+                  h('div', { class: 'td text-right' }, [
+                    h('small', {}, text(formatDate(updatedAt) || '-'))
+                  ]),
+                  h('div', { class: 'td' }, [
+                    h('a', { class: 'delete', onclick: [DeleteBook, { bookId: book.id }] }, [
+                      h('small', {}, text('delete'))
+                    ])
+                  ])
+                ]
+              })
+            ])
+          ),
+          (book?.chapters?.length > 0) && (
+            h('nav', {}, [
+              h('ol', { start: 0 }, [
+                ...book.chapters.map(c => (
+                  h('li', { class: { active: c == chapter } }, [
+                    h('a', {
+                      href: router.route({ book: book.id, chapter: c.id }),
+                      onclick: (_, event) => {
+                        event.preventDefault();
+                        return [OpenBook, { bookId: book.id, chapterId: c.id }];
+                      },
+                      title: c.title,
+                    }, [
+                      text(c.title)
+                    ])
+                  ])
+                ))
+              ])
+            ])
+          ),
+          chapter && (
+            h('main', {}, [
+              h('article', {}, [
+                ...chapter.content.split('\n').map(line => (
+                    /^[-]+$/.test(line)
+                      ? h('hr', {})
+                      : h('p', {}, text(line))
+                  )
+                )
+              ])
+            ])
+          ),
+          h('aside', { class: 'settings' }, [
+            chapter && (
+              h('a', {
+                class: 'close',
+                href: router.route({}),
+                onclick: (_, event) => {
+                  event.preventDefault();
+                  return [ShowRecentBooks];
+                }
+              })
+            ),
+            h('div', { class: 'colors' }, [
+              h('button', { class: ['white', { checked: settings.color == 'white' }], onclick: [SaveSettings, { color: 'white' }] }),
+              h('button', { class: ['sepia', { checked: settings.color == 'sepia' }], onclick: [SaveSettings, { color: 'sepia' }] }),
+              h('button', { class: ['gray', { checked: settings.color == 'gray' }], onclick: [SaveSettings, { color: 'gray' }] }),
+              h('button', { class: ['night', { checked: settings.color == 'night' }], onclick: [SaveSettings, { color: 'night' }] }),
+            ])
+          ])
+        ])
+      )
+    });
+
+    function Book(file, fileContent) {
+      let id, name, description, chapters;
+      if (file?.name) {
+        name = /(?<name>^[^(]*)\s*\(/.exec(file?.name).groups.name.trim();
+        description = /(?<description>\(.*)\.txt/.exec(file?.name).groups.description.trim();
+        id = slug(name);
+      }
+      if (fileContent) {
+        chapters = extractChapters(name, fileContent);
+      }
+      return { id, name, description, chapters };
+    }
+
+    function extractChapters(filename, text) {
+      //cleanup
+      text = text.replace(/[\r\n]+/g, '\n');
+      text = text.replace(/(.+)/g, (s) => s.trim());
+      text = text.replace(/^'([^']+)'$/gm, '"$1"');
+      text = text.replace(/(\d)\s*(\.)\s*(\d)/gm, '$1$2$3');
+      text = text.replace(/\s+([.,;:?!\]】)])/gm, '$1');
+      text = text.replace(/([([【])\s+/gm, '$1');
+      text = text.replace(/([:—]{2,})/gm, c => c.slice(0, 1));
+      text = text.replace(/(:)[^\s\w]+\s*/gm, '$1 ');
+
+      //extract chapters
+      let chapterPattern = /^\s*\[?\s*(?:chapter)?\s*:?\s*Thứ\s+\w+\s+chương\b.*|\bChương\s+\d+\s*:?.*|^(?:\d+\s*\.?\s*)+$|^\s*\d+\s+Chương\s*:?\s*|^【.*?】\([\d-]+\)$|^【.*?】\s*bộ(\s+\d+)+$|^\d+[.!].*/gimu;
+      let matches = [...chapterPattern[Symbol.matchAll](text)];
+      let chapters = matches.map((match, i) => {
+        let startIndex = text.lastIndexOf('\n', match.index);
+        if (startIndex == -1) startIndex = 0;
+        let endIndex = text.length;
+        if (matches[i+1]) endIndex = text.lastIndexOf('\n', matches[i+1].index);
+        return {
+          title: match[0].trim(),
+          startIndex,
+          endIndex,
+        }
+      });
+      let isShort = chapter => ((chapter.endIndex - chapter.startIndex) <= 2_000);
+      let isLong = chapter => !isShort(chapter);
+      //delete all first short chapters, they belongs to prologue
+      let firstLongChapterIndex = chapters.findIndex(isLong);
+      chapters.splice(0, firstLongChapterIndex);
+      //merge short chapters to next long chapter
+      let short;
+      while((short = chapters.find(isShort))) {
+        let shortIndex = chapters.indexOf(short);
+        let long = chapters.find((chapter, index) => isLong(chapter) && index >= shortIndex);
+        let longIndex = chapters.indexOf(long);
+        if (long) {
+          short.endIndex = long.endIndex;
+          chapters.splice(shortIndex, longIndex - shortIndex);
+        } else {
+          //merge all last short chapters
+          short.endIndex = text.length;
+          chapters.length = shortIndex + 1;
+          break;
+        }
+      }
+      //populate content
+      for (let i = 0; i < chapters.length; i++) {
+        let chapter = chapters[i];
+        chapter.content = text.slice(chapter.startIndex, chapter.endIndex).trim();
+        chapter.id = slug(chapter.title) + '-' + i;
+      }
+
+      //extract prologue
+      let prologue = text.slice(0, chapters[0]?.startIndex ?? -1).trim();
+      if(prologue) {
+        chapters.unshift({
+          id: '',
+          title: filename,
+          content: filename + '\n' + prologue,
+        });
+      }
+
+      return chapters;
+    }
+
+    function slug(s) {
+      s = latinize(s);
+      s = s.replace(/\W+/g, '-');
+      s = s.replace(/^-+|-+$/g, '');
+      s = s.toLowerCase();
+      return s;
+    }
+
+    function latinize(s) {
+      s = s.replace(/[ÁĂẮẶẰẲẴǍÂẤẬẦẨẪÄǞȦǠẠȀÀẢȂĀĄÅǺḀȺÃⱯᴀ]/g, 'A');
+      s = s.replace(/[Ꜳ]/g, 'AA');
+      s = s.replace(/[ÆǼǢᴁ]/g, 'AE');
+      s = s.replace(/[Ꜵ]/g, 'AO');
+      s = s.replace(/[Ꜷ]/g, 'AU');
+      s = s.replace(/[ꜸꜺ]/g, 'AV');
+      s = s.replace(/[Ꜽ]/g, 'AY');
+      s = s.replace(/[ḂḄƁḆɃƂʙᴃБ]/g, 'B');
+      s = s.replace(/[ĆČÇḈĈĊƇȻꜾᴄ]/g, 'C');
+      s = s.replace(/[ĎḐḒḊḌƊḎǲǅĐÐƋꝹᴅД]/g, 'D');
+      s = s.replace(/[ǱǄ]/g, 'DZ');
+      s = s.replace(/[ÉĔĚȨḜÊẾỆỀỂỄḘËĖẸȄÈẺȆĒḖḔĘɆẼḚƐƎᴇⱻЕЭ]/g, 'E');
+      s = s.replace(/[Ꝫ]/g, 'ET');
+      s = s.replace(/[ḞƑꝻꜰФ]/g, 'F');
+      s = s.replace(/[ǴĞǦĢĜĠƓḠǤꝽɢʛГҐ]/g, 'G');
+      s = s.replace(/[ḪȞḨĤⱧḦḢḤĦʜХ]/g, 'H');
+      s = s.replace(/[ÍĬǏÎÏḮİỊȈÌỈȊĪĮƗĨḬІɪЙЫИ]/g, 'I');
+      s = s.replace(/[ꞂŔŘŖṘṚṜȐȒṞɌⱤʁʀᴙᴚР]/g, 'R');
+      s = s.replace(/[ꞄŚṤŠṦŞŜȘṠṢṨꜱС]/g, 'S');
+      s = s.replace(/[ꞆŤŢṰȚȾṪṬƬṮƮŦᴛТ]/g, 'T');
+      s = s.replace(/[Ꝭ]/g, 'IS');
+      s = s.replace(/[ĴɈᴊ]/g, 'J');
+      s = s.replace(/[ḰǨĶⱩꝂḲƘḴꝀꝄᴋК]/g, 'K');
+      s = s.replace(/[ĹȽĽĻḼḶḸⱠꝈḺĿⱢǈŁꞀʟᴌЛ]/g, 'L');
+      s = s.replace(/[Ǉ]/g, 'LJ');
+      s = s.replace(/[ḾṀṂⱮƜᴍМ]/g, 'M');
+      s = s.replace(/[ŃŇŅṊṄṆǸƝṈȠǋÑɴᴎН]/g, 'N');
+      s = s.replace(/[Ǌ]/g, 'NJ');
+      s = s.replace(/[ÓŎǑÔỐỘỒỔỖÖȪȮȰỌŐȌÒỎƠỚỢỜỞỠȎꝊꝌŌṒṐƟǪǬØǾÕṌṎȬƆᴏᴐО]/g, 'O');
+      s = s.replace(/[Ƣ]/g, 'OI');
+      s = s.replace(/[Ꝏ]/g, 'OO');
+      s = s.replace(/[Ȣᴕ]/g, 'OU');
+      s = s.replace(/[ṔṖꝒƤꝔⱣꝐᴘП]/g, 'P');
+      s = s.replace(/[ꝘꝖ]/g, 'Q');
+      s = s.replace(/[ß]/g, 'ss');
+      s = s.replace(/[ɅꝞṾƲṼᴠВ]/g, 'V');
+      s = s.replace(/[Ꜩ]/g, 'TZ');
+      s = s.replace(/[ÚŬǓÛṶÜǗǙǛǕṲỤŰȔÙỦƯỨỰỪỬỮȖŪṺŲŮŨṸṴᴜУ]/g, 'U');
+      s = s.replace(/[Ꝡ]/g, 'VY');
+      s = s.replace(/[ẂŴẄẆẈẀⱲᴡ]/g, 'W');
+      s = s.replace(/[ẌẊ]/g, 'X');
+      s = s.replace(/[ÝŶŸẎỴỲƳỶỾȲɎỸʏ]/g, 'Y');
+      s = s.replace(/[Ї]/g, 'YI');
+      s = s.replace(/[ŹŽẐⱫŻẒȤẔƵᴢЗ]/g, 'Z');
+      s = s.replace(/[Þ]/g, 'TH');
+      s = s.replace(/[Ĳ]/g, 'IJ');
+      s = s.replace(/[Œɶ]/g, 'OE');
+      s = s.replace(/[áăắặằẳẵǎâấậầẩẫäǟȧǡạȁàảȃāąᶏẚåǻḁⱥãɐₐАа]/g, 'a');
+      s = s.replace(/[ꜳ]/g, 'aa');
+      s = s.replace(/[æǽǣᴂ]/g, 'ae');
+      s = s.replace(/[ꜵ]/g, 'ao');
+      s = s.replace(/[ꜷ]/g, 'au');
+      s = s.replace(/[ꜹꜻ]/g, 'av');
+      s = s.replace(/[ꜽ]/g, 'ay');
+      s = s.replace(/[ḃḅɓḇᵬᶀƀƃб]/g, 'b');
+      s = s.replace(/[ɵóŏǒôốộồổỗöȫȯȱọőȍòỏơớợờởỡȏꝋꝍⱺōṓṑǫǭøǿõṍṏȭɔᶗᴑᴓₒо]/g, 'o');
+      s = s.replace(/[ćčçḉĉɕċƈȼↄꜿ]/g, 'c');
+      s = s.replace(/[ďḑḓȡḋḍɗᶑḏᵭᶁđɖƌðꝺд]/g, 'd');
+      s = s.replace(/[ıíĭǐîïḯịȉìỉȋīįᶖɨĩḭіᴉᵢйыи]/g, 'i');
+      s = s.replace(/[ȷɟʄǰĵʝɉⱼ]/g, 'j');
+      s = s.replace(/[ǳǆ]/g, 'dz');
+      s = s.replace(/[éĕěȩḝêếệềểễḙëėẹȅèẻȇēḗḕⱸęᶒɇẽḛɛᶓɘǝₑеэ]/g, 'e');
+      s = s.replace(/[ꝫ]/g, 'et');
+      s = s.replace(/[ḟƒᵮᶂꝼф]/g, 'f');
+      s = s.replace(/[ǵğǧģĝġɠḡᶃǥᵹɡᵷгґ]/g, 'g');
+      s = s.replace(/[ḫȟḩĥⱨḧḣḥɦẖħɥʮʯх]/g, 'h');
+      s = s.replace(/[ƕ]/g, 'hv');
+      s = s.replace(/[ꞃŕřŗṙṛṝȑɾᵳȓṟɼᵲᶉɍɽɿɹɻɺⱹᵣр]/g, 'r');
+      s = s.replace(/[ꞅſẜẛẝśṥšṧşŝșṡṣṩʂᵴᶊȿс]/g, 's');
+      s = s.replace(/[ꞇťţṱțȶẗⱦṫṭƭṯᵵƫʈŧʇт]/g, 't');
+      s = s.replace(/[ꝭ]/g, 'is');
+      s = s.replace(/[ḱǩķⱪꝃḳƙḵᶄꝁꝅʞк]/g, 'k');
+      s = s.replace(/[ĺƚɬľļḽȴḷḹⱡꝉḻŀɫᶅɭłꞁл]/g, 'l');
+      s = s.replace(/[ǉ]/g, 'lj');
+      s = s.replace(/[ḿṁṃɱᵯᶆɯɰм]/g, 'm');
+      s = s.replace(/[ńňņṋȵṅṇǹɲṉƞᵰᶇɳñн]/g, 'n');
+      s = s.replace(/[ǌ]/g, 'nj');
+      s = s.replace(/[ƣ]/g, 'oi');
+      s = s.replace(/[ꝏ]/g, 'oo');
+      s = s.replace(/[ȣ]/g, 'ou');
+      s = s.replace(/[ṕṗꝓƥᵱᶈꝕᵽꝑп]/g, 'p');
+      s = s.replace(/[ꝙʠɋꝗ]/g, 'q');
+      s = s.replace(/[ᴝúŭǔûṷüǘǚǜǖṳụűȕùủưứựừửữȗūṻųᶙůũṹṵᵤу]/g, 'u');
+      s = s.replace(/[ᵺþ]/g, 'th');
+      s = s.replace(/[ᴔœ]/g, 'oe');
+      s = s.replace(/[ʌⱴꝟṿʋᶌⱱṽᵥв]/g, 'v');
+      s = s.replace(/[ʍẃŵẅẇẉẁⱳẘ]/g, 'w');
+      s = s.replace(/[ʎýŷÿẏỵỳƴỷỿȳẙɏỹ]/g, 'y');
+      s = s.replace(/[ꜩ]/g, 'tz');
+      s = s.replace(/[ᵫ]/g, 'ue');
+      s = s.replace(/[ꝸ]/g, 'um');
+      s = s.replace(/[ꝡ]/g, 'vy');
+      s = s.replace(/[ẍẋᶍₓ]/g, 'x');
+      s = s.replace(/[ї]/g, 'yi');
+      s = s.replace(/[źžẑʑⱬżẓȥẕᵶᶎʐƶɀз]/g, 'z');
+      s = s.replace(/[ﬀ]/g, 'ff');
+      s = s.replace(/[ﬃ]/g, 'ffi');
+      s = s.replace(/[ﬄ]/g, 'ffl');
+      s = s.replace(/[ﬁ]/g, 'fi');
+      s = s.replace(/[ﬂ]/g, 'fl');
+      s = s.replace(/[ĳ]/g, 'ij');
+      s = s.replace(/[ﬆ]/g, 'st');
+      s = s.replace(/[Ё]/g, 'YO');
+      s = s.replace(/[Ц]/g, 'TS');
+      s = s.replace(/[Ш]/g, 'SH');
+      s = s.replace(/[Щ]/g, 'SCH');
+      s = s.replace(/[ЪъЬь]/g, '\'');
+      s = s.replace(/[ё]/g, 'yo');
+      s = s.replace(/[ц]/g, 'ts');
+      s = s.replace(/[ш]/g, 'sh');
+      s = s.replace(/[щ]/g, 'sch');
+      s = s.replace(/[Ж]/g, 'ZH');
+      s = s.replace(/[ж]/g, 'zh');
+      s = s.replace(/[Я]/g, 'Ya');
+      s = s.replace(/[Ч]/g, 'CH');
+      s = s.replace(/[Ю]/g, 'YU');
+      s = s.replace(/[я]/g, 'ya');
+      s = s.replace(/[ч]/g, 'ch');
+      s = s.replace(/[ю]/g, 'yu');
+      return s;
+    }
+  </script>
+</body>
+</html>

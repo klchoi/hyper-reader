@@ -4,10 +4,21 @@
   <meta charset="UTF-8" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
   <title>Text Reader</title>
+  <link rel="manifest" href="http://localhost:3000/manifest.json">
   <style>
     @font-face {
-      font-family: Reader;
+      font-family: Reader1;
       src: local('LMRoman12-Regular'), url('https://mirror.kku.ac.th/CTAN/fonts/lm/fonts/opentype/public/lm/lmroman12-regular.otf') format('opentype');
+    }
+    @font-face {
+      font-family: Reader;
+      font-weight: 400;
+      src: local('WorkSans-Regular');
+    }
+    @font-face {
+      font-family: Reader;
+      font-weight: 500;
+      src: local('WorkSans-Medium');
     }
 
     /** reset **/
@@ -47,6 +58,7 @@
       --nav-width: 300px;
       --aside-width: 60px;
       --gap: 1rem;
+      cursor: default;
     }
     .settings .colors button.white,
     :root[data-color=white] {
@@ -97,6 +109,7 @@
       font: 16pt/1.4 Reader;
       color: var(--body-font-color);
       background: var(--body-background-color);
+      font-variant-numeric: oldstyle-nums tabular-nums slashed-zero;
     }
     a {
       color: var(--link-color);
@@ -220,6 +233,7 @@
       padding: 1rem 3rem;
       outline: 1px solid var(--paper-outline-color, transparent);
       box-shadow: 0px 6px 12px 3px var(--paper-shadow-color, transparent);
+      text-indent: 3ch;
     }
     main article p:first-child {
       line-height: 1.2;
@@ -456,7 +470,7 @@
       state,
       async (dispatch) => {
         let files = await state.db.getAll('files');
-        files.sort((a, z) => a.name.localeCompare(z.name));
+        files.sort((a, z) => a.name.localeCompare(z.name, 'vi-VN', { sensitivity: 'accent' }));
         dispatch(LoadRecentBooksDone, { files });
       }
     ];
@@ -761,7 +775,7 @@
                 let A = Book(a), Z = Book(z);
                 let result;
                 if (field == 'name') {
-                  result = A.name.localeCompare(Z.name);
+                  result = A.name.localeCompare(Z.name, 'vi-VN', { sensitivity: 'accent' });
                 } else if (field == 'size') {
                   result = a[field] - z[field];
                 } else if (field == 'updatedAt') {
@@ -833,7 +847,7 @@
           chapter && (
             h('main', {}, [
               h('article', {}, [
-                ...chapter.content.split('\n').map(line => (
+                ...chapter.content.split(/\n|<\/?\w+>/gi).map(line => (
                     /^[-]+$/.test(line)
                       ? h('hr', {})
                       : h('p', {}, text(line))
@@ -867,18 +881,21 @@
     function Book(file, fileContent) {
       let id, name, description, chapters;
       if (file?.name) {
-        name = /(?<name>^[^(]*)\s*\(/.exec(file?.name).groups.name.trim();
-        description = /(?<description>\(.*)\.txt/.exec(file?.name).groups.description.trim();
+        name = /(?<name>^[^(]*).*?\.txt/.exec(file.name.normalize()).groups.name.trim();
+        description = /(?<description>\(.*)\.txt/.exec(file?.name.normalize())?.groups?.description?.trim();
         id = slug(name);
       }
       if (fileContent) {
-        chapters = extractChapters(name, fileContent);
+        fileContent = normalizeFileContent(fileContent);
+        // fileContent = titleizeHumanName(fileContent);
+        chapters = extractChapters(name, fileContent, { name });
       }
       return { id, name, description, chapters };
     }
 
-    function extractChapters(filename, text) {
-      //cleanup
+    function normalizeFileContent(text) {
+      text = text.normalize();
+      text = text.replace(/[^.]*(Sắc Hiện Viện|Sắc Hiệp Viện|Sachiepvien\.net)[^.]*\.?/g, '');
       text = text.replace(/[\r\n]+/g, '\n');
       text = text.replace(/(.+)/g, (s) => s.trim());
       text = text.replace(/^'([^']+)'$/gm, '"$1"');
@@ -887,22 +904,284 @@
       text = text.replace(/([([【])\s+/gm, '$1');
       text = text.replace(/([:—]{2,})/gm, c => c.slice(0, 1));
       text = text.replace(/(:)[^\s\w]+\s*/gm, '$1 ');
+      text = text.replace(/^\s*"\s+|\s+"\s*$/gm, '"');
+      return text;
+    }
 
-      //extract chapters
-      let chapterPattern = /^\s*\[?\s*(?:chapter)?\s*:?\s*Thứ\s+\w+\s+chương\b.*|\bChương\s+\d+\s*:?.*|^(?:\d+\s*\.?\s*)+$|^\s*\d+\s+Chương\s*:?\s*|^【.*?】\([\d-]+\)$|^【.*?】\s*bộ(\s+\d+)+$|^\d+[.!].*/gimu;
-      let matches = [...chapterPattern[Symbol.matchAll](text)];
-      let chapters = matches.map((match, i) => {
-        let startIndex = text.lastIndexOf('\n', match.index);
-        if (startIndex == -1) startIndex = 0;
-        let endIndex = text.length;
-        if (matches[i+1]) endIndex = text.lastIndexOf('\n', matches[i+1].index);
-        return {
-          title: match[0].trim(),
-          startIndex,
-          endIndex,
+    function Chapter(_, { chapters, filename, text }) {
+      return {
+        _,
+        get title() {
+          let title, titleBook, titleChap;
+          if (_.bookNum) titleBook = 'Bộ ' + _.bookNum;
+          else if (_.bookText) titleBook = 'Bộ ' + _.bookText;
+          if (_.chapNum) titleChap = 'Chương ' + _.chapNum;
+          else if (_.chapText) titleChap = 'Chương ' + _.chapText;
+          title = [titleBook, titleChap].filter(Boolean).join(' ');
+          title = [title, _.title].filter(Boolean).join(': ');
+          if (!title) title = _.text;
+          return title;
+        },
+        get i() {
+          return chapters.indexOf(this);
+        },
+        get startIndex() {
+          // return text.lastIndexOf('\n', _.index);
+          return _.index;
+        },
+        get endIndex() {
+          if (this.i == chapters.length-1) return text.length;
+          return chapters[this.i + 1].startIndex;
+        },
+        get id() {
+          return slug(this.title) + '-' + this.i;
+        },
+        get content() {
+          return text.slice(this.startIndex, this.endIndex).trim();
+        },
+        get chapter() {
+          let num = _.chapNum || _.chapText;
+          if (num) return Number(num);
+        },
+        get length() {
+          return this.endIndex - this.startIndex;
+        }
+      };
+    }
+
+    function extractChapters(filename, text, { name }) {
+      let NUMERIC = '(\\d{1,3}(\\.\d{1,2})*)';
+      let NUMERIC_WORD = '(không|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười|mươi|lăm|nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cưởu|thập)';
+      let NUMERIC_WORDS = `${NUMERIC_WORD}( ${NUMERIC_WORD})*`;
+      NUMERIC_WORDS = '(một|hai|ba|bốn|năm|sáu|bảy|tám|chín|(mười( một)?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( mốt)?)( (hai|ba|bốn|lăm|sáu|bảy|tám|chín))?)';
+      let patterns = [
+        /*
+        【xanh biếc lữ du tiên】 bộ 2 tự chương
+        【xanh biếc lữ du tiên】 bộ 2 thứ 01 chương
+        Xanh Biếc lữ du tiên bộ 2 thứ 09 chương
+        【xanh biếc lữ du tiên bộ 2】 thứ 10 chương Đông hải tiên các (1)
+        Xanh Biếc lữ du tiên bộ 2 thứ 13 chương Nữ Đế dâm tâm
+        【xanh biếc lữ du tiên】 Chương 8:
+        【Chương 8: Tông môn dâm loạn (nhất)】
+        【xanh biếc lữ du tiên】 Chương 6:
+        【Chương 6: Hoàng thành long ảnh】
+        Thứ 02 chương: Hong Kong
+        Thứ 1 chương đại nghịch bất đạo ái đồ, nhưng lại hy vọng đem sư tôn dạy dỗ vì song tu chuyên dụng ấu thê!
+        Thứ 10 chương, võ diễm hòa không rõ thân phận nam nhân thông đồng cùng với trần san cùng ca ca trần vừa loạn luân địt bi chuyện xưa
+        【mẹ thành gia bên trong bảo mẫu con dâu】(15) hoàn
+        Nhị, thay đổi
+        【bạn gái đệ đệ】3
+        "Bạn gái đệ đệ" 11
+        Thượng (2)
+        Chính Văn Chương 07: Chỉnh quân
+        Nhất, lời dẫn tưởng nói ngắn gọn, nhưng không biết từ đâu nói lên.
+        Thứ 34 chương mẫu thượng công lược (3.11) An Nặc tiến bệnh viện
+        — Chương 2: (dịch nóng thể)—
+        2020 năm tháng 1 6 ngày
+        Hạ bộ — chị em yêu nhau (lục hi hòa lục nếu)
+        【mẹ con】(nhị -- yêu nói hết)
+        (nhị -- yêu nói hết)
+        ch. 1
+        Hồi 1: Ngây thơ diện mạo Khuynh Thành vận giao mui xe thị lão Ông phủ ấu tử từ huệ thục hiền Hongkong
+        Thứ 41-48 chương
+        */
+        //Chương 23:
+        //Phiên ngoại Chương 18:
+        '^(Phiên Ngoại )?Chương CHAP_NUM:$',
+        //Chương 1: Tân niên đặc biệt thiên (thượng)
+        //Phiên Ngoại Chương 8: Treo đầu dê bán thịt chó
+        '^(Phiên Ngoại )?Chương CHAP_NUM([: ]TITLE)?$',
+        //Ngũ
+        //Hai mươi mốt
+        '^CHAP_TEXT$',
+        // (1)
+        '^\\(CHAP_NUM\\)$',
+        //8.1
+        '^CHAP_NUM$',
+        // (tứ)
+        // (mười một)
+        '^\\(CHAP_TEXT\\)$',
+        //【bạn gái đệ đệ】9
+        '^【' + name + '】CHAP_NUM([: ]TITLE)?',
+        //Thứ 7 chương mẫu thượng công lược (1.7) tiểu ma nữ phục vụ
+        // '^Thứ BOOK_NUM chương ' + name + ' \\(CHAP_NUM\\)([: ]TITLE)?',
+        //Thứ 31 chương
+        '^Thứ CHAP_NUM chương([: ]TITLE)?',
+        //Bảy năm vợ chồng gần ba năm cùng hai cái đơn nam đệ tử chuyện xưa (5)
+        '^' + name + ' \\(CHAP_NUM\\)',
+        //2019-7-19 mười lăm
+        '^DATE CHAP_TEXT',
+        //Mười hai, nửa năm sau cuộc sống vẫn đang tiếp tục. Phố xá như trước thái bình.
+        '^CHAP_TEXT[,] TITLE$',
+        //Quyển thứ hai Chương 11: Mỹ mẫu cầu xin
+        '^Quyển( thứ)? (BOOK_NUM|BOOK_TEXT) Chương CHAP_NUM: TITLE',
+        //Lời dẫn
+        '^(chương (cuối|kết)|tự chương|Lời dẫn)$',
+        //【xanh biếc lữ du tiên】 bộ 2 thứ 08 chương
+        '^【' + name + '】 bộ BOOK_NUM thứ CHAP_NUM chương',
+        //Xanh biếc lữ du tiên bộ 2 Chương 8: Sơ ngộ bích du
+        '^' + name + ' bộ BOOK_NUM Chương CHAP_NUM: TITLE',
+        //(Chương 20: hèn chó diễn phượng (che giấu thiên 3)
+        '^\\(Chương CHAP_NUM: TITLE',
+        //Phiên Ngoại hai mươi lăm chương
+        '^(Phiên Ngoại )CHAP_TEXT chương',
+        //【các huynh đệ loạn luân thịnh yến】(tam)
+        //【không chỉ tình yêu】(1)
+        '^【' + name + '】\\((CHAP_TEXT|CHAP_NUM)\\)',
+        //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
+        '^【' + name + '】(phiên ngoại) TITLE',
+        //"Ân, ta đều nghe ngươi!" (13)
+        '(?<=\\W) \\(CHAP_NUM\\)$',
+        //(14) nghiêm hạo tại sofa phía trên thích không thể tự thoát ra được, nhất tinh mặc xong đồ ngủ, sau đó tiếp lấy đem nghiêm hạo ôm đến chân của mình phía trên, nhẹ nhàng âu yếm.
+        '\\(CHAP_NUM\\)',
+        //"2" hào môn bí mật
+        '^"\\s*CHAP_NUM\\s*"( TITLE)?',
+        //"13 chương kết"
+        '^"CHAP_NUM TITLE"$',
+        //Người nhà quần áo Chương 1: Mẹ dị thường
+        '^' + name + ' Chương CHAP_NUM: TITLE$',
+        //Tập thứ hai thứ 36 chương con tin uy hiếp
+        '^Tập thứ BOOK_TEXT thứ CHAP_NUM chương TITLE$',
+        //22)
+        '^CHAP_NUM\\)$',
+      ];
+      let matches = [];
+      for (let pattern of patterns) {
+        let source = pattern
+          .replace('DATE', '\\d+-\\d+-\\d+')
+          .replace('SEP', '[ :]')
+          .replace('TITLE', '(?<title>.+)')
+          .replace('CHAP_NUM', `(?<chapNum>${NUMERIC})`)
+          .replace('CHAP_TEXT', `(?<chapText>${NUMERIC_WORDS})`)
+          .replace('BOOK_NUM', `(?<bookNum>${NUMERIC})`)
+          .replace('BOOK_TEXT', `(?<bookText>${NUMERIC_WORDS})`);
+        let regex = new RegExp(source, 'gimu');
+        let result = [...text.matchAll(regex)];
+        matches.push(...result.map(m => ({ pattern, regex, index: m.index, ...m.groups, text: m[0] })));
+      }
+      matches.forEach(m => {
+        for (let f of ['chapText', 'bookText']) {
+          if (m[f]) {
+            let c = m[f].toLowerCase();
+            let vn = {
+              'mươi': '',
+              'mươi$': 0,
+              '(mười|thập)(?=.+)|m[ộố]t|nhất': 1,
+              'hai|nhị': 2,
+              'ba|tam': 3,
+              'bốn|tứ': 4,
+              '[nl]ăm|ngũ': 5,
+              'sáu|lục': 6,
+              'bảy|thất': 7,
+              'tám|bát': 8,
+              'chín|cửu': 9,
+              'mười|thập': 10,
+            };
+            Object.entries(vn).forEach(([w, i]) => {
+              w = new RegExp(w, 'gimu');
+              c = c.replace(w, i);
+            });
+            c = c.replace(/\s/g, '');
+            m[f] = Number.parseInt(c);
+          }
+        }
+        for (let f of ['chapNum', 'bookNum']) {
+          if (m[f]) {
+            m[f] = m[f].split('.').map(Number).join('.');
+          }
         }
       });
-      let isShort = chapter => ((chapter.endIndex - chapter.startIndex) <= 2_000);
+      matches.sort((a, z) => a.index - z.index);
+
+      let chapters = [];
+      matches.forEach(m => {
+        chapters.push(Chapter(m, { chapters, filename, text }));
+      });
+
+      mergeShortChapters(chapters, 500);
+      dedupeChapters(chapters);
+      cleanupChapters(chapters);
+      // debug({chapters})
+      addPrologue(chapters, filename, text);
+
+      return chapters;
+    }
+
+    function mergeBehind(chapters, i) {
+      // chapters[i].endIndex = chapters[i+1].endIndex;
+      chapters.splice(i, 1);
+    }
+
+    function dedupeChapters(chapters) {
+      for (let i = chapters.length - 1; i > 0; i--) {
+        let h = i-1;
+        let ch = chapters[h];
+        let ci = chapters[i];
+        if (ch.chapter && ch.chapter == ci.chapter) {
+          console.log('dedupe', ch.title, ci.title);
+          mergeBehind(chapters, i);
+        }
+      }
+    }
+
+    function cleanupChapters(chapters) {
+      debug({chapters})
+      let i = 1;
+      while (i < chapters.length - 1) {
+        let [ch, ci, cj] = [chapters[i-1], chapters[i], chapters[i+1]];
+        let shouldMerge = false;
+        //ci is not continuity of ch
+        if (ch.chapter && ci.chapter && (ch.chapter + 1 != ci.chapter)) {
+          if (!cj) {
+            //ci is the last chapter, can merge
+            //TODO: check if ci is [phien ngoai]
+            shouldMerge = true;
+          } else {
+            //find continuity of ch
+            for (let j = i + 1; j <= i + 3 && j < chapters.length; j++) {
+              cj = chapters[j];
+              console.log(ch.chapter, cj.chapter);
+              if (cj.chapter && (ch.chapter + 1 == cj.chapter)) {
+                shouldMerge = true;
+                break;
+              }
+            }
+          }
+        }
+        if (shouldMerge) {
+          console.debug('cleanupChapters', ch.chapter, '<-', ci.chapter, cj?.chapter);
+          mergeBehind(chapters, i);
+        } else {
+          i++;
+        }
+      }
+      // for(let i = 1; i < chapters.length; ) {
+      //   let [h, j] = [i - 1, i + 1];
+      //   //if ci is not continuity of ch
+      //   if (ch.chapter && ci.chapter && (ch.chapter + 1) != ci.chapter) {
+      //     // ci is the last chapter, can merge
+      //     if (!cj) {
+      //       console.debug('cleanupChapters', ch.chapter, '<-', ci.chapter);
+      //       mergeBehind(chapters, i);
+      //     } else {
+      //       // cj is the continuity of ch
+      //       if (cj.chapter && ch.chapter + 1 == cj.chapter) {
+      //       }
+      //     }
+      //   }
+      // }
+    }
+    
+    function mergeShortChapters(chapters, minLength = 2_000) {
+      for (let i = chapters.length - 1; i > 0; i--) {
+        if (chapters[i].length < minLength) {
+          mergeBehind(chapters, i);
+        }
+      }
+    }
+
+    function mergeShortChapters1(chapters, minLength = 2e3) {
+      let isShort = chapter => ((chapter.endIndex - chapter.startIndex) <= minLength);
       let isLong = chapter => !isShort(chapter);
       //delete all first short chapters, they belongs to prologue
       let firstLongChapterIndex = chapters.findIndex(isLong);
@@ -917,30 +1196,95 @@
           short.endIndex = long.endIndex;
           chapters.splice(shortIndex, longIndex - shortIndex);
         } else {
-          //merge all last short chapters
-          short.endIndex = text.length;
-          chapters.length = shortIndex + 1;
+          //merge last short chapters to previous long chapter
+          long = chapters[shortIndex - 1];
+          if (long) {
+            long.endIndex = text.length;
+            chapters.length = shortIndex;
+          }
           break;
         }
       }
-      //populate content
-      for (let i = 0; i < chapters.length; i++) {
-        let chapter = chapters[i];
-        chapter.content = text.slice(chapter.startIndex, chapter.endIndex).trim();
-        chapter.id = slug(chapter.title) + '-' + i;
-      }
+    }
 
+    function addPrologue(chapters, filename, text) {
       //extract prologue
       let prologue = text.slice(0, chapters[0]?.startIndex ?? -1).trim();
       if(prologue) {
-        chapters.unshift({
-          id: '',
+        chapters.unshift(Chapter({
           title: filename,
-          content: filename + '\n' + prologue,
-        });
+          index: 0,
+        }, { chapters, filename, text }));
       }
+    }
 
-      return chapters;
+    function extractChapters1(filename, text, { name }) {
+      let debug = true;
+      debug && console.log({ name });
+      //let chapterPattern = /^\s*\[?\s*(?:chapter)?\s*:?\s*Thứ\s+\w+(\s*-\s*\d+)?\s+chương\b.*|\bChương\s+\d+\s*:?.*|^(?:\d+\s*\.?\s*)+$|^\s*\d+\s+Chương\s*:?\s*|^【.*?】\([\d-]+\)$|^【.*?】\s*bộ(\s+\d+)+$|^\d+[.!].*|^\s*\d+(\s*-\s*\d+)?\s*$|^[-]+$/gimu;
+      let certainPatterns = [
+        /^chương \d+$/,
+        /^chương \d+:/,
+        /^— ?chương \d+:.*? ?—/,
+        /^chương (cuối|kết)/,
+        /^tự chương/,
+        /^Lời dẫn/,
+        /^bộ \d+:? chương \d+/, // bộ 01: chương 05:
+        /^thứ \d+ bộ thứ \d+ chương/, // thứ 01 bộ thứ 02 chương
+        /^\d+([\.\s]+\d+)*$/,
+        /thứ \d+ chương/,
+        /^\(\d+\)/,
+        /^Hồi \d+/,
+        new RegExp('^【' + name + '】\\d+$'),
+        new RegExp('^"' + name + '" \\d+$'),
+        /^ch\. \d+/,
+        /^ ?\[? ?(?:chapter)? ?:? ?Thứ \w+( ?- ?\d+)? chương/,
+        /^ ?\d+ Chương ?:? ?/,
+        /^【.*?】\([\d-]+\)$/,
+        /^【.*?】 ?bộ( \d+)+$/,
+        /^\d+[.!].*/,
+        /^ ?\d+( ?- ?\d+)? ?$/,
+        /quyển (thứ )?(\d+|(một|hai|ba|bốn|năm|sáu|bảy|tám|chín|(mười( một)?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( mốt)?)( (hai|ba|bốn|lăm|sáu|bảy|tám|chín))?)) chương \d.*/,
+        /(phiên ngoại|chính văn) chương \d+:/,
+        /phiên ngoại .* chương/,
+        /^(thượng|trung|hạ) \(\d+\)$/,
+        /^(thượng|trung|hạ) bộ/,
+      ];
+      let loosePatterns = [
+        new RegExp('^【' + name + '】.*$'),
+        new RegExp('^"' + name + '".*$'),
+        new RegExp('^' + name + ' [\\(\\.:\\d]'),
+        /^.*\((thượng|trung|hạ)\):?$/, // phản kích (thượng)
+        /^([(]?)(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập|(mười) (một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mươi))(?=[,:)])([^.]*)$/,
+        /^(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập).*/,
+        /^\[.*\]$/,
+        /^[-—* ]+$/,
+      ];
+      let matches;
+      for (let patterns of [certainPatterns, loosePatterns]) {
+        let regex = new RegExp('(?:' + patterns.map(p => '(?:' + p.source + ')').join('|') + ').*', 'gimu');
+        matches = [...regex[Symbol.matchAll](text)];
+        debug && console.log({ regex, matches })
+        if (matches.length > 0) break;
+      }
+      let chapters = matches.map((match, i) => {
+        let startIndex = text.lastIndexOf('\n', match.index);
+        if (startIndex == -1) startIndex = 0;
+        let endIndex = text.length;
+        if (matches[i+1]) endIndex = text.lastIndexOf('\n', matches[i+1].index);
+        let title = match[0].trim();
+        if (/^[-—]+$/.test(title)) title = `-Chương ${i+1}-`;
+        title = title.replace(new RegExp('^【(' + name + ')】\s*', 'i'), '');
+        title = title.replace(new RegExp('^"(' + name + ')"\s*', 'i'), '');
+        title = title.replace(new RegExp('^(' + name + ')\s*', 'i'), '');
+        return {
+          title,
+          startIndex,
+          endIndex,
+        }
+      });
+
+      return mergeChapters(chapters, filename, text);
     }
 
     function slug(s) {
@@ -1073,6 +1417,63 @@
       s = s.replace(/[ю]/g, 'yu');
       return s;
     }
+
+    function titleizeHumanName(s, minOccurence = 10, occurenceThreshold = 0.8) {
+      let debug = false;
+      debug && console.time('titleizeHumanName');
+      let pattern = /(?:(?<pre>\p{Ll}+)[ ]+)?(?<name>[\p{Lu}A-Z]\p{Ll}+(?:[ ]+\p{Lu}\p{Ll}+)?)(?:[ ]+(?<post>\p{Ll}+))?/gu;
+      let counts = {};
+      let match;
+      let titleize = s => s.replace(/(?<=^|[^\p{L}])\p{L}/gu, s => s.toUpperCase());
+      let c = 0;
+      while ((match = pattern.exec(s))) {
+        if (++c < 10) debug && console.log({ match });
+        let { pre, name, post } = match.groups;
+        if (!counts[name]) counts[name] = { total: 0, pre: {}, post: {} };
+        counts[name].total += 1;
+        if (pre) {
+          if (!counts[name].pre[pre]) counts[name].pre[pre] = 0;
+          counts[name].pre[pre] += 1;
+        }
+        if (post) {
+          if (!counts[name].post[post]) counts[name].post[post] = 0;
+          counts[name].post[post] += 1;
+        }
+      }
+      debug && console.dir(counts);
+      analyze: for (let [name, { total, pre, post }] of Object.entries(counts)) {
+        if (total < minOccurence) {
+          debug && console.debug(name, 'is too few .. IGNORE', { total });
+          continue analyze;
+        }
+        for (let [prefix, prefixCount] of Object.entries(pre)) {
+          if (prefixCount / total >= occurenceThreshold) {
+            debug && console.warn(name, '->', titleize(prefix), name, { total, prefixCount });
+            s = s.replace(new RegExp(prefix + '\\s+' + name, 'gu'), titleize);
+            continue analyze;
+          }
+        }
+        for (let [postfix, postfixCount] of Object.entries(post)) {
+          if (postfixCount / total >= occurenceThreshold) {
+            debug && console.warn(name, '->', titleize(postfix), name, { total, postfixCount });
+            s = s.replace(new RegExp(name + '\\s+' + postfix, 'gu'), titleize);
+            continue analyze;
+          }
+        }
+      }
+      debug && console.timeEnd('titleizeHumanName');
+      return s;
+    }
+
+    function debug(...args) {
+      if (args.length == 1) {
+        console.table(Object.values(args[0])[0]);
+      } else {
+        console.info(...args);
+      }
+    }
   </script>
 </body>
 </html>
+
+

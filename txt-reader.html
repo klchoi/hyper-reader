@@ -122,7 +122,7 @@
       --body-font-color: rgb(27, 27, 27);
       --body-background-color: rgb(230, 230, 230);
       --paper-background-color: rgb(255, 255, 255);
-      --paper-shadow-color: rgba(0, 0, 0, .2);
+      /*--paper-shadow-color: rgba(0, 0, 0, .2); */
       --link-color: rgb(65, 110, 210);
       --horizontal-line-color: rgb(220, 220, 220);
     }
@@ -131,7 +131,7 @@
       --body-font-color: rgb(79, 50, 28);
       --body-background-color: rgb(225, 216, 200);
       --paper-background-color: rgb(248, 241, 227);
-      --paper-shadow-color: rgba(0, 0, 0, .2);
+      /*--paper-shadow-color: rgba(0, 0, 0, .2); */
       --link-color: rgb(209, 150, 0);
       --horizontal-line-color: rgb(230, 218, 201);
     }
@@ -140,9 +140,10 @@
       --body-font-color: rgba(255, 255, 255, 0.78);
       --body-background-color: rgb(50, 50, 51);
       --paper-background-color: rgb(74, 74, 77);
-      --paper-shadow-color: rgba(0, 0, 0, .24);
+      /*--paper-shadow-color: rgba(0, 0, 0, .24); */
       --link-color: rgb(90, 200, 250);
       --horizontal-line-color: rgb(111, 111, 111);
+      --body-font-smoothing: antialiased;
     }
     .settings .colors button.night,
     :root[data-color=night] {
@@ -152,6 +153,7 @@
       --paper-outline-color: #272727;
       --link-color: rgb(90, 200, 250);
       --horizontal-line-color: rgb(62, 62, 62);
+      --body-font-smoothing: antialiased;
     }
     .settings .colors button.rose-pine,
     :root[data-color=rose-pine] {
@@ -161,6 +163,7 @@
       --paper-outline-color: var(--rp-main-highlight-med-alpha);
       --link-color: var(--rp-main-pine);
       --horizontal-line-color: var(--rp-main-highlight-high-alpha);
+      --body-font-smoothing: antialiased;
     }
     .settings .colors button.rose-pine-moon,
     :root[data-color=rose-pine-moon] {
@@ -170,6 +173,7 @@
       --paper-outline-color: var(--rp-moon-highlight-med-alpha);
       --link-color: var(--rp-moon-rose);
       --horizontal-line-color: var(--rp-moon-highlight-high-alpha);
+      --body-font-smoothing: antialiased;
     }
     .settings .colors button.rose-pine-dawn,
     :root[data-color=rose-pine-dawn] {
@@ -194,6 +198,7 @@
       color: var(--body-font-color);
       background: var(--body-background-color);
       font-variant-numeric: oldstyle-nums tabular-nums slashed-zero;
+      -webkit-font-smoothing: var(--body-font-smoothing, normal);
     }
     a {
       color: var(--link-color);

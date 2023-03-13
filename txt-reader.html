@@ -96,6 +96,36 @@
       --link-color: rgb(90, 200, 250);
       --horizontal-line-color: rgb(62, 62, 62);
     }
+    .settings .colors button.rose-pine,
+    :root[data-color=rose-pine] {
+      --body-font-color: #e0def4;
+      --body-background-color: #191724;
+      --paper-background-color: #1f1d2e;
+      --paper-outline-color: #524f67;
+      --link-color: #c4a7e7;
+      --horizontal-line-color: #524f67;
+      --highlight-background-color: #26233a;
+    }
+    .settings .colors button.rose-pine-moon,
+    :root[data-color=rose-pine-moon] {
+      --body-font-color: #e0def4;
+      --body-background-color: #232136;
+      --paper-background-color: #2a273f;
+      --paper-outline-color: #56526e;
+      --link-color: #c4a7e7;
+      --horizontal-line-color: #56526e;
+      --highlight-background-color: #393552;
+    }
+    .settings .colors button.rose-pine-dawn,
+    :root[data-color=rose-pine-dawn] {
+      --body-font-color: #575279;
+      --body-background-color: #faf4ed;
+      --paper-background-color: #fffaf3;
+      --paper-outline-color: #cecacd;
+      --link-color: #907aa9;
+      --horizontal-line-color: #cecacd;
+      --highlight-background-color: #f2e9e1;
+    }
 
     /** layout **/
     body { display: flex; }
@@ -144,8 +174,8 @@
       padding-bottom: 0.1ex;
     }
     nav li.active {
-      background: yellow;
-      outline: 0.3ch solid yellow;
+      background: var(--highlight-background-color, yellow);
+      outline: 0.3ch solid var(--highlight-background-color, yellow);
     }
     nav li.active a {
       pointer-events: none;
@@ -867,12 +897,13 @@
                 }
               })
             ),
-            h('div', { class: 'colors' }, [
-              h('button', { class: ['white', { checked: settings.color == 'white' }], onclick: [SaveSettings, { color: 'white' }] }),
-              h('button', { class: ['sepia', { checked: settings.color == 'sepia' }], onclick: [SaveSettings, { color: 'sepia' }] }),
-              h('button', { class: ['gray', { checked: settings.color == 'gray' }], onclick: [SaveSettings, { color: 'gray' }] }),
-              h('button', { class: ['night', { checked: settings.color == 'night' }], onclick: [SaveSettings, { color: 'night' }] }),
-            ])
+            h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn'].map(color => (
+              h('button', {
+                class: [color, { checked: settings.color == color }],
+                onclick: [SaveSettings, { color: color }],
+                title: color,
+              })
+            )))
           ])
         ])
       )

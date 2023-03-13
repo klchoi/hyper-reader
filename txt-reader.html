@@ -51,6 +51,64 @@
     small {
       font-size: 0.875em;
     }
+    
+    /** rose pine **/
+    :root {
+      --rp-main-base: #191724;
+      --rp-main-surface: #1f1d2e;
+      --rp-main-overlay: #26233a;
+      --rp-main-muted: #6e6a86;
+      --rp-main-subtle: #908caa;
+      --rp-main-text: #e0def4;
+      --rp-main-love: #eb6f92;
+      --rp-main-gold: #f6c177;
+      --rp-main-rose: #ebbcba;
+      --rp-main-pine: #31748f;
+      --rp-main-foam: #9ccfd8;
+      --rp-main-iris: #c4a7e7;
+      --rp-main-highlight-low: #21202e;
+      --rp-main-highlight-low-alpha: #6e6a861a;
+      --rp-main-highlight-med: #403d52;
+      --rp-main-highlight-med-alpha: #6e6a8633;
+      --rp-main-highlight-high: #524f67;
+      --rp-main-highlight-high-alpha: #6e6a8666;
+      --rp-moon-base: #232136;
+      --rp-moon-surface: #2a273f;
+      --rp-moon-overlay: #393552;
+      --rp-moon-muted: #6e6a86;
+      --rp-moon-subtle: #908caa;
+      --rp-moon-text: #e0def4;
+      --rp-moon-love: #eb6f92;
+      --rp-moon-gold: #f6c177;
+      --rp-moon-rose: #ea9a97;
+      --rp-moon-pine: #3e8fb0;
+      --rp-moon-foam: #9ccfd8;
+      --rp-moon-iris: #c4a7e7;
+      --rp-moon-highlight-low: #2a283e;
+      --rp-moon-highlight-low-alpha: #817c9c14;
+      --rp-moon-highlight-med: #44415a;
+      --rp-moon-highlight-med-alpha: #817c9c26;
+      --rp-moon-highlight-high: #56526e;
+      --rp-moon-highlight-high-alpha: #817c9c4d;
+      --rp-dawn-base: #faf4ed;
+      --rp-dawn-surface: #fffaf3;
+      --rp-dawn-overlay: #f2e9e1;
+      --rp-dawn-muted: #9893a5;
+      --rp-dawn-subtle: #797593;
+      --rp-dawn-text: #575279;
+      --rp-dawn-love: #b4637a;
+      --rp-dawn-gold: #ea9d34;
+      --rp-dawn-rose: #d7827e;
+      --rp-dawn-pine: #286983;
+      --rp-dawn-foam: #56949f;
+      --rp-dawn-iris: #907aa9;
+      --rp-dawn-highlight-low: #f4ede8;
+      --rp-dawn-highlight-low-alpha: #6e6a860d;
+      --rp-dawn-highlight-med: #dfdad9;
+      --rp-dawn-highlight-med-alpha: #6e6a8614;
+      --rp-dawn-highlight-high: #cecacd;
+      --rp-dawn-highlight-high-alpha: #6e6a8626;
+    }
 
     /** variables **/
     :root {
@@ -97,33 +155,30 @@
     }
     .settings .colors button.rose-pine,
     :root[data-color=rose-pine] {
-      --body-font-color: #e0def4;
-      --body-background-color: #191724;
-      --paper-background-color: #1f1d2e;
-      --paper-outline-color: #524f67;
-      --link-color: #c4a7e7;
-      --horizontal-line-color: #524f67;
-      --highlight-background-color: #26233a;
+      --body-font-color: var(--rp-main-subtle);
+      --body-background-color: var(--rp-main-surface);
+      --paper-background-color: var(--rp-main-base);
+      --paper-outline-color: var(--rp-main-highlight-med-alpha);
+      --link-color: var(--rp-main-pine);
+      --horizontal-line-color: var(--rp-main-highlight-high-alpha);
     }
     .settings .colors button.rose-pine-moon,
     :root[data-color=rose-pine-moon] {
-      --body-font-color: #e0def4;
-      --body-background-color: #232136;
-      --paper-background-color: #2a273f;
-      --paper-outline-color: #56526e;
-      --link-color: #c4a7e7;
-      --horizontal-line-color: #56526e;
-      --highlight-background-color: #393552;
+      --body-font-color: var(--rp-moon-subtle);
+      --body-background-color: var(--rp-moon-surface);
+      --paper-background-color: var(--rp-moon-base);
+      --paper-outline-color: var(--rp-moon-highlight-med-alpha);
+      --link-color: var(--rp-moon-rose);
+      --horizontal-line-color: var(--rp-moon-highlight-high-alpha);
     }
     .settings .colors button.rose-pine-dawn,
     :root[data-color=rose-pine-dawn] {
-      --body-font-color: #575279;
-      --body-background-color: #faf4ed;
-      --paper-background-color: #fffaf3;
-      --paper-outline-color: #cecacd;
-      --link-color: #907aa9;
-      --horizontal-line-color: #cecacd;
-      --highlight-background-color: #f2e9e1;
+      --body-font-color: var(--rp-dawn-text);
+      --body-background-color: var(--rp-dawn-base);
+      --paper-background-color: var(--rp-dawn-overlay);
+      --paper-outline-color: var(--rp-dawn-highlight-med);
+      --link-color: var(--rp-dawn-love);
+      --horizontal-line-color: var(--rp-dawn-highlight-high);
     }
 
     /** layout **/
@@ -151,7 +206,7 @@
       overscroll-behavior-y: contain;
       position: sticky;
       top: 0;
-      padding: calc(var(--gap) * 0.75) var(--gap);
+      padding: calc(var(--gap) * 0.75);
       font-size: 0.875rem;
       line-height: 1.2;
     }
@@ -171,14 +226,17 @@
       /**/
       padding-top: 0.1ex;
       padding-bottom: 0.1ex;
+      padding-left: calc(var(--gap) * 0.25);
+      padding-right: calc(var(--gap) * 0.25);
     }
     nav li.active {
-      background: var(--highlight-background-color, yellow);
-      outline: 0.3ch solid var(--highlight-background-color, yellow);
+      background: var(--body-font-color);
+      outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
+      border-radius: 0.5ex;
     }
     nav li.active a {
       pointer-events: none;
-      color: black;
+      color: var(--body-background-color);
     }
     nav a {
       color: var(--body-font-color);
@@ -203,36 +261,32 @@
       flex-direction: column;
       row-gap: var(--gap);
     }
+    aside a,
+    aside button {
+      appearance: none;
+      background: var(--paper-background-color);
+      color: var(--body-font-color);
+      outline: 1px solid var(--horizontal-line-color);
+      width: 100%;
+      min-width: 25px;
+      aspect-ratio: 1;
+      display: grid;
+      place-content: center;
+      border-radius: 50%;
+    }
     aside .colors {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: calc(var(--gap) * .75);
     }
-    aside .colors button {
-      appearance: none;
-      width: 100%;
-      min-width: 25px;
-      aspect-ratio: 1;
-      background: var(--paper-background-color);
-      outline: 0.5px solid rgba(255, 255, 255, .5);
-      border-radius: 50%;
-      display: grid;
-      place-content: center;
-    }
     aside .colors button.checked::before {
       content: '✔';
-      color: var(--body-font-color);
       font-size: .7rem;
     }
     aside a.close {
-      display: block;
-      width: 100%;
-      aspect-ratio: 1;
-      border-radius: 50%;
       position: relative;
       box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
-      background: var(--paper-background-color);
     }
     aside a.close::before,
     aside a.close::after {
@@ -244,21 +298,13 @@
       position: absolute;
       top: 50%;
       left: 50%;
-      background: var(--body-font-color);
+      background: currentColor;
     }
     aside a.close::after {
       --rotate: -45deg;
     }
     aside button.refresh {
-      display: flex;
-      width: 100%;
-      aspect-ratio: 1;
-      border-radius: 50%;
-      position: relative;
       box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
-      background: var(--paper-background-color);
-      align-items: center;
-      justify-content: center;
     }
     aside button.refresh::after {
       content: '↻';

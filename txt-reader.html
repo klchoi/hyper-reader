@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
   <title>Text Reader</title>
-  <link rel="manifest" href="http://localhost:3000/manifest.json">
   <style>
     @font-face {
       font-family: Reader1;
@@ -200,13 +199,15 @@
       padding-bottom: var(--gap);
       padding-left: var(--gap);
       padding-right: var(--gap);
+      display: flex;
+      flex-direction: column;
+      row-gap: var(--gap);
     }
     aside .colors {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: calc(var(--gap) * .75);
-      padding-top: calc(var(--gap) / 2);
     }
     aside .colors button {
       appearance: none;
@@ -220,7 +221,7 @@
       place-content: center;
     }
     aside .colors button.checked::before {
-      content: '✓';
+      content: '✔';
       color: var(--body-font-color);
       font-size: .7rem;
     }
@@ -247,6 +248,23 @@
     }
     aside a.close::after {
       --rotate: -45deg;
+    }
+    aside button.refresh {
+      display: flex;
+      width: 100%;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      position: relative;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
+      background: var(--paper-background-color);
+      align-items: center;
+      justify-content: center;
+    }
+    aside button.refresh::after {
+      content: '↻';
+      font-size: 1rem;
+      position: relative;
+      top: -1px;
     }
 
     /** main **/
@@ -397,13 +415,15 @@
     let InitDb = (state) => [
       state,
       async (dispatch) => {
-        let db = await openDB('text-reader', 20, {
+        let db = await openDB('text-reader', 22, {
           upgrade(db, oldVersion, newVersion, transaction) {
             let schemas = {
               files: {},
               fileContents: {},
               settings: {},
               progress: {},
+              books: {},
+              chapters: {},
             };
             for (let [store, keyOptions] of Object.entries(schemas)) {
               if (!db.objectStoreNames.contains(store)) {
@@ -416,7 +436,10 @@
             //    db.deleteObjectStore(store);
             //  }
             //}
-          }
+          },
+          blocked: console.log,
+          blocking: console.log,
+          terminated: console.log,
         });
 
         dispatch(InitDbDone, { db });
@@ -486,12 +509,14 @@
       async (dispatch) => {
         dispatch(ApplySettings, settings);
 
-        let transaction = await state.db.transaction('settings', 'readwrite');
-        for (let [key, value] of Object.entries(settings)) {
-          transaction.store.put(value, key);
-          document.documentElement.dataset[key] = (value || '');
-        }
-        await transaction.done;
+        let tx = state.db.transaction('settings', 'readwrite');
+        await Promise.all([
+          ...Object.entries(settings).map(([key, value]) => {
+            document.documentElement.dataset[key] = (value || '');
+            return tx.store.put(value, key);
+          }),
+          tx.done,
+        ]);
       }
     ];
 
@@ -549,7 +574,7 @@
         });
       }
     ];
-    let OpenBook = (state, { bookId, chapterId }) => [
+    let OpenBook = (state, { bookId, chapterId, migrate = true, retry = true }) => [
       state,
       async (dispatch) => {
         if (!bookId) {
@@ -557,19 +582,28 @@
           return;
         }
 
-        let { book } = state;
-        if (book?.id != bookId) {
-          let file = await state.db.get('files', bookId);
-          let fileContent = await state.db.get('fileContents', bookId);
-          if (!file || !fileContent) {
-            console.info('File not found:', { file, fileContent, bookId });
-            return;
+        let [book, chapter] = await Promise.all([
+          state.db.get('books', bookId),
+          state.db.get('chapters', bookId + '/' + chapterId),
+        ]);
+        if (!book) {
+          console.info('Book not found:', { book, chapter });
+          if (migrate) dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, { bookId, chapterId, migrate: false, retry }] });
+          return
+        }
+        if (!chapter) {
+          console.info('Chapter not found:', { bookId, chapterId });
+          if (retry) {
+            chapterId = book.chapters[0].id;
+            dispatch(OpenBook, { bookId, chapterId, retry: false });
           }
-          book = Book(file, fileContent);
+          return;
         }
 
-        let chapter = book.chapters.find(chapter => chapter.id == chapterId);
-        if (!chapter) chapter = book.chapters[0];
+        let chapters = [...book.chapters];
+        let chapterIndex = chapters.findIndex(c => c.id == chapter.id);
+        if (chapterIndex < 0) chapterIndex = 0;
+        chapters[chapterIndex] = chapter;
 
         dispatch(OpenBookDone, { book, chapter });
         dispatch(SaveProgress, { book, chapter });
@@ -579,9 +613,10 @@
     let OpenNextChapter = (state, indexDelta = 1) => [
       state,
       (dispatch) => {
-        let chapter = state.book.chapters.find((chapter, i, chapters) => chapters[i - indexDelta] == state.chapter);
-        if (chapter) {
-          dispatch(OpenBook, { bookId: state.book.id, chapterId: chapter.id });
+        let chapterIndex = state.book.chapters.findIndex(c => c.id == state.chapter.id);
+        let nextChapter = state.book.chapters[chapterIndex + indexDelta];
+        if (nextChapter) {
+          dispatch(OpenBook, { bookId: state.book.id, chapterId: nextChapter.id });
         }
       }
     ];
@@ -615,13 +650,48 @@
       }
     ];
 
-    let StoreFiles = (state, { files: localFiles }) => [
+    let StoreFilesDone = (state, { files }) => [
       state,
-      (dispatch) =>  {
+      async (dispatch) => {
+        //refresh recent books in state
+        dispatch(LoadRecentBooks);
+
+        //open if stored only one book
+        if (files.length == 1) {
+          let { file } = files[0];
+          let book = Book(file);
+          let chapterId = (await state.db.get('progress', book.id))?.chapterId;
+          state.router.push({ book: book.id, chapterId });
+          dispatch(OpenBook, { bookId: book.id, chapterId });
+        } else {
+          state.router.push({});
+          dispatch(ShowRecentBooks);
+        }
+      }
+    ];
+    let StoreFiles = (state, { files: localFiles, fileContents }) => [
+      state,
+      async (dispatch) =>  {
+        let readFile = (localFile) => new Promise(resolve => {
+          let reader = new FileReader();
+          reader.addEventListener('load', event => {
+            let file = {
+              name: localFile.name,
+              size: localFile.size,
+            };
+            let fileContent = event.target.result;
+            resolve({ file, fileContent });
+          });
+          reader.readAsText(localFile);
+        });
+
         let files = [];
-        let fileContents = [];
-        let updated = [];
-        let storedCount = 0;
+        for (let localFile of localFiles) {
+          files.push(await readFile(localFile));
+        }
+
+        dispatch(StoreBooks, { files, onSuccess: [StoreFilesDone, { files }] });
+        /**
         for (let i = 0; i < localFiles.length; i++) {
           let reader = new FileReader();
           reader.addEventListener('load', async event => {
@@ -636,47 +706,94 @@
             if (existingFile?.size != files[i].size) {
               book = Book(files[i], fileContents[i]);
               dispatch(SaveProgress, { book, chapter: book.chapters[0] });
-
-              let transaction = state.db.transaction(['files', 'fileContents'], 'readwrite');
-              transaction.objectStore('files').put(files[i], book.id);
-              transaction.objectStore('fileContents').put(fileContents[i], book.id);
-              await transaction.done;
-
               updated[i] = true;
             }
 
+            let tx = state.db.transaction(['files', 'fileContents'], 'readwrite');
+            await Promise.all([
+              tx.objectStore('files').put(files[i], book.id),
+              tx.objectStore('fileContents').put(fileContents[i], book.id),
+              tx.done,
+            ]);
+
+            dispatch(StoreBook, { bookId: book.id });
             storedCount++;
 
             if (storedCount == localFiles.length) {
-              dispatch(LoadRecentBooks);
-              if (files.length == 1) {
-                let book = Book(files[0]);
-                let chapterId;
-                if (!updated[0]) {
-                  //file is not updated, continue at the saved chapter
-                  chapterId = (await state.db.get('progress', book.id))?.chapterId;
-                }
-                state.router.push({ book: book.id, chapterId });
-                dispatch(OpenBook, { bookId: book.id, chapterId });
-              } else {
-                state.router.push({});
-                dispatch(ShowRecentBooks);
-              }
+              
             }
           });
           reader.readAsText(localFiles[i]);
         }
+        /**/
       },
+    ];
+
+    let StoreBooks = (state, { files, onSuccess }) => [
+      state,
+      async (dispatch) => {
+        let chapterKeys = await state.db.getAllKeys('chapters');
+
+        let tx = state.db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
+        await Promise.all([
+          ...files.flatMap(({ file, fileContent }) => {
+            let book = Book(file, fileContent);
+            return [
+              tx.objectStore('files').put(file, book.id),
+              tx.objectStore('fileContents').put(fileContent, book.id),
+              tx.objectStore('books').put(book.toJSON(), book.id),
+              ...chapterKeys.filter(k => k.startsWith(book.id + '/')).map(k => tx.objectStore('chapters').delete(k)),
+              ...book.chapters.map(c => tx.objectStore('chapters').put(c.toJSON(), book.id + '/' + c.id)),
+            ];
+          }),
+          tx.done,
+        ]);
+
+        if (onSuccess) dispatch(...onSuccess);
+      }
+    ];
+
+    let RefreshBook = (state, { bookId, onSuccess }) => [
+      state,
+      async (dispatch) => {
+        if (!bookId) {
+          console.info('Failed to load file:', { bookId, chapterId });
+          return;
+        }
+
+        let [file, fileContent] = await Promise.all([
+          state.db.get('files', bookId),
+          state.db.get('fileContents', bookId),
+        ]);
+        if (!file || !fileContent) {
+          console.info('File not found:', { bookId, file, fileContent });
+          return;
+        }
+        
+        if (!onSuccess) onSuccess = [OpenBook, { bookId }];
+
+        dispatch(StoreBooks, {
+          files: [{ file, fileContent }],
+          onSuccess,
+        });
+      }
     ];
 
     let DeleteBookDone = (state, { bookId }) => ({ ...state, files: state.files.filter(file => Book(file).id != bookId) });
     let DeleteBook = (state, { bookId }) => [
       state,
       async (dispatch) => {
-        let transaction = state.db.transaction(['files', 'fileContents'], 'readwrite');
-        transaction.objectStore('files').delete(bookId);
-        transaction.objectStore('fileContents').delete(bookId);
-        await transaction.done;
+        let chapterKeys = (await state.db.getAllKeys('chapters')).filter(k => k.startsWith(bookId + '/'));
+
+        let tx = state.db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
+        await Promise.all([
+          tx.objectStore('files').delete(bookId),
+          tx.objectStore('fileContents').delete(bookId),
+          tx.objectStore('books').delete(bookId),
+          ...chapterKeys.map(k => tx.objectStore('chapters').delete(k)),
+          tx.done,
+        ]);
+
         dispatch(DeleteBookDone, { bookId });
       }
     ];
@@ -858,7 +975,7 @@
             h('nav', {}, [
               h('ol', { start: 0 }, [
                 ...book.chapters.map(c => (
-                  h('li', { class: { active: c == chapter } }, [
+                  h('li', { class: { active: c.id == chapter.id } }, [
                     h('a', {
                       href: router.route({ book: book.id, chapter: c.id }),
                       onclick: (_, event) => {
@@ -903,14 +1020,17 @@
                 onclick: [SaveSettings, { color: color }],
                 title: color,
               })
-            )))
+            ))),
+            chapter && (
+              h('button', { class: 'refresh', onclick: [RefreshBook, { bookId: book.id, chapterId: chapter.id }] })
+            )
           ])
         ])
       )
     });
 
-    function Book(file, fileContent) {
-      let id, name, description, chapters;
+    function Book(file, fileContent, chapters) {
+      let id, name, description;
       if (file?.name) {
         name = /(?<name>^[^(]*).*?\.txt/.exec(file.name.normalize()).groups.name.trim();
         description = /(?<description>\(.*)\.txt/.exec(file?.name.normalize())?.groups?.description?.trim();
@@ -921,7 +1041,24 @@
         // fileContent = titleizeHumanName(fileContent);
         chapters = extractChapters(name, fileContent, { name });
       }
-      return { id, name, description, chapters };
+      return {
+        id,
+        name,
+        description,
+        chapters,
+        toJSON() {
+          return {
+            id,
+            name,
+            description,
+            chapters: chapters.map(c => {
+              c = c.toJSON();
+              delete c.content;
+              return c;
+            }),
+          }
+        }
+      };
     }
 
     function normalizeFileContent(text) {
@@ -976,15 +1113,20 @@
         },
         get length() {
           return this.endIndex - this.startIndex;
+        },
+        toJSON() {
+          return {
+            id: this.id,
+            title: this.title,
+            content: this.content,
+          }
         }
       };
     }
 
     function extractChapters(filename, text, { name }) {
       let NUMERIC = '(\\d{1,3}(\\.\d{1,2})*)';
-      let NUMERIC_WORD = '(không|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười|mươi|lăm|nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cưởu|thập)';
-      let NUMERIC_WORDS = `${NUMERIC_WORD}( ${NUMERIC_WORD})*`;
-      NUMERIC_WORDS = '(một|hai|ba|bốn|năm|sáu|bảy|tám|chín|(mười( một)?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( mốt)?)( (hai|ba|bốn|lăm|sáu|bảy|tám|chín))?)';
+      let NUMERIC_WORDS = '((một|hai|ba|bốn|năm|sáu|bảy|tám|chín|(mười( một)?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( mốt)?)( (hai|ba|bốn|lăm|sáu|bảy|tám|chín))?))|(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập)';
       let patterns = [
         /*
         【xanh biếc lữ du tiên】 bộ 2 tự chương
@@ -1132,7 +1274,6 @@
       mergeShortChapters(chapters, 500);
       dedupeChapters(chapters);
       cleanupChapters(chapters);
-      // debug({chapters})
       addPrologue(chapters, filename, text);
 
       return chapters;
@@ -1149,14 +1290,14 @@
         let ch = chapters[h];
         let ci = chapters[i];
         if (ch.chapter && ch.chapter == ci.chapter) {
-          console.log('dedupe', ch.title, ci.title);
+          // console.log('dedupe', ch.title, ci.title);
           mergeBehind(chapters, i);
         }
       }
     }
 
     function cleanupChapters(chapters) {
-      debug({chapters})
+      // debug({chapters})
       let i = 1;
       while (i < chapters.length - 1) {
         let [ch, ci, cj] = [chapters[i-1], chapters[i], chapters[i+1]];
@@ -1171,7 +1312,7 @@
             //find continuity of ch
             for (let j = i + 1; j <= i + 3 && j < chapters.length; j++) {
               cj = chapters[j];
-              console.log(ch.chapter, cj.chapter);
+              // console.log(ch.chapter, cj.chapter);
               if (cj.chapter && (ch.chapter + 1 == cj.chapter)) {
                 shouldMerge = true;
                 break;
@@ -1180,7 +1321,7 @@
           }
         }
         if (shouldMerge) {
-          console.debug('cleanupChapters', ch.chapter, '<-', ci.chapter, cj?.chapter);
+          // console.debug('cleanupChapters', ch.chapter, '<-', ci.chapter, cj?.chapter);
           mergeBehind(chapters, i);
         } else {
           i++;

@@ -1263,6 +1263,8 @@
         '^Tập thứ BOOK_TEXT thứ CHAP_NUM chương TITLE$',
         //22)
         '^CHAP_NUM\\)$',
+        //【phiên ngoại thiên chi Diệp Minh Hi tự bạch】(1)
+        '【(?=.*?phiên ngoại)(?<title>.*?)】\\(CHAP_NUM\\)',
       ];
       let matches = [];
       for (let pattern of patterns) {
@@ -1317,32 +1319,49 @@
         chapters.push(Chapter(m, { chapters, filename, text }));
       });
 
-      mergeShortChapters(chapters, 500);
       dedupeChapters(chapters);
+      mergeShortChapters(chapters, 200);
       cleanupChapters(chapters);
       addPrologue(chapters, filename, text);
 
       return chapters;
     }
 
-    function mergeBehind(chapters, i) {
+    function mergeBehind(chapters, i, reason) {
       // chapters[i].endIndex = chapters[i+1].endIndex;
+      let [ch, ci] = [chapters[i-1], chapters[i]];
+      let c;
+      if (!ch.chapter && ci.chapter) c = ci;
+      else if (ch.chapter == ci.chapter) {
+        if (!ch._.title && ci._.title) c = ci;
+      }
+      // console.log('merge', [ch.title, ci.title], 'because', reason, c == ci, { ch, ci });
+      if (c) {
+        Object.assign(ch._, {
+          title: c._.title,
+          chapNum: c._.chapNum,
+          chapText: c._.chapText,
+          bookNum: c._.bookNum,
+          bookText: c._.bookText,
+        });
+      }
       chapters.splice(i, 1);
     }
 
     function dedupeChapters(chapters) {
       for (let i = chapters.length - 1; i > 0; i--) {
         let h = i-1;
-        let ch = chapters[h];
-        let ci = chapters[i];
+        let [ch, ci] = [chapters[h], chapters[i]];
         if (ch.chapter && ch.chapter == ci.chapter) {
-          // console.log('dedupe', ch.title, ci.title);
-          mergeBehind(chapters, i);
+          // console.log('dedupe', [ch.title, ci.title]);
+          mergeBehind(chapters, i, 'dedupe');
         }
       }
     }
 
     function cleanupChapters(chapters) {
+      let phienNgoai = c => /phiên ngoại/iu.test(c._.title);
+
       // debug({chapters})
       let i = 1;
       while (i < chapters.length - 1) {
@@ -1350,9 +1369,13 @@
         let shouldMerge = false;
         //ci is not continuity of ch
         if (ch.chapter && ci.chapter && (ch.chapter + 1 != ci.chapter)) {
-          if (!cj) {
+          console.log('phien ngoai', [ch._.title, ci._.title]);
+          if (phienNgoai(ch) != phienNgoai(ci)) {
+            i++;
+            continue;
+          }
+          if (!cj && !/phiên ngoại/iu.test(ci._.title)) {
             //ci is the last chapter, can merge
-            //TODO: check if ci is [phien ngoai]
             shouldMerge = true;
           } else {
             //find continuity of ch
@@ -1367,33 +1390,18 @@
           }
         }
         if (shouldMerge) {
-          // console.debug('cleanupChapters', ch.chapter, '<-', ci.chapter, cj?.chapter);
-          mergeBehind(chapters, i);
+          console.debug('cleanupChapters', ch.chapter, '<-', ci.chapter, cj?.chapter);
+          mergeBehind(chapters, i, 'cleanup');
         } else {
           i++;
         }
       }
-      // for(let i = 1; i < chapters.length; ) {
-      //   let [h, j] = [i - 1, i + 1];
-      //   //if ci is not continuity of ch
-      //   if (ch.chapter && ci.chapter && (ch.chapter + 1) != ci.chapter) {
-      //     // ci is the last chapter, can merge
-      //     if (!cj) {
-      //       console.debug('cleanupChapters', ch.chapter, '<-', ci.chapter);
-      //       mergeBehind(chapters, i);
-      //     } else {
-      //       // cj is the continuity of ch
-      //       if (cj.chapter && ch.chapter + 1 == cj.chapter) {
-      //       }
-      //     }
-      //   }
-      // }
     }
     
     function mergeShortChapters(chapters, minLength = 2_000) {
       for (let i = chapters.length - 1; i > 0; i--) {
         if (chapters[i].length < minLength) {
-          mergeBehind(chapters, i);
+          mergeBehind(chapters, i, 'short');
         }
       }
     }

@@ -821,7 +821,7 @@
           return;
         }
         
-        if (!onSuccess) onSuccess = [OpenBook, { bookId }];
+        if (!onSuccess) onSuccess = [OpenBook, { bookId, chapterId: state.chapter.id }];
 
         dispatch(StoreBooks, {
           files: [{ file, fileContent }],

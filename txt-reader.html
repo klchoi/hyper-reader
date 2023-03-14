@@ -1270,8 +1270,6 @@
         // (tứ)
         // (mười một)
         '^\\(CHAP_TEXT\\)$',
-        //【bạn gái đệ đệ】9
-        '^【' + name + '】CHAP_NUM([: ]TITLE)?',
         //Thứ 7 chương mẫu thượng công lược (1.7) tiểu ma nữ phục vụ
         // '^Thứ BOOK_NUM chương ' + name + ' \\(CHAP_NUM\\)([: ]TITLE)?',
         //Thứ 31 chương
@@ -1288,22 +1286,30 @@
         '^Quyển( thứ)? (BOOK_NUM|BOOK_TEXT) Chương CHAP_NUM: TITLE',
         //Lời dẫn
         '^(chương (cuối|kết)|tự chương|Lời dẫn)$',
-        //【xanh biếc lữ du tiên】 bộ 2 thứ 08 chương
-        '^【' + name + '】 bộ BOOK_NUM thứ CHAP_NUM chương',
-        //Xanh biếc lữ du tiên bộ 2 Chương 8: Sơ ngộ bích du
-        '^' + name + ' bộ BOOK_NUM Chương CHAP_NUM: TITLE',
         //(Chương 20: hèn chó diễn phượng (che giấu thiên 3)
         '^\\(Chương CHAP_NUM: TITLE',
         //Phiên Ngoại hai mươi lăm chương
         '^(Phiên Ngoại )CHAP_TEXT chương',
+        //【 đọa phụ 】 Chương 2:: Khuất nhục phu nhân
+        '^【NAME】 Chương CHAP_NUM: TITLE',
+        //【xanh biếc lữ du tiên】 bộ 2 thứ 08 chương
+        '^【NAME】 bộ BOOK_NUM thứ CHAP_NUM chương',
+        //Xanh biếc lữ du tiên bộ 2 Chương 8: Sơ ngộ bích du
+        '^NAME bộ BOOK_NUM Chương CHAP_NUM: TITLE',
+        //【bạn gái đệ đệ】9
+        '^【NAME】CHAP_NUM([: ]TITLE)?',
         //【các huynh đệ loạn luân thịnh yến】(tam)
         //【không chỉ tình yêu】(1)
-        '^【' + name + '】\\((CHAP_TEXT|CHAP_NUM)\\)',
+        '^【NAME】\\((CHAP_TEXT|CHAP_NUM)\\)',
         //【của ta giang hồ】(thứ 2 chương)
-        '^【' + name + '】\\(thứ CHAP_NUM chương\\)',
+        '^【NAME】\\(thứ CHAP_NUM chương\\)',
         //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
-        '^【' + name + '】(phiên ngoại) TITLE',
-        //"Ân, ta đều nghe ngươi!" (13)
+        '^【NAME】(phiên ngoại) TITLE',
+        //【phiên ngoại thiên chi Diệp Minh Hi tự bạch】(1)
+        '【(?=.*?phiên ngoại)(?<title>.*?)】\\(CHAP_NUM\\)',
+        //Người nhà quần áo Chương 1: Mẹ dị thường
+        '^NAME Chương CHAP_NUM: TITLE$',
+        //..."Ân, ta đều nghe ngươi!" (13)
         '(?<=\\W) \\(CHAP_NUM\\)$',
         //(14) nghiêm hạo tại sofa phía trên thích không thể tự thoát ra được, nhất tinh mặc xong đồ ngủ, sau đó tiếp lấy đem nghiêm hạo ôm đến chân của mình phía trên, nhẹ nhàng âu yếm.
         '\\(CHAP_NUM\\)',
@@ -1311,18 +1317,15 @@
         '^"\\s*CHAP_NUM\\s*"( TITLE)?',
         //"13 chương kết"
         '^"CHAP_NUM TITLE"$',
-        //Người nhà quần áo Chương 1: Mẹ dị thường
-        '^' + name + ' Chương CHAP_NUM: TITLE$',
         //Tập thứ hai thứ 36 chương con tin uy hiếp
         '^Tập thứ BOOK_TEXT thứ CHAP_NUM chương TITLE$',
         //22)
         '^CHAP_NUM\\)$',
-        //【phiên ngoại thiên chi Diệp Minh Hi tự bạch】(1)
-        '【(?=.*?phiên ngoại)(?<title>.*?)】\\(CHAP_NUM\\)',
       ];
       let matches = [];
       for (let pattern of patterns) {
         let source = pattern
+          .replace('NAME', '(?<name>' + name + ')')
           .replace('DATE', '\\d+-\\d+-\\d+')
           .replace('SEP', '[ :]')
           .replace('TITLE', '(?<title>.+)')
@@ -1463,7 +1466,10 @@
     function mergeShortChapters(chapters, minLength = 2_000) {
       for (let i = chapters.length - 1; i > 0; i--) {
         if (chapters[i].length < minLength) {
-          mergeBehind(chapters, i, 'short');
+          if (chapters[i]._.name && chapters[i+1])
+            mergeBehind(chapters, i+1, 'short');
+          else
+            mergeBehind(chapters, i, 'short');
         }
       }
     }

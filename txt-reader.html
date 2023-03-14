@@ -1258,7 +1258,8 @@
         '^(Phiên Ngoại )?Chương CHAP_NUM:$',
         //Chương 1: Tân niên đặc biệt thiên (thượng)
         //Phiên Ngoại Chương 8: Treo đầu dê bán thịt chó
-        '^(Phiên Ngoại )?Chương CHAP_NUM([: ]TITLE)?$',
+        //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
+        '(^|(?<=\\W ))(Phiên Ngoại )?Chương CHAP_NUM([: ]TITLE)?$',
         //Ngũ
         //Hai mươi mốt
         '^CHAP_TEXT$',
@@ -1275,6 +1276,8 @@
         // '^Thứ BOOK_NUM chương ' + name + ' \\(CHAP_NUM\\)([: ]TITLE)?',
         //Thứ 31 chương
         '^Thứ CHAP_NUM chương([: ]TITLE)?',
+        //[thứ 1 chương]
+        '^\\[thứ CHAP_NUM chương\\]',
         //Bảy năm vợ chồng gần ba năm cùng hai cái đơn nam đệ tử chuyện xưa (5)
         '^' + name + ' \\(CHAP_NUM\\)',
         //2019-7-19 mười lăm
@@ -1296,6 +1299,8 @@
         //【các huynh đệ loạn luân thịnh yến】(tam)
         //【không chỉ tình yêu】(1)
         '^【' + name + '】\\((CHAP_TEXT|CHAP_NUM)\\)',
+        //【của ta giang hồ】(thứ 2 chương)
+        '^【' + name + '】\\(thứ CHAP_NUM chương\\)',
         //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
         '^【' + name + '】(phiên ngoại) TITLE',
         //"Ân, ta đều nghe ngươi!" (13)

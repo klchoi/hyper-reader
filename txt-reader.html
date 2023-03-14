@@ -185,6 +185,11 @@
       --horizontal-line-color: var(--rp-dawn-highlight-high);
     }
 
+    :root[data-paper-size=sm] { --paper-width: 90ex; }
+    :root[data-paper-size=md] { --paper-width: 120ex; }
+    :root[data-paper-size=lg] { --paper-width: 160ex; }
+    :root[data-paper-size=xl] { --paper-width: none; }
+
     /** layout **/
     body { display: flex; }
     body > * { flex: 1 }
@@ -317,6 +322,18 @@
       position: relative;
       top: -1px;
     }
+    aside .paper-size {
+      display: flex;
+      flex-direction: column;
+      gap: calc(var(--gap) * 0.5);
+    }
+    aside .paper-size button {
+      border-radius: 0.75ex;
+      outline-width: 0;
+    }
+    aside .paper-size .selected {
+      font-weight: bold;
+    }
 
     /** main **/
     main {
@@ -325,14 +342,17 @@
       padding-bottom: var(--gap);
       /**/
       display: flex;
-    }
-    main article {
-      flex: 1;
       background: var(--paper-background-color);
       padding: 1rem 3rem;
       outline: 1px solid var(--paper-outline-color, transparent);
       box-shadow: 0px 6px 12px 3px var(--paper-shadow-color, transparent);
+    }
+    main article {
+      flex: 1;
       text-indent: 3ch;
+      max-width: var(--paper-width, 90ex);
+      margin: 0 auto;
+      transform: translate3d(calc((var(--nav-width) - var(--aside-width))/-2 + var(--paper-width)*0), 0, 0);
     }
     main article p:first-child {
       line-height: 1.2;
@@ -1072,6 +1092,15 @@
                 title: color,
               })
             ))),
+            chapter && (
+              h('div', { class: 'paper-size' }, ['sm', 'md', 'lg', 'xl'].map(size => (
+                h('button', {
+                  class: ['size', size, { selected: settings.paperSize == size }],
+                  onclick: [SaveSettings, { paperSize: size }],
+                  title: size,
+                }, text(size))
+              )))
+            ),
             chapter && (
               h('button', { class: 'refresh', onclick: [RefreshBook, { bookId: book.id, chapterId: chapter.id }] })
             )

@@ -263,13 +263,6 @@
       position: sticky;
       top: 0;
       height: 100vh;
-      padding-top: var(--gap);
-      padding-bottom: var(--gap);
-      padding-left: var(--gap);
-      padding-right: var(--gap);
-      display: flex;
-      flex-direction: column;
-      row-gap: var(--gap);
     }
     aside a,
     aside button {
@@ -283,12 +276,31 @@
       display: grid;
       place-content: center;
       border-radius: 50%;
+      cursor: pointer;
     }
-    aside .colors {
+    aside > div {
+      padding-top: var(--gap);
+      padding-bottom: var(--gap);
+      padding-left: var(--gap);
+      padding-right: var(--gap);
       display: flex;
       flex-direction: column;
-      align-items: center;
-      gap: calc(var(--gap) * .75);
+      row-gap: calc(var(--gap) * .5);
+    }
+    aside > div + div {
+      position: relative;
+    }
+    aside > div + div::before {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translate3d(-50%, 0, 0);
+      content: '';
+      display: block;
+      width: calc(var(--gap) * 2);
+      height: 1px;
+      background: var(--horizontal-line-color);
+      opacity: 0.5;
     }
     aside .colors button.checked::before {
       content: '✔';
@@ -321,11 +333,6 @@
       font-size: 1rem;
       position: relative;
       top: -1px;
-    }
-    aside .paper-size {
-      display: flex;
-      flex-direction: column;
-      gap: calc(var(--gap) * 0.5);
     }
     aside .paper-size button {
       border-radius: 0.75ex;
@@ -1076,20 +1083,23 @@
           ),
           h('aside', { class: 'settings' }, [
             chapter && (
-              h('a', {
-                class: 'close',
-                href: router.route({}),
-                onclick: (_, event) => {
-                  event.preventDefault();
-                  return [ShowRecentBooks];
-                }
-              })
+              h('div', {}, [
+                h('a', {
+                  class: 'close',
+                  href: router.route({}),
+                  onclick: (_, event) => {
+                    event.preventDefault();
+                    return [ShowRecentBooks];
+                  },
+                  title: 'Back to bookshelf',
+                })
+              ])
             ),
             h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn'].map(color => (
               h('button', {
                 class: [color, { checked: settings.color == color }],
                 onclick: [SaveSettings, { color: color }],
-                title: color,
+                title: `Theme: ${color}`,
               })
             ))),
             chapter && (
@@ -1097,12 +1107,18 @@
                 h('button', {
                   class: ['size', size, { selected: settings.paperSize == size }],
                   onclick: [SaveSettings, { paperSize: size }],
-                  title: size,
+                  title: `Page size: ${size}`,
                 }, text(size))
               )))
             ),
             chapter && (
-              h('button', { class: 'refresh', onclick: [RefreshBook, { bookId: book.id, chapterId: chapter.id }] })
+              h('div', {}, [
+                h('button', {
+                  class: 'refresh',
+                  onclick: [RefreshBook, { bookId: book.id, chapterId: chapter.id }],
+                  title: 'Refresh book',
+                })
+              ])
             )
           ])
         ])

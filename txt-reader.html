@@ -115,6 +115,7 @@
       --nav-width: 300px;
       --aside-width: 60px;
       --gap: 1rem;
+      --paper-padding: calc(var(--gap) * 3);
       cursor: default;
     }
     .settings .colors button.white,
@@ -188,13 +189,13 @@
     :root[data-paper-size=sm] { --paper-width: 90ex; }
     :root[data-paper-size=md] { --paper-width: 120ex; }
     :root[data-paper-size=lg] { --paper-width: 160ex; }
-    :root[data-paper-size=xl] { --paper-width: none; }
+    :root[data-paper-size=xl] { --paper-width: 100%; }
 
     /** layout **/
-    body { display: flex; }
-    body > * { flex: 1 }
-    nav { flex: 0 0 var(--nav-width); }
-    aside { flex: 0 0 var(--aside-width); }
+    body {
+      display: grid;
+      grid-template-columns: minmax(var(--nav-width), 1fr) minmax(auto, calc(var(--paper-width) + 2*var(--paper-padding))) minmax(var(--aside-width), 1fr);
+    }
 
     /** global **/
     html,
@@ -286,6 +287,7 @@
       display: flex;
       flex-direction: column;
       row-gap: calc(var(--gap) * .5);
+      width: var(--aside-width);
     }
     aside > div + div {
       position: relative;
@@ -359,7 +361,6 @@
       text-indent: 3ch;
       max-width: var(--paper-width, 90ex);
       margin: 0 auto;
-      transform: translate3d(calc((var(--nav-width) - var(--aside-width))/-2 + var(--paper-width)*0), 0, 0);
     }
     main article p:first-child {
       line-height: 1.2;
@@ -948,6 +949,26 @@
       node: document.body,
       view: ({ router, files, book, chapter, progress, settings }) => (
         h('body', {}, [
+          h('nav', {}, [
+            (book?.chapters?.length > 0) && (
+              h('ol', { start: 0 }, [
+                ...book.chapters.map(c => (
+                  h('li', { class: { active: c.id == chapter.id } }, [
+                    h('a', {
+                      href: router.route({ book: book.id, chapter: c.id }),
+                      onclick: (_, event) => {
+                        event.preventDefault();
+                        return [OpenBook, { bookId: book.id, chapterId: c.id }];
+                      },
+                      title: c.title,
+                    }, [
+                      text(c.title)
+                    ])
+                  ])
+                ))
+              ])
+            )
+          ]),
           !book && (
             h('div', { class: 'table' }, [
               h('a', {
@@ -1049,26 +1070,6 @@
               })
             ])
           ),
-          (book?.chapters?.length > 0) && (
-            h('nav', {}, [
-              h('ol', { start: 0 }, [
-                ...book.chapters.map(c => (
-                  h('li', { class: { active: c.id == chapter.id } }, [
-                    h('a', {
-                      href: router.route({ book: book.id, chapter: c.id }),
-                      onclick: (_, event) => {
-                        event.preventDefault();
-                        return [OpenBook, { bookId: book.id, chapterId: c.id }];
-                      },
-                      title: c.title,
-                    }, [
-                      text(c.title)
-                    ])
-                  ])
-                ))
-              ])
-            ])
-          ),
           chapter && (
             h('main', {}, [
               h('article', {}, [
@@ -1102,15 +1103,13 @@
                 title: `Theme: ${color}`,
               })
             ))),
-            chapter && (
-              h('div', { class: 'paper-size' }, ['sm', 'md', 'lg', 'xl'].map(size => (
-                h('button', {
-                  class: ['size', size, { selected: settings.paperSize == size }],
-                  onclick: [SaveSettings, { paperSize: size }],
-                  title: `Page size: ${size}`,
-                }, text(size))
-              )))
-            ),
+            h('div', { class: 'paper-size' }, ['sm', 'md', 'lg', 'xl'].map(size => (
+              h('button', {
+                class: ['size', size, { selected: settings.paperSize == size }],
+                onclick: [SaveSettings, { paperSize: size }],
+                title: `Page size: ${size}`,
+              }, text(size))
+            ))),
             chapter && (
               h('div', {}, [
                 h('button', {

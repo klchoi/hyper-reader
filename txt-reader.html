@@ -1322,6 +1322,8 @@
         '^【NAME】(phiên ngoại) TITLE',
         //【phiên ngoại thiên chi Diệp Minh Hi tự bạch】(1)
         '【(?=.*?phiên ngoại)(?<title>.*?)】\\(CHAP_NUM\\)',
+        //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
+        '^【NAME】\\(phiên ngoại\\) TITLE',
         //Người nhà quần áo Chương 1: Mẹ dị thường
         '^NAME Chương CHAP_NUM: TITLE$',
         //..."Ân, ta đều nghe ngươi!" (13)
@@ -1340,6 +1342,10 @@
         '^(?<!.*chương.*TITLE) \\(HALF\\)$',
         //Thứ 1002 chương lữ mộng đẹp cảnh nhã nhàn bá mẫu (nhị)
         '^Thứ CHAP_NUM chương TITLE',
+        //Đệ nhất bộ tứ đại mỹ nữ chi đẹp nhất thị trưởng dương ngưng băng (thượng)
+        '^Đệ (BOOK_NUM|BOOK_TEXT) BOOK_TYPE TITLE \\(HALF\\)',
+        //Bộ 2 tứ đại mỹ nữ chi kim bài chủ trì dương ninh làm (hạ)
+        '^BOOK_TYPE BOOK_NUM TITLE \\(HALF\\)',
       ];
       let matches = [];
       for (let pattern of patterns) {
@@ -1356,6 +1362,7 @@
           .replace('BOOK_TEXT', `(?<bookText>${NUMERIC_WORDS})`);
         let regex = new RegExp(source, 'gimu');
         let result = [...text.matchAll(regex)];
+        console.debug({ pattern, regex, result });
         matches.push(...result.map(m => ({ pattern, regex, index: m.index, ...m.groups, text: m[0] })));
       }
       matches.forEach(m => {
@@ -1391,6 +1398,7 @@
         }
       });
       matches.sort((a, z) => a.index - z.index);
+      debug({ matches });
 
       if (matches.length == 0) {
         let paragraphsPerChapter = 60;

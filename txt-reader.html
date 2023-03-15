@@ -1158,7 +1158,7 @@
 
     function normalizeFileContent(text) {
       text = text.normalize();
-      text = text.replace(/[^.]*(Sắc Hiện Viện|Sắc Hiệp Viện|Sachiepvien\.net)[^.]*\.?/g, '');
+      text = text.replace(/[^.\n]*(Sắc Hiện Viện|Sắc Hiệp Viện|Sachiepvien\.net)[^.\n]*\.?/g, '');
       text = text.replace(/[\r\n]+/g, '\n');
       text = text.replace(/(.+)/g, (s) => s.trim());
       text = text.replace(/^'([^']+)'$/gm, '"$1"');
@@ -1175,13 +1175,17 @@
       return {
         _,
         get title() {
-          let title, titleBook, titleChap;
-          if (_.bookNum) titleBook = 'Bộ ' + _.bookNum;
-          else if (_.bookText) titleBook = 'Bộ ' + _.bookText;
-          if (_.chapNum) titleChap = 'Chương ' + _.chapNum;
-          else if (_.chapText) titleChap = 'Chương ' + _.chapText;
-          title = [titleBook, titleChap].filter(Boolean).join(' ');
+          let title, titleBook, titleChap, phienNgoai, half;
+          if (_.bookType) {
+            if (_.bookNum) titleBook = this.bookType + ' ' + _.bookNum;
+            else if (_.bookText) titleBook = this.bookType + ' ' + _.bookText;
+          }
+          if (/phiên ngoại/iu.test(_.text) && !/phiên ngoại/iu.test(_.title)) phienNgoai = 'Phiên ngoại';
+          if (this.chapter) titleChap = 'Chương ' + this.chapter;
+          if (this.half && !_.title?.includes('(' + this.half + ')')) half = '(' + this.half + ')';
+          title = [titleBook, phienNgoai, titleChap].filter(Boolean).join(' ');
           title = [title, _.title].filter(Boolean).join(': ');
+          title = [title, half].filter(Boolean).join(' ');
           if (!title) title = 'Chương ' + (this.i + 1);
           return title;
         },
@@ -1209,6 +1213,14 @@
         get length() {
           return this.endIndex - this.startIndex;
         },
+        get half() {
+          if (_.half) return _.half.toLowerCase();
+          let m = /(?<=\()(thượng|trung|hạ)(?=\))/iu.exec(_.title);
+          if (m) return m[0].toLowerCase();
+        },
+        get bookType() {
+          if (_.bookType) return _.bookType.toLowerCase().replace(/^./, c => c.toUpperCase());
+        },
         toJSON() {
           return {
             id: this.id,
@@ -1220,7 +1232,7 @@
     }
 
     function extractChapters(filename, text, { name }) {
-      let NUMERIC = '(\\d{1,3}(\\.\d{1,2})*)';
+      let NUMERIC = '(\\d{1,4}(\\.\d{1,2})*)';
       let NUMERIC_WORDS = '((một|hai|ba|bốn|năm|sáu|bảy|tám|chín|(mười( một)?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( mốt)?)( (hai|ba|bốn|lăm|sáu|bảy|tám|chín))?))|(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập)';
       let patterns = [
         /*
@@ -1273,7 +1285,8 @@
         //Thứ 7 chương mẫu thượng công lược (1.7) tiểu ma nữ phục vụ
         // '^Thứ BOOK_NUM chương ' + name + ' \\(CHAP_NUM\\)([: ]TITLE)?',
         //Thứ 31 chương
-        '^Thứ CHAP_NUM chương([: ]TITLE)?',
+        //Tập thứ nhất thứ 01 chương thất đọa vách núi đen
+        '^(BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) )?Thứ CHAP_NUM chương([: ]TITLE)?',
         //[thứ 1 chương]
         '^\\[thứ CHAP_NUM chương\\]',
         //Bảy năm vợ chồng gần ba năm cùng hai cái đơn nam đệ tử chuyện xưa (5)
@@ -1283,9 +1296,10 @@
         //Mười hai, nửa năm sau cuộc sống vẫn đang tiếp tục. Phố xá như trước thái bình.
         '^CHAP_TEXT[,] TITLE$',
         //Quyển thứ hai Chương 11: Mỹ mẫu cầu xin
-        '^Quyển( thứ)? (BOOK_NUM|BOOK_TEXT) Chương CHAP_NUM: TITLE',
+        //Tập 6 Chương 110: Nhân thay mới trang
+        '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) Chương CHAP_NUM: TITLE',
         //Lời dẫn
-        '^(chương (cuối|kết)|tự chương|Lời dẫn)$',
+        '^(?<title>chương (cuối|kết)|tự chương|Lời dẫn)$',
         //(Chương 20: hèn chó diễn phượng (che giấu thiên 3)
         '^\\(Chương CHAP_NUM: TITLE',
         //Phiên Ngoại hai mươi lăm chương
@@ -1300,7 +1314,8 @@
         '^【NAME】CHAP_NUM([: ]TITLE)?',
         //【các huynh đệ loạn luân thịnh yến】(tam)
         //【không chỉ tình yêu】(1)
-        '^【NAME】\\((CHAP_TEXT|CHAP_NUM)\\)',
+        //【không chỉ tình yêu】(18) hoàn
+        '^【NAME】\\((CHAP_TEXT|CHAP_NUM)\\)( TITLE)?',
         //【của ta giang hồ】(thứ 2 chương)
         '^【NAME】\\(thứ CHAP_NUM chương\\)',
         //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
@@ -1321,6 +1336,10 @@
         '^Tập thứ BOOK_TEXT thứ CHAP_NUM chương TITLE$',
         //22)
         '^CHAP_NUM\\)$',
+        //Tự mẫu một ngày (hạ)
+        '^(?<!.*chương.*TITLE) \\(HALF\\)$',
+        //Thứ 1002 chương lữ mộng đẹp cảnh nhã nhàn bá mẫu (nhị)
+        '^Thứ CHAP_NUM chương TITLE',
       ];
       let matches = [];
       for (let pattern of patterns) {
@@ -1329,6 +1348,8 @@
           .replace('DATE', '\\d+-\\d+-\\d+')
           .replace('SEP', '[ :]')
           .replace('TITLE', '(?<title>.+)')
+          .replace('BOOK_TYPE', '(?<bookType>(quyển|tập|bộ))')
+          .replace('HALF', `(?<=\\()(?<half>(thượng|trung|hạ|${NUMERIC_WORDS}))(?=\\))`)
           .replace('CHAP_NUM', `(?<chapNum>${NUMERIC})`)
           .replace('CHAP_TEXT', `(?<chapText>${NUMERIC_WORDS})`)
           .replace('BOOK_NUM', `(?<bookNum>${NUMERIC})`)
@@ -1400,7 +1421,7 @@
       else if (ch.chapter == ci.chapter) {
         if (!ch._.title && ci._.title) c = ci;
       }
-      // console.log('merge', [ch.title, ci.title], 'because', reason, c == ci, { ch, ci });
+      console.log('merge', [ch.title, ci.title], 'because', reason, c == ci, { ch, ci });
       if (c) {
         Object.assign(ch._, {
           title: c._.title,
@@ -1408,6 +1429,8 @@
           chapText: c._.chapText,
           bookNum: c._.bookNum,
           bookText: c._.bookText,
+          bookType: c._.bookType,
+          half: c._.half,
         });
       }
       chapters.splice(i, 1);
@@ -1417,7 +1440,7 @@
       for (let i = chapters.length - 1; i > 0; i--) {
         let h = i-1;
         let [ch, ci] = [chapters[h], chapters[i]];
-        if (ch.chapter && ch.chapter == ci.chapter) {
+        if (ch.chapter && ch.chapter == ci.chapter && ch.half == ci.half) {
           // console.log('dedupe', [ch.title, ci.title]);
           mergeBehind(chapters, i, 'dedupe');
         }
@@ -1434,8 +1457,8 @@
         let shouldMerge = false;
         //ci is not continuity of ch
         if (ch.chapter && ci.chapter && (ch.chapter + 1 != ci.chapter)) {
-          console.log('phien ngoai', [ch._.title, ci._.title]);
-          if (phienNgoai(ch) != phienNgoai(ci)) {
+          // console.log('phien ngoai', [ch._.title, ci._.title]);
+          if (phienNgoai(ch) != phienNgoai(ci) || ch.half != ci.half) {
             i++;
             continue;
           }
@@ -1465,9 +1488,18 @@
 
     function mergeShortChapters(chapters, minLength = 2_000) {
       for (let i = chapters.length - 1; i > 0; i--) {
-        if (chapters[i].length < minLength) {
-          if (chapters[i]._.name && chapters[i+1])
-            mergeBehind(chapters, i+1, 'short');
+        let [h, j] = [i-1, i+1];
+        let [ch, ci, cj] = [chapters[h], chapters[i], chapters[j]];
+        if (ci.length < minLength) {
+          let fields = [];
+          if (ci.chapter) fields.push('chapter');
+          if (ci.half) fields.push('half');
+          if (fields.every(f => ch[f] == ci[f]))
+            mergeBehind(chapters, i, 'short and dupe of prev');
+          else if (cj && fields.every(f => cj[f] == ci[f]))
+            mergeBehind(chapters, j, 'short and dupe of next');
+          else if (ci._.name && cj)
+            mergeBehind(chapters, j, 'short with name');
           else
             mergeBehind(chapters, i, 'short');
         }

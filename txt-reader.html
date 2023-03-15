@@ -418,8 +418,6 @@
     }
     .table .th[data-sort=asc] span::after { content: '↑'; }
     .table .th[data-sort=desc] span::after { content: '↓'; }
-    .table .text-left { text-align: left; }
-    .table .text-right { text-align: right; }
     .table .desc { display: block; }
     .table .delete { color: inherit; }
     .table .delete:hover { color: var(--link-color); }
@@ -436,6 +434,10 @@
       overflow-y: auto;
     }
     /**/
+
+    .text-left { text-align: left; }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
   </style>
 </head>
 <body>
@@ -1076,7 +1078,7 @@
                 ...chapter.content.split(/\n|<\/?\w+>/gi).map(line => (
                     /^[-]+$/.test(line)
                       ? h('hr', {})
-                      : h('p', {}, text(line))
+                      : h('p', { class: { 'text-center': /^\W+$/.test(line) } }, text(line))
                   )
                 )
               ])
@@ -1346,6 +1348,8 @@
         '^Đệ (BOOK_NUM|BOOK_TEXT) BOOK_TYPE TITLE \\(HALF\\)',
         //Bộ 2 tứ đại mỹ nữ chi kim bài chủ trì dương ninh làm (hạ)
         '^BOOK_TYPE BOOK_NUM TITLE \\(HALF\\)',
+        //(Chương 20: hèn chó diễn phượng (che giấu thiên 2)
+        '^\\(Chương CHAP_NUM: TITLE HALF\\)',
       ];
       let matches = [];
       for (let pattern of patterns) {

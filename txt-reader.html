@@ -1350,6 +1350,9 @@
         '^BOOK_TYPE BOOK_NUM TITLE \\(HALF\\)',
         //(Chương 20: hèn chó diễn phượng (che giấu thiên 2)
         '^\\(Chương CHAP_NUM: TITLE HALF\\)',
+        //Đệ 1 chương: (Mẹ Mamako)
+        //Đệ 8 chương, đẩy ngược phản bị địt.
+        '^(Đệ|thứ) CHAP_NUM chương[,:] TITLE',
       ];
       let matches = [];
       for (let pattern of patterns) {
@@ -1404,12 +1407,12 @@
       matches.sort((a, z) => a.index - z.index);
       debug({ matches });
 
-      if (matches.length == 0) {
+      if (matches.length < 2 || matches[1].index > 5000) {
         let paragraphsPerChapter = 60;
         let pattern = '(.*\n){1,' + paragraphsPerChapter + '}';
         let regex = new RegExp(pattern, 'gimu')
         let result = [...text.matchAll(regex)];
-        matches.push(...result.map(m => ({ pattern, regex, index: m.index, ...m.groups, text: m[0] })));
+        matches = result.map(m => ({ pattern, regex, index: m.index, ...m.groups, text: m[0] }));
       }
 
       let chapters = [];

@@ -709,7 +709,7 @@
         async (dispatch) => {
           let progress = (await state.db.get('progress', book.id) || {});
           progress.chapterId = chapter.id;
-          progress.chapterIndex = book.chapters.indexOf(chapter) + (book.chapters[0].id ? 1 : 0);
+          progress.chapterIndex = book.chapters.findIndex(c => c.id == chapter.id) + (book.chapters[0].id ? 1 : 0);
           progress.chapterCount = (book.chapters[0].id ? book.chapters.length : book.chapters.length - 1);
           progress.updatedAt = new Date().toISOString();
           await state.db.put('progress', progress, book.id);

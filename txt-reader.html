@@ -1513,10 +1513,12 @@
             mergeBehind(chapters, i, 'short and dupe of prev');
           else if (cj && fields.every(f => cj[f] == ci[f]))
             mergeBehind(chapters, j, 'short and dupe of next');
-          else if (ci._.name && cj)
-            mergeBehind(chapters, j, 'short with name');
-          else
-            mergeBehind(chapters, i, 'short');
+          else if (fields.length == 0) {
+            if (ci._.name && cj)
+              mergeBehind(chapters, j, 'short with name');
+            else
+              mergeBehind(chapters, i, 'short');
+          }
         }
       }
     }

@@ -164,6 +164,7 @@
       --paper-outline-color: var(--rp-main-highlight-med-alpha);
       --link-color: var(--rp-main-pine);
       --horizontal-line-color: var(--rp-main-highlight-high-alpha);
+      --selection-bg: var(--rp-main-highlight-med);
       --body-font-smoothing: antialiased;
     }
     .settings .colors button.rose-pine-moon,
@@ -174,6 +175,7 @@
       --paper-outline-color: var(--rp-moon-highlight-med-alpha);
       --link-color: var(--rp-moon-rose);
       --horizontal-line-color: var(--rp-moon-highlight-high-alpha);
+      --selection-bg: var(--rp-moon-highlight-med);
       --body-font-smoothing: antialiased;
     }
     .settings .colors button.rose-pine-dawn,
@@ -184,12 +186,17 @@
       --paper-outline-color: var(--rp-dawn-highlight-med);
       --link-color: var(--rp-dawn-love);
       --horizontal-line-color: var(--rp-dawn-highlight-high);
+      --selection-bg: var(--rp-dawn-highlight-med);
     }
 
     :root[data-paper-size=sm] { --paper-width: 90ex; }
     :root[data-paper-size=md] { --paper-width: 120ex; }
     :root[data-paper-size=lg] { --paper-width: 160ex; }
     :root[data-paper-size=xl] { --paper-width: 100%; }
+
+    *::selection {
+      background-color: var(--selection-bg);
+    }
 
     /** layout **/
     body {
@@ -244,10 +251,11 @@
       background: var(--body-font-color);
       outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
       border-radius: 0.5ex;
+      color: var(--body-background-color);
     }
     nav li.active a {
       pointer-events: none;
-      color: var(--body-background-color);
+      color: inherit;
     }
     nav a {
       color: var(--body-font-color);
@@ -438,6 +446,7 @@
     .text-left { text-align: left; }
     .text-right { text-align: right; }
     .text-center { text-align: center; }
+    .indent-none { text-indent: 0; }
   </style>
 </head>
 <body>
@@ -1075,12 +1084,12 @@
           chapter && (
             h('main', {}, [
               h('article', {}, [
-                ...chapter.content.split(/\n|<\/?\w+>/gi).map(line => (
-                    /^[-]+$/.test(line)
-                      ? h('hr', {})
-                      : h('p', { class: { 'text-center': /^\W+$/.test(line) } }, text(line))
-                  )
-                )
+                ...chapter.content.split(/\n|<\/?\w+>/gi).map(line => {
+                  if (/^[-]+$/.test(line)) return h('hr', {});
+                  if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { class: 'text-center indent-none' }, text(line));
+                  // if (/^"/.test(line)) return h('p', {}, h('em', {}, text(line)));
+                  return h('p', {}, text(line));
+                })
               ])
             ])
           ),
@@ -1183,12 +1192,12 @@
             else if (_.bookText) titleBook = this.bookType + ' ' + _.bookText;
           }
           if (/phiên ngoại/iu.test(_.text) && !/phiên ngoại/iu.test(_.title)) phienNgoai = 'Phiên ngoại';
-          if (this.chapter) titleChap = 'Chương ' + this.chapter;
+          if (this.chapter != null) titleChap = this.chapType + ' ' + this.chapter;
           if (this.half && !_.title?.includes('(' + this.half + ')')) half = '(' + this.half + ')';
           title = [titleBook, phienNgoai, titleChap].filter(Boolean).join(' ');
           title = [title, _.title].filter(Boolean).join(': ');
           title = [title, half].filter(Boolean).join(' ');
-          if (!title) title = 'Chương ' + (this.i + 1);
+          if (!title) title = this.chapType + ' ' + (this.i + 1);
           return title;
         },
         get i() {
@@ -1209,8 +1218,13 @@
           return text.slice(this.startIndex, this.endIndex).trim();
         },
         get chapter() {
-          let num = _.chapNum || _.chapText;
-          if (num) return Number(num);
+          return _.chapNum || _.chapText;
+        },
+        get chapNo() {
+          if (this.chapter) return Number(this.chapter)
+        },
+        get chapType() {
+          return _.chapType || 'Chương'
         },
         get length() {
           return this.endIndex - this.startIndex;
@@ -1223,6 +1237,10 @@
         get bookType() {
           if (_.bookType) return _.bookType.toLowerCase().replace(/^./, c => c.toUpperCase());
         },
+        get bookNo() {
+          if (_.bookNum) return Number(_.bookNum);
+          if (_.bookText) return Number(_.bookText);
+        },
         toJSON() {
           return {
             id: this.id,
@@ -1234,8 +1252,9 @@
     }
 
     function extractChapters(filename, text, { name }) {
-      let NUMERIC = '(\\d{1,4}(\\.\d{1,2})*)';
-      let NUMERIC_WORDS = '((một|hai|ba|bốn|năm|sáu|bảy|tám|chín|(mười( một)?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( mốt)?)( (hai|ba|bốn|lăm|sáu|bảy|tám|chín))?))|(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập)';
+      let NUMERIC = '(\\d{1,4}(\\.\\d{1,2})*)';
+      let NUMERIC_DECIMAL = '(\\d{1,4}(\\.\\d{1,2})+)';
+      let NUMERIC_WORDS = '(mười( (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( (mốt|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín)|(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập)';
       let patterns = [
         /*
         【xanh biếc lữ du tiên】 bộ 2 tự chương
@@ -1269,11 +1288,12 @@
         */
         //Chương 23:
         //Phiên ngoại Chương 18:
-        '^(Phiên Ngoại )?Chương CHAP_NUM:$',
+        '^(Phiên Ngoại )?CHAP_TYPE CHAP_NUM:$',
         //Chương 1: Tân niên đặc biệt thiên (thượng)
         //Phiên Ngoại Chương 8: Treo đầu dê bán thịt chó
         //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
-        '(^|(?<=\\W ))(Phiên Ngoại )?Chương CHAP_NUM([: ]TITLE)?$',
+        //Hồi 2: · phẫn vũ nữ khinh thân dụ địch tù, nhu vú to thát tử loạn tâm trí
+        '(^|(?<=\\W ))(Phiên Ngoại )?CHAP_TYPE CHAP_NUM([^\\p{L}\\p{N}]+TITLE)?$',
         //Ngũ
         //Hai mươi mốt
         '^CHAP_TEXT$',
@@ -1288,9 +1308,9 @@
         // '^Thứ BOOK_NUM chương ' + name + ' \\(CHAP_NUM\\)([: ]TITLE)?',
         //Thứ 31 chương
         //Tập thứ nhất thứ 01 chương thất đọa vách núi đen
-        '^(BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) )?Thứ CHAP_NUM chương([: ]TITLE)?',
+        '^(BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) )?Thứ CHAP_NUM CHAP_TYPE([: ]TITLE)?',
         //[thứ 1 chương]
-        '^\\[thứ CHAP_NUM chương\\]',
+        '^\\[thứ CHAP_NUM CHAP_TYPE\\]',
         //Bảy năm vợ chồng gần ba năm cùng hai cái đơn nam đệ tử chuyện xưa (5)
         '^' + name + ' \\(CHAP_NUM\\)',
         //2019-7-19 mười lăm
@@ -1299,19 +1319,19 @@
         '^CHAP_TEXT[,] TITLE$',
         //Quyển thứ hai Chương 11: Mỹ mẫu cầu xin
         //Tập 6 Chương 110: Nhân thay mới trang
-        '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) Chương CHAP_NUM: TITLE',
+        '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) CHAP_TYPE CHAP_NUM: TITLE',
         //Lời dẫn
-        '^(?<title>chương (cuối|kết)|tự chương|Lời dẫn)$',
+        '^(?<title>CHAP_TYPE (cuối|kết)|tự chương|Lời dẫn)$',
         //(Chương 20: hèn chó diễn phượng (che giấu thiên 3)
-        '^\\(Chương CHAP_NUM: TITLE',
+        '^\\(CHAP_TYPE CHAP_NUM: TITLE',
         //Phiên Ngoại hai mươi lăm chương
-        '^(Phiên Ngoại )CHAP_TEXT chương',
+        '^(Phiên Ngoại )CHAP_TEXT CHAP_TYPE',
         //【 đọa phụ 】 Chương 2:: Khuất nhục phu nhân
-        '^【NAME】 Chương CHAP_NUM: TITLE',
+        '^【NAME】 CHAP_TYPE CHAP_NUM: TITLE',
         //【xanh biếc lữ du tiên】 bộ 2 thứ 08 chương
-        '^【NAME】 bộ BOOK_NUM thứ CHAP_NUM chương',
+        '^【NAME】 bộ BOOK_NUM thứ CHAP_NUM CHAP_TYPE',
         //Xanh biếc lữ du tiên bộ 2 Chương 8: Sơ ngộ bích du
-        '^NAME bộ BOOK_NUM Chương CHAP_NUM: TITLE',
+        '^NAME bộ BOOK_NUM CHAP_TYPE CHAP_NUM: TITLE',
         //【bạn gái đệ đệ】9
         '^【NAME】CHAP_NUM([: ]TITLE)?',
         //【các huynh đệ loạn luân thịnh yến】(tam)
@@ -1319,7 +1339,7 @@
         //【không chỉ tình yêu】(18) hoàn
         '^【NAME】\\((CHAP_TEXT|CHAP_NUM)\\)( TITLE)?',
         //【của ta giang hồ】(thứ 2 chương)
-        '^【NAME】\\(thứ CHAP_NUM chương\\)',
+        '^【NAME】\\(thứ CHAP_NUM CHAP_TYPE\\)',
         //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
         '^【NAME】(phiên ngoại) TITLE',
         //【phiên ngoại thiên chi Diệp Minh Hi tự bạch】(1)
@@ -1327,7 +1347,13 @@
         //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
         '^【NAME】\\(phiên ngoại\\) TITLE',
         //Người nhà quần áo Chương 1: Mẹ dị thường
-        '^NAME Chương CHAP_NUM: TITLE$',
+        '^NAME CHAP_TYPE CHAP_NUM: TITLE$',
+        //Nón xanh mặc ta mang (nhất) kinh vi thiên nhân
+        '^NAME \\(CHAP_TEXT\\) TITLE',
+        //(bản cũ) dâm loạn gia đình thứ 01 chương: Sau khi tan lớp ba ba âu yếm
+        'NAME thứ CHAP_NUM CHAP_TYPE: TITLE',
+        //(16) A Kiện nói: Nàng... Nàng là ta... Muội muội
+        '^\\(CHAP_NUM\\) TITLE',
         //..."Ân, ta đều nghe ngươi!" (13)
         '(?<=\\W) \\(CHAP_NUM\\)$',
         //(14) nghiêm hạo tại sofa phía trên thích không thể tự thoát ra được, nhất tinh mặc xong đồ ngủ, sau đó tiếp lấy đem nghiêm hạo ôm đến chân của mình phía trên, nhẹ nhàng âu yếm.
@@ -1337,32 +1363,45 @@
         //"13 chương kết"
         '^"CHAP_NUM TITLE"$',
         //Tập thứ hai thứ 36 chương con tin uy hiếp
-        '^Tập thứ BOOK_TEXT thứ CHAP_NUM chương TITLE$',
+        '^Tập thứ BOOK_TEXT thứ CHAP_NUM CHAP_TYPE TITLE$',
         //22)
         '^CHAP_NUM\\)$',
         //Tự mẫu một ngày (hạ)
-        '^(?<!.*chương.*TITLE) \\(HALF\\)$',
+        '^(?<!.*CHAP_TYPE.*TITLE) \\(HALF\\)$',
         //Thứ 1002 chương lữ mộng đẹp cảnh nhã nhàn bá mẫu (nhị)
-        '^Thứ CHAP_NUM chương TITLE',
+        '^Thứ CHAP_NUM CHAP_TYPE TITLE',
         //Đệ nhất bộ tứ đại mỹ nữ chi đẹp nhất thị trưởng dương ngưng băng (thượng)
         '^Đệ (BOOK_NUM|BOOK_TEXT) BOOK_TYPE TITLE \\(HALF\\)',
         //Bộ 2 tứ đại mỹ nữ chi kim bài chủ trì dương ninh làm (hạ)
         '^BOOK_TYPE BOOK_NUM TITLE \\(HALF\\)',
         //(Chương 20: hèn chó diễn phượng (che giấu thiên 2)
-        '^\\(Chương CHAP_NUM: TITLE HALF\\)',
+        '^\\(CHAP_TYPE CHAP_NUM: TITLE HALF\\)',
         //Đệ 1 chương: (Mẹ Mamako)
         //Đệ 8 chương, đẩy ngược phản bị địt.
-        '^(Đệ|thứ) CHAP_NUM chương[,:] TITLE',
+        '^(Đệ|thứ) CHAP_NUM CHAP_TYPE[,:] TITLE',
+        //Quyển thứ hai thiết giáp phong vân
+        '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) BOOK_TITLE',
+        //Thứ 4 cuốn đế đô bi ca
+        '^Thứ BOOK_NUM BOOK_TYPE BOOK_TITLE',
+        //1.1 nhân vật chính kêu mũ
+        '^CHAP_NUM_DECIMAL TITLE$',
+        //(4.25)G con mẹ nó du học sinh
+        '^\\(CHAP_NUM\\) ?TITLE$',
+        //Chương mười:
+        '^CHAP_TYPE CHAP_TEXT:$',
       ];
       let matches = [];
       for (let pattern of patterns) {
         let source = pattern
-          .replace('NAME', '(?<name>' + name + ')')
+          .replace('NAME', '(?<name>' + [...new Set([name, name.replace('hệ liệt', '').trim()])].join('|') + ')')
           .replace('DATE', '\\d+-\\d+-\\d+')
           .replace('SEP', '[ :]')
+          .replace('BOOK_TITLE', '(?<bookTitle>.+)')
           .replace('TITLE', '(?<title>.+)')
-          .replace('BOOK_TYPE', '(?<bookType>(quyển|tập|bộ))')
+          .replace('BOOK_TYPE', '(?<bookType>(quyển|tập|bộ|cuốn))')
+          .replace('CHAP_TYPE', '(?<chapType>(chương|hồi))')
           .replace('HALF', `(?<=\\()(?<half>(thượng|trung|hạ|${NUMERIC_WORDS}))(?=\\))`)
+          .replace('CHAP_NUM_DECIMAL', `(?<chapNum>${NUMERIC_DECIMAL})`)
           .replace('CHAP_NUM', `(?<chapNum>${NUMERIC})`)
           .replace('CHAP_TEXT', `(?<chapText>${NUMERIC_WORDS})`)
           .replace('BOOK_NUM', `(?<bookNum>${NUMERIC})`)
@@ -1407,7 +1446,7 @@
       matches.sort((a, z) => a.index - z.index);
       debug({ matches });
 
-      if (matches.length < 2 || matches[1].index > 5000) {
+      if (matches.length < 2) {
         let paragraphsPerChapter = 60;
         let pattern = '(.*\n){1,' + paragraphsPerChapter + '}';
         let regex = new RegExp(pattern, 'gimu')
@@ -1432,11 +1471,11 @@
       // chapters[i].endIndex = chapters[i+1].endIndex;
       let [ch, ci] = [chapters[i-1], chapters[i]];
       let c;
-      if (!ch.chapter && ci.chapter) c = ci;
-      else if (ch.chapter == ci.chapter) {
+      if (!ch.chapNo && ci.chapNo) c = ci;
+      else if (ch.chapNo == ci.chapNo) {
         if (!ch._.title && ci._.title) c = ci;
       }
-      console.log('merge', [ch.title, ci.title], 'because', reason, c == ci, { ch, ci });
+      console.log('merge', [ch._.text, ci._.text], 'because', reason, c == ci, { ch, ci });
       if (c) {
         Object.assign(ch._, {
           title: c._.title,
@@ -1455,7 +1494,10 @@
       for (let i = chapters.length - 1; i > 0; i--) {
         let h = i-1;
         let [ch, ci] = [chapters[h], chapters[i]];
-        if (ch.chapter && ch.chapter == ci.chapter && ch.half == ci.half) {
+        let shouldMerge = false;
+        if (ch.startIndex == ci.startIndex) shouldMerge = true;
+        if (ch.chapNo != null && ch.chapNo == ci.chapNo && ch.half == ci.half) shouldMerge = true;
+        if (shouldMerge) {
           // console.log('dedupe', [ch.title, ci.title]);
           mergeBehind(chapters, i, 'dedupe');
         }
@@ -1471,7 +1513,7 @@
         let [ch, ci, cj] = [chapters[i-1], chapters[i], chapters[i+1]];
         let shouldMerge = false;
         //ci is not continuity of ch
-        if (ch.chapter && ci.chapter && (ch.chapter + 1 != ci.chapter)) {
+        if (ch.chapNo != null && ci.chapNo != null && (ch.chapNo + 1 != ci.chapNo)) {
           // console.log('phien ngoai', [ch._.title, ci._.title]);
           if (phienNgoai(ch) != phienNgoai(ci) || ch.half != ci.half) {
             i++;
@@ -1484,8 +1526,8 @@
             //find continuity of ch
             for (let j = i + 1; j <= i + 3 && j < chapters.length; j++) {
               cj = chapters[j];
-              // console.log(ch.chapter, cj.chapter);
-              if (cj.chapter && (ch.chapter + 1 == cj.chapter)) {
+              // console.log(ch.chapNo, cj.chapNo);
+              if (cj.chapNo != null && (ch.chapNo + 1 == cj.chapNo)) {
                 shouldMerge = true;
                 break;
               }
@@ -1493,7 +1535,7 @@
           }
         }
         if (shouldMerge) {
-          console.debug('cleanupChapters', ch.chapter, '<-', ci.chapter, cj?.chapter);
+          console.debug('cleanupChapters', ch.chapNo, '<-', ci.chapNo, cj?.chapNo);
           mergeBehind(chapters, i, 'cleanup');
         } else {
           i++;
@@ -1507,7 +1549,8 @@
         let [ch, ci, cj] = [chapters[h], chapters[i], chapters[j]];
         if (ci.length < minLength) {
           let fields = [];
-          if (ci.chapter) fields.push('chapter');
+          if (ci.bookNo) fields.push('bookNo');
+          if (ci.chapter != null) fields.push('chapter');
           if (ci.half) fields.push('half');
           if (fields.every(f => ch[f] == ci[f]))
             mergeBehind(chapters, i, 'short and dupe of prev');

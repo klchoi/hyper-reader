@@ -228,44 +228,44 @@
       padding: calc(var(--gap) * 0.75);
       font-size: 0.875rem;
       line-height: 1.2;
-    }
-    nav ol {
-      list-style: none;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5em;
-      align-items: start;
-    }
-    nav li {
-      /**/
-      max-width: 100%;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      /**/
-      padding-top: 0.1ex;
-      padding-bottom: 0.1ex;
-      padding-left: calc(var(--gap) * 0.25);
-      padding-right: calc(var(--gap) * 0.25);
-    }
-    nav li.active {
-      background: var(--body-font-color);
-      outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
-      border-radius: 0.5ex;
-      color: var(--body-background-color);
-    }
-    nav li.active a {
-      pointer-events: none;
-      color: inherit;
-    }
-    nav a {
-      color: var(--body-font-color);
-    }
-    nav a:hover {
-      color: var(--link-color);
-    }
-    nav li:first-child a {
-      font-weight: bold;
+      ol {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5em;
+        align-items: start;
+        li {
+          /**/
+          max-width: 100%;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          /**/
+          padding-top: 0.1ex;
+          padding-bottom: 0.1ex;
+          padding-left: calc(var(--gap) * 0.25);
+          padding-right: calc(var(--gap) * 0.25);
+          &.active {
+            background: var(--body-font-color);
+            outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
+            border-radius: 0.5ex;
+            color: var(--body-background-color);
+            a {
+              pointer-events: none;
+              color: inherit;
+            }
+          }
+          a {
+            color: var(--body-font-color);
+            &:hover {
+              color: var(--link-color);
+            }
+          }
+          &:first-child a {
+            font-weight: bold;
+          }
+        }
+      }
     }
 
     /** aside **/
@@ -320,37 +320,38 @@
     aside a.close {
       position: relative;
       box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
-    }
-    aside a.close::before,
-    aside a.close::after {
-      content: '';
-      display: block;
-      width: 50%;
-      height: 1px;
-      transform: translate3d(-50%, -50%, 0) rotateZ(var(--rotate, 45deg));
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      background: currentColor;
-    }
-    aside a.close::after {
-      --rotate: -45deg;
+      &::before,
+      &::after {
+        content: '';
+        display: block;
+        width: 50%;
+        height: 1px;
+        transform: translate3d(-50%, -50%, 0) rotateZ(var(--rotate, 45deg));
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        background: currentColor;
+      }
+      &::after {
+        --rotate: -45deg;
+      }
     }
     aside button.refresh {
       box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
-    }
-    aside button.refresh::after {
-      content: '↻';
-      font-size: 1rem;
-      position: relative;
-      top: -1px;
+      &::after {
+        content: '↻';
+        font-size: 1rem;
+        position: relative;
+        top: -1px;
+      }
     }
     aside .paper-size button {
       border-radius: 0.75ex;
       outline-width: 0;
+      &.selected {
+        font-weight: bold;
+      }
     }
-    aside .paper-size .selected {
-      font-weight: bold;
     }
 
     /** main **/
@@ -364,20 +365,20 @@
       padding: 1rem 3rem;
       outline: 1px solid var(--paper-outline-color, transparent);
       box-shadow: 0px 6px 12px 3px var(--paper-shadow-color, transparent);
-    }
-    main article {
-      flex: 1;
-      text-indent: 3ch;
-      max-width: var(--paper-width, 90ex);
-      margin: 0 auto;
-    }
-    main article p:first-child {
-      line-height: 1.2;
-      font-size: 1.5rem;
-      font-weight: bold;
-    }
-    main article hr {
-      background: var(--horizontal-line-color);
+      article {
+        flex: 1;
+        text-indent: 3ch;
+        max-width: var(--paper-width, 90ex);
+        margin: 0 auto;
+        p:first-child {
+          line-height: 1.2;
+          font-size: 1.5rem;
+          font-weight: bold;
+        }
+        hr {
+          background: var(--horizontal-line-color);
+        }
+      }
     }
 
     /** table **/

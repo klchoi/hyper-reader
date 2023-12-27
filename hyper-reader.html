@@ -352,6 +352,12 @@
         font-weight: bold;
       }
     }
+    aside button.zen {
+      border-radius: 0.75ex;
+      outline-width: 0;
+      &::after {
+        content: 'ℤ';
+      }
     }
 
     /** main **/
@@ -444,6 +450,15 @@
       overflow-y: auto;
     }
     /**/
+
+    /** zen mode **/
+    [data-zen=true] nav {
+      opacity: 0;
+      transition: opacity .15s ease-in-out;
+      &:hover {
+        opacity: 1;
+      }
+    }
 
     .text-left { text-align: left; }
     .text-right { text-align: right; }
@@ -1129,7 +1144,12 @@
                   class: 'refresh',
                   onclick: [RefreshBook, { bookId: book.id, chapterId: chapter.id }],
                   title: 'Refresh book',
-                })
+                }),
+                h('button', {
+                  class: 'zen',
+                  onclick: [SaveSettings, { zen: !settings.zen }],
+                  title: 'Toggle Zen Mode',
+                }),
               ])
             )
           ])

@@ -460,6 +460,72 @@
       }
     }
 
+    /** command palette **/
+    #command-palette[open] {
+      --width: calc(var(--paper-width) - 80px);
+      width: var(--width);
+      max-height: 70%;
+      position: fixed;
+      top: 10%;
+      left: calc((100% - var(--width)) / 2);
+      border-radius: 1.5ex;
+      overflow: hidden;
+      box-shadow: 0 10px 20px rgba(0,0,0,.2);
+      border: 1px solid var(--horizontal-line-color);
+      background: var(--body-background-color);
+      display: flex;
+      flex-direction: column;
+      padding: 0.7ex;
+
+      form {
+        display: contents;
+
+        input {
+          background: var(--paper-background-color);
+          font-size: inherit;
+          padding: 1ex 1.3ex;
+          border: 1px solid var(--paper-outline-color);
+          border-radius: 0.8ex;
+          color: var(--body-font-color);
+        }
+      }
+
+      ul {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        position: relative;
+        margin-top: 0.7ex;
+        gap: 1px;
+
+        li {
+          a {
+            display: block;
+            padding: 0.5ex 1.3ex;
+            border-radius: 0.8ex;
+            color: var(--body-font-color);
+            text-decoration: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          &:hover,
+          &.selected {
+            a {
+              background: var(--paper-background-color);
+            }
+          }
+
+          ::highlight(match) {
+            background: yellow;
+          }
+        }
+      }
+    }
+
     .text-left { text-align: left; }
     .text-right { text-align: right; }
     .text-center { text-align: center; }
@@ -577,19 +643,148 @@
       }
     ];
 
-    let InitKeyboardNavigator = (state) => [
-      state,
-      (dispatch) => {
-        addEventListener('keydown', (event) => {
-          switch(event.key) {
-            case 'ArrowRight': dispatch(OpenNextChapter, +1); break;
-            case 'ArrowLeft': dispatch(OpenNextChapter, -1); break;
-            case 'Backspace': dispatch(ShowRecentBooks); break;
-            default: break;
-          }
-        });
+    let InitKeyboardNavigator = (dispatch) => {
+      let onKeyDown = (event) => {
+        let formElements = ['INPUT', 'TEXTAREA', 'SELECT', 'OPTION'];
+        if(formElements.includes(event.target.tagName)) return;
+
+        switch(event.key) {
+          case 'ArrowRight': dispatch(OpenNextChapter, +1); break;
+          case 'ArrowLeft': dispatch(OpenNextChapter, -1); break;
+          case 'Backspace': dispatch(ShowRecentBooks); break;
+          default: break;
+        }
+      };
+      addEventListener('keydown', onKeyDown);
+      return () => removeEventListener('keydown', onKeyDown);
+    };
+
+    let InitCommandPalette = async (dispatch) => {
+      onKey('Cmd+K', ToggleCommandPalette)(dispatch);
+      onKey('Escape', [ToggleCommandPalette, { open: false }])(dispatch);
+
+      await nextTick();
+      let dialog = document.querySelector('#command-palette');
+      onKey('ArrowUp', SelectPrevCommand, { target: dialog })(dispatch);
+      onKey('ArrowDown', SelectNextCommand, { target: dialog })(dispatch);
+    };
+
+    let ToggleCommandPalette = (state, options) => [
+      {
+        ...state,
+        commandPalette: {
+          ...state.commandPalette,
+          open: options?.open != null ? !!options.open : !state.commandPalette.open,
+        }
+      },
+      async () => {
+        await nextTick();
+        document.querySelector('#command-palette input').focus();
       }
     ];
+
+    let SelectCommand = (state, index) => [
+      {
+        ...state,
+        commandPalette: {
+          ...state.commandPalette,
+          selectedIndex: index,
+        }
+      },
+      async () => {
+        await nextTick();
+
+        //scroll selected command into view
+        let ul = document.querySelector('#command-palette ul');
+        if (!ul) return;
+        let li = ul.querySelector('li.selected');
+        if (li.offsetTop < ul.scrollTop) {
+          ul.scroll({ behavior: 'instant', top: li.offsetTop });
+        } else if (ul.scrollTop + ul.clientHeight < li.offsetTop + li.clientHeight) {
+          ul.scroll({ behavior: 'instant', top: li.offsetTop + li.clientHeight - ul.clientHeight });
+        }
+      }
+    ];
+
+    let SelectNextCommand = (state) => [SelectCommand, state.commandPalette.selectedIndex + 1];
+    let SelectPrevCommand = (state) => [SelectCommand, state.commandPalette.selectedIndex - 1];
+
+    let SetCommandQuery = (state, q) => ({
+      ...state,
+      commandPalette: {
+        ...state.commandPalette,
+        q: q.trim().toLowerCase(),
+      },
+    });
+
+    let ExecuteSelectedCommand = state => state;
+    let HighlightMatches = (state) => [
+      state,
+      async () => {
+        await nextTick();
+
+        let ranges = [];
+        let q = state.commandPalette.q;
+        document.querySelectorAll('#command-palette a').forEach(el => {
+          let text = el.firstChild;
+          let match = latinize(text.textContent).toLowerCase();
+          if(match.includes(q)) {
+            let start = match.indexOf(q);
+            let end = start + q.length;
+            let range = new Range();
+            range.setStart(text, start);
+            range.setEnd(text, end);
+            ranges.push(range);
+          }
+        });
+        let hl = new Highlight(...ranges);
+        CSS.highlights.set('match', hl);
+      }
+    ];
+
+    let MultipleActions = (state, actions) => [
+      state,
+      async (dispatch) => {
+        for(let action of actions) {
+          await nextTick();
+          dispatch(...[].concat(action));
+        }
+      }
+    ];
+
+    let nextTick = async () => {
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    };
+
+    let onKey = (key, action, options) => (dispatch) => {
+      let el = options?.target || window;
+      let onKeyDown = (event) => {
+        let opts = key.toLowerCase().split('+').reduce((opts, k) => {
+          switch(k) {
+            case 'ctrl':
+            case 'shift':
+            case 'alt':
+              opts[k + 'Key'] = true;
+              break;
+            case 'cmd':
+            case 'win':
+            case 'super':
+              opts.metaKey = true;
+              break;
+            default:
+              opts.key = k;
+          }
+          return opts;
+        }, {});
+        if(event.key.toLowerCase() == opts.key.toLowerCase() && ['metaKey', 'ctrlKey', 'shiftKey', 'altKey'].every(f => Boolean(event[f]) == Boolean(opts[f]))) {
+          event.preventDefault();
+          dispatch(action);
+        }
+      };
+      el.addEventListener('keydown', onKeyDown);
+      return () => el.removeEventListener('keydown', onKeyDown);
+    };
 
     let LoadSettings = (state) => [
       state,
@@ -909,12 +1104,13 @@
       if (!state.book) return state;
       return [
         { ...state, book: null, chapter: null },
-        () => {
+        (dispatch) => {
           state.router.push({});
           document.title = 'Text Reader';
           requestAnimationFrame(() => {
             scroll(0, 0);
           });
+          dispatch(ToggleCommandPalette, { open: false });
         }
       ];
     };
@@ -952,13 +1148,17 @@
               direction: 'desc'
             }
           },
+          commandPalette: {
+            open: false,
+            q: '',
+            selectedIndex: 0,
+          }
         },
         (dispatch) => {
           dispatch(InitRouter);
           dispatch(InitTheme);
           dispatch(InitDb);
           dispatch(InitDropzone);
-          dispatch(InitKeyboardNavigator);
         }
       ],
       dispatch: (dispatch) => {
@@ -974,8 +1174,12 @@
           dispatch(action, payload);
         };
       },
+      subscriptions: (state) => [
+        [InitKeyboardNavigator],
+        [InitCommandPalette],
+      ],
       node: document.body,
-      view: ({ router, files, book, chapter, progress, settings }) => (
+      view: ({ router, files, book, chapter, progress, settings, commandPalette, result }) => (
         h('body', {}, [
           h('nav', {}, [
             (book?.chapters?.length > 0) && (
@@ -1104,8 +1308,15 @@
                 ...chapter.content.split(/\n|<\/?\w+>/gi).map(line => {
                   if (/^[-]+$/.test(line)) return h('hr', {});
                   if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { class: 'text-center indent-none' }, text(line));
+                  let content = [], m;
+                  while ((m = /https?:\/\/\S+/.exec(line))) {
+                    if (m.index > 0) content.push(text(line.slice(0, m.index)));
+                    content.push(h('a', { href: m[0], target: '_blank' }, [text(m[0])]));
+                    line = line.slice(m.index + m[0].length);
+                  }
+                  if (line) content.push(text(line));
                   // if (/^"/.test(line)) return h('p', {}, h('em', {}, text(line)));
-                  return h('p', {}, text(line));
+                  return h('p', {}, content);
                 })
               ])
             ])
@@ -1152,6 +1363,49 @@
                 }),
               ])
             )
+          ]),
+          h('dialog', { id: 'command-palette', open: commandPalette.open }, [
+            (result = book?.chapters.filter(c => latinize(c.title).toLowerCase().includes(commandPalette.q)) ?? []) && false,
+            h('form', {
+              onsubmit: (_, event) => {
+                event.preventDefault();
+                return [MultipleActions, [
+                  [OpenBook, { bookId: book.id, chapterId: result[commandPalette.selectedIndex]?.id }],
+                  [ToggleCommandPalette, { open: false }],
+                ]];
+              }
+            }, [
+              h('input', {
+                oninput: (_, event) => [MultipleActions, [
+                  [SetCommandQuery, event.target.value],
+                  [SelectCommand, 0],
+                  [HighlightMatches],
+                ]],
+              }),
+              h('input', { type: 'submit', hidden: true }),
+            ]),
+            result.length > 0 && h('ul', {}, [
+              ...result.map((c, index) => (
+                h('li', {
+                  class: { selected: (commandPalette.selectedIndex % result.length + result.length) % result.length == index }
+                },
+                  h('a', {
+                    href: router.route({ book: book.id, chapter: c.id }),
+                    onclick: (_, event) => {
+                      event.preventDefault();
+                      return [MultipleActions, [
+                        [SelectCommand, index],
+                        [OpenBook, { bookId: book.id, chapterId: c.id }],
+                        [ToggleCommandPalette, { open: false }],
+                      ]]
+                    },
+                    title: c.title,
+                  },[
+                    text(c.title),
+                  ])
+                )
+              ))
+            ])
           ])
         ])
       )

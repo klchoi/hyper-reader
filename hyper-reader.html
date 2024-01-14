@@ -118,8 +118,7 @@
       --paper-padding: calc(var(--gap) * 3);
       cursor: default;
     }
-    .settings .colors button.white,
-    :root[data-color=white] {
+    .settings .colors button.white {
       --body-font-color: rgb(27, 27, 27);
       --body-background-color: rgb(230, 230, 230);
       --paper-background-color: rgb(255, 255, 255);
@@ -127,8 +126,27 @@
       --link-color: rgb(65, 110, 210);
       --horizontal-line-color: rgb(220, 220, 220);
     }
-    .settings .colors button.sepia,
-    :root[data-color=sepia] {
+    :root[data-color\:light=white] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: rgb(27, 27, 27);
+        --body-background-color: rgb(230, 230, 230);
+        --paper-background-color: rgb(255, 255, 255);
+        /*--paper-shadow-color: rgba(0, 0, 0, .2); */
+        --link-color: rgb(65, 110, 210);
+        --horizontal-line-color: rgb(220, 220, 220);
+      }
+    }
+    :root[data-color\:dark=white] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: rgb(27, 27, 27);
+        --body-background-color: rgb(230, 230, 230);
+        --paper-background-color: rgb(255, 255, 255);
+        /*--paper-shadow-color: rgba(0, 0, 0, .2); */
+        --link-color: rgb(65, 110, 210);
+        --horizontal-line-color: rgb(220, 220, 220);
+      }
+    }
+    .settings .colors button.sepia {
       --body-font-color: rgb(79, 50, 28);
       --body-background-color: rgb(225, 216, 200);
       --paper-background-color: rgb(248, 241, 227);
@@ -136,8 +154,27 @@
       --link-color: rgb(209, 150, 0);
       --horizontal-line-color: rgb(230, 218, 201);
     }
-    .settings .colors button.gray,
-    :root[data-color=gray] {
+    :root[data-color\:light=sepia] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: rgb(79, 50, 28);
+        --body-background-color: rgb(225, 216, 200);
+        --paper-background-color: rgb(248, 241, 227);
+        /*--paper-shadow-color: rgba(0, 0, 0, .2); */
+        --link-color: rgb(209, 150, 0);
+        --horizontal-line-color: rgb(230, 218, 201);
+      }
+    }
+    :root[data-color\:dark=sepia] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: rgb(79, 50, 28);
+        --body-background-color: rgb(225, 216, 200);
+        --paper-background-color: rgb(248, 241, 227);
+        /*--paper-shadow-color: rgba(0, 0, 0, .2); */
+        --link-color: rgb(209, 150, 0);
+        --horizontal-line-color: rgb(230, 218, 201);
+      }
+    }
+    .settings .colors button.gray {
       --body-font-color: rgba(255, 255, 255, 0.78);
       --body-background-color: rgb(50, 50, 51);
       --paper-background-color: rgb(74, 74, 77);
@@ -146,8 +183,29 @@
       --horizontal-line-color: rgb(111, 111, 111);
       --body-font-smoothing: antialiased;
     }
-    .settings .colors button.night,
-    :root[data-color=night] {
+    :root[data-color\:light=gray] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: rgba(255, 255, 255, 0.78);
+        --body-background-color: rgb(50, 50, 51);
+        --paper-background-color: rgb(74, 74, 77);
+        /*--paper-shadow-color: rgba(0, 0, 0, .24); */
+        --link-color: rgb(90, 200, 250);
+        --horizontal-line-color: rgb(111, 111, 111);
+        --body-font-smoothing: antialiased;
+      }
+    }
+    :root[data-color\:dark=gray] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: rgba(255, 255, 255, 0.78);
+        --body-background-color: rgb(50, 50, 51);
+        --paper-background-color: rgb(74, 74, 77);
+        /*--paper-shadow-color: rgba(0, 0, 0, .24); */
+        --link-color: rgb(90, 200, 250);
+        --horizontal-line-color: rgb(111, 111, 111);
+        --body-font-smoothing: antialiased;
+      }
+    }
+    .settings .colors button.night {
       --body-font-color: rgb(176, 176, 176);
       --body-background-color: rgb(0, 0, 0);
       --paper-background-color: rgb(18, 18, 18);
@@ -156,8 +214,29 @@
       --horizontal-line-color: rgb(62, 62, 62);
       --body-font-smoothing: antialiased;
     }
-    .settings .colors button.rose-pine,
-    :root[data-color=rose-pine] {
+    :root[data-color\:light=night] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: rgb(176, 176, 176);
+        --body-background-color: rgb(0, 0, 0);
+        --paper-background-color: rgb(18, 18, 18);
+        --paper-outline-color: #272727;
+        --link-color: rgb(90, 200, 250);
+        --horizontal-line-color: rgb(62, 62, 62);
+        --body-font-smoothing: antialiased;
+      }
+    }
+    :root[data-color\:dark=night] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: rgb(176, 176, 176);
+        --body-background-color: rgb(0, 0, 0);
+        --paper-background-color: rgb(18, 18, 18);
+        --paper-outline-color: #272727;
+        --link-color: rgb(90, 200, 250);
+        --horizontal-line-color: rgb(62, 62, 62);
+        --body-font-smoothing: antialiased;
+      }
+    }
+    .settings .colors button.rose-pine {
       --body-font-color: var(--rp-main-subtle);
       --body-background-color: var(--rp-main-surface);
       --paper-background-color: var(--rp-main-base);
@@ -167,8 +246,31 @@
       --selection-bg: var(--rp-main-highlight-med);
       --body-font-smoothing: antialiased;
     }
-    .settings .colors button.rose-pine-moon,
-    :root[data-color=rose-pine-moon] {
+    :root[data-color\:light=rose-pine] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: var(--rp-main-subtle);
+        --body-background-color: var(--rp-main-surface);
+        --paper-background-color: var(--rp-main-base);
+        --paper-outline-color: var(--rp-main-highlight-med-alpha);
+        --link-color: var(--rp-main-pine);
+        --horizontal-line-color: var(--rp-main-highlight-high-alpha);
+        --selection-bg: var(--rp-main-highlight-med);
+        --body-font-smoothing: antialiased;
+      }
+    }
+    :root[data-color\:dark=rose-pine] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: var(--rp-main-subtle);
+        --body-background-color: var(--rp-main-surface);
+        --paper-background-color: var(--rp-main-base);
+        --paper-outline-color: var(--rp-main-highlight-med-alpha);
+        --link-color: var(--rp-main-pine);
+        --horizontal-line-color: var(--rp-main-highlight-high-alpha);
+        --selection-bg: var(--rp-main-highlight-med);
+        --body-font-smoothing: antialiased;
+      }
+    }
+    .settings .colors button.rose-pine-moon {
       --body-font-color: var(--rp-moon-subtle);
       --body-background-color: var(--rp-moon-surface);
       --paper-background-color: var(--rp-moon-base);
@@ -178,8 +280,31 @@
       --selection-bg: var(--rp-moon-highlight-med);
       --body-font-smoothing: antialiased;
     }
-    .settings .colors button.rose-pine-dawn,
-    :root[data-color=rose-pine-dawn] {
+    :root[data-color\:light=rose-pine-moon] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: var(--rp-moon-subtle);
+        --body-background-color: var(--rp-moon-surface);
+        --paper-background-color: var(--rp-moon-base);
+        --paper-outline-color: var(--rp-moon-highlight-med-alpha);
+        --link-color: var(--rp-moon-rose);
+        --horizontal-line-color: var(--rp-moon-highlight-high-alpha);
+        --selection-bg: var(--rp-moon-highlight-med);
+        --body-font-smoothing: antialiased;
+      }
+    }
+    :root[data-color\:dark=rose-pine-moon] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: var(--rp-moon-subtle);
+        --body-background-color: var(--rp-moon-surface);
+        --paper-background-color: var(--rp-moon-base);
+        --paper-outline-color: var(--rp-moon-highlight-med-alpha);
+        --link-color: var(--rp-moon-rose);
+        --horizontal-line-color: var(--rp-moon-highlight-high-alpha);
+        --selection-bg: var(--rp-moon-highlight-med);
+        --body-font-smoothing: antialiased;
+      }
+    }
+    .settings .colors button.rose-pine-dawn {
       --body-font-color: var(--rp-dawn-text);
       --body-background-color: var(--rp-dawn-base);
       --paper-background-color: var(--rp-dawn-overlay);
@@ -187,6 +312,28 @@
       --link-color: var(--rp-dawn-love);
       --horizontal-line-color: var(--rp-dawn-highlight-high);
       --selection-bg: var(--rp-dawn-highlight-med);
+    }
+    :root[data-color\:light=rose-pine-dawn] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: var(--rp-dawn-text);
+        --body-background-color: var(--rp-dawn-base);
+        --paper-background-color: var(--rp-dawn-overlay);
+        --paper-outline-color: var(--rp-dawn-highlight-med);
+        --link-color: var(--rp-dawn-love);
+        --horizontal-line-color: var(--rp-dawn-highlight-high);
+        --selection-bg: var(--rp-dawn-highlight-med);
+      }
+    }
+    :root[data-color\:dark=rose-pine-dawn] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: var(--rp-dawn-text);
+        --body-background-color: var(--rp-dawn-base);
+        --paper-background-color: var(--rp-dawn-overlay);
+        --paper-outline-color: var(--rp-dawn-highlight-med);
+        --link-color: var(--rp-dawn-love);
+        --horizontal-line-color: var(--rp-dawn-highlight-high);
+        --selection-bg: var(--rp-dawn-highlight-med);
+      }
     }
 
     :root,
@@ -313,9 +460,21 @@
       background: var(--horizontal-line-color);
       opacity: 0.5;
     }
-    aside .colors button.checked::before {
-      content: '✔';
-      font-size: .7rem;
+    aside .colors button {
+      &::before {
+        content: var(--checkmark);
+        font-size: .7em;
+      }
+      @media (prefers-color-scheme:light) {
+        &.checked\:light {
+          --checkmark: '✔';
+        }
+      }
+      @media (prefers-color-scheme:dark) {
+        &.checked\:dark {
+          --checkmark: '✔';
+        }
+      }
     }
     aside a.close {
       position: relative;
@@ -622,9 +781,8 @@
     let InitTheme = (state) => [
       state,
       (dispatch) => {
-        let color = 'white';
-        if (matchMedia('(prefers-color-scheme: dark)').matches) color = 'night';
-        dispatch(ApplySettings, { color });
+        let colors = { 'color:dark': 'night', 'color:light': 'white' };
+        dispatch(ApplySettings, colors);
       }
     ];
 
@@ -1337,8 +1495,8 @@
             ),
             h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn'].map(color => (
               h('button', {
-                class: [color, { checked: settings.color == color }],
-                onclick: [SaveSettings, { color: color }],
+                class: [color, { 'checked:light': settings['color:light'] == color, 'checked:dark': settings['color:dark'] == color }],
+                onclick: () => [SaveSettings, { [`color:${getColorScheme()}`]: color }],
                 title: `Theme: ${color}`,
               })
             ))),
@@ -2133,6 +2291,11 @@
       } else {
         console.info(...args);
       }
+    }
+
+    function getColorScheme() {
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+      return 'light';
     }
   </script>
 </body>

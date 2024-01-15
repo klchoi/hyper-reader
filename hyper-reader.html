@@ -1067,6 +1067,7 @@
 
         dispatch(OpenBookDone, { book, chapter });
         dispatch(SaveProgress, { book, chapter });
+        dispatch(ToggleCommandPalette, { open: false });
       }
     ];
 
@@ -1337,236 +1338,259 @@
         [InitCommandPalette],
       ],
       node: document.body,
-      view: ({ router, files, book, chapter, progress, settings, commandPalette, result }) => (
-        h('body', {}, [
-          h('nav', {}, [
-            (book?.chapters?.length > 0) && (
-              h('ol', { start: 0 }, [
-                ...book.chapters.map(c => (
-                  h('li', { class: { active: c.id == chapter.id } }, [
-                    h('a', {
-                      href: router.route({ book: book.id, chapter: c.id }),
-                      onclick: (_, event) => {
-                        event.preventDefault();
-                        return [OpenBook, { bookId: book.id, chapterId: c.id }];
-                      },
-                      title: c.title,
-                    }, [
-                      text(c.title)
+      view: ({ router, files, book, chapter, progress, settings, commandPalette }) => {
+        let commands = [], selectedCommand;
+        if(!book) {
+          commands = files.map(f => Book(f))
+            .filter(book => latinize(book.name).toLowerCase().includes(commandPalette.q))
+            .map((book, index) => {
+              let { chapterId } = (progress[book.id] || {});
+              return {
+                label: book.name,
+                action: OpenBook,
+                payload: { bookId: book.id, chapterId },
+              }
+            });
+        } else {
+          commands = book.chapters
+            .filter(chapter => latinize(chapter.title).toLowerCase().includes(commandPalette.q))
+            .map(chapter => ({
+              label: chapter.title,
+              action: OpenBook,
+              payload: { bookId: book.id, chapterId: chapter.id },
+            }));
+        }
+        selectedCommand = commands[(commandPalette.selectedIndex + commands.length) % commands.length];
+        return (
+          h('body', {}, [
+            h('nav', {}, [
+              (book?.chapters?.length > 0) && (
+                h('ol', { start: 0 }, [
+                  ...book.chapters.map(c => (
+                    h('li', { class: { active: c.id == chapter.id } }, [
+                      h('a', {
+                        href: router.route({ book: book.id, chapter: c.id }),
+                        onclick: (_, event) => {
+                          event.preventDefault();
+                          return [OpenBook, { bookId: book.id, chapterId: c.id }];
+                        },
+                        title: c.title,
+                      }, [
+                        text(c.title)
+                      ])
                     ])
-                  ])
-                ))
-              ])
-            )
-          ]),
-          !book && (
-            h('div', { class: 'table' }, [
-              h('a', {
-                class: 'th text-left',
-                'data-sort': settings.sort.field == 'name' && settings.sort.direction,
-                href: '#',
-                onclick: (_, event) => {
-                  event.preventDefault();
-                  let field = 'name', direction = 'asc';
-                  if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
-                  return [SaveSettings, { sort: { field, direction } }];
-                }
-              }, h('span', {}, text('File'))),
-              h('a', {
-                class: 'th text-right',
-                'data-sort': settings.sort.field == 'size' && settings.sort.direction,
-                href: '#',
-                onclick: (_, event) => {
-                  event.preventDefault();
-                  let field = 'size', direction = 'asc';
-                  if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
-                  return [SaveSettings, { sort: { field, direction } }];
-                }
-              }, h('span', {}, text('Size'))),
-              h('a', {
-                class: 'th text-right',
-                'data-sort': settings.sort.field == 'chapterCount' && settings.sort.direction,
-                href: '#',
-                onclick: (_, event) => {
-                  event.preventDefault();
-                  let field = 'chapterCount', direction = 'asc';
-                  if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
-                  return [SaveSettings, { sort: { field, direction } }];
-                }
-              }, h('span', {}, text('Chapters'))),
-              h('a', {
-                class: 'th text-right',
-                'data-sort': settings.sort.field == 'updatedAt' && settings.sort.direction,
-                href: '#',
-                onclick: (_, event) => {
-                  event.preventDefault();
-                  let field = 'updatedAt', direction = 'desc';
-                  if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
-                  return [SaveSettings, { sort: { field, direction } }];
-                }
-              }, h('span', {}, text('Date'))),
-              h('span', { class: 'th' }, h('span', {})),
-              ...files.sort((a, z) => {
-                let { field, direction } = settings.sort;
-                let A = Book(a), Z = Book(z);
-                let result;
-                if (field == 'name') {
-                  result = A.name.localeCompare(Z.name, 'vi-VN', { sensitivity: 'accent' });
-                } else if (field == 'size') {
-                  result = a[field] - z[field];
-                } else if (field == 'updatedAt') {
-                  a = new Date(progress[A.id]?.[field] || 0);
-                  z = new Date(progress[Z.id]?.[field] || 0);
-                  result = a - z;
-                } else if (field == 'chapterCount') {
-                  result = (progress[A.id]?.[field] || 1) - (progress[Z.id]?.[field] || 1);
-                }
-                if ((direction == 'desc') && (result != 0)) result = -result;
-                return result;
-              }).flatMap(file => {
-                let book = Book(file);
-                let { chapterId, chapterIndex, chapterCount, updatedAt } = (progress[book.id] || {});
-                return [
-                  h('div', { class: 'td' }, [
-                    h('a', {
-                      class: 'name',
-                      href: router.route({ book: book.id, chapter: chapterId }),
-                      onclick: (_, event) => {
-                        event.preventDefault();
-                        return [OpenBook, { bookId: book.id, chapterId }];
-                      }
-                    }, [
-                      text(book.name)
-                    ]),
-                    book.description && (
-                      h('small', { class: 'desc' }, text(book.description))
-                    )
-                  ]),
-                  h('div', { class: 'td text-right' }, [
-                    h('small', {}, text(formatSize(file.size)))
-                  ]),
-                  h('div', { class: 'td text-right' }, [
-                    h('small', {}, text(!chapterCount ? '-' : `${chapterIndex}/${chapterCount}`))
-                  ]),
-                  h('div', { class: 'td text-right' }, [
-                    h('small', {}, text(formatDate(updatedAt) || '-'))
-                  ]),
-                  h('div', { class: 'td' }, [
-                    h('a', { class: 'delete', onclick: [DeleteBook, { bookId: book.id }] }, [
-                      h('small', {}, text('delete'))
-                    ])
-                  ])
-                ]
-              })
-            ])
-          ),
-          chapter && (
-            h('main', {}, [
-              h('article', {}, [
-                ...chapter.content.split(/\n|<\/?\w+>/gi).map(line => {
-                  if (/^[-]+$/.test(line)) return h('hr', {});
-                  if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { class: 'text-center indent-none' }, text(line));
-                  let content = [], m;
-                  while ((m = /https?:\/\/\S+/.exec(line))) {
-                    if (m.index > 0) content.push(text(line.slice(0, m.index)));
-                    content.push(h('a', { href: m[0], target: '_blank' }, [text(m[0])]));
-                    line = line.slice(m.index + m[0].length);
-                  }
-                  if (line) content.push(text(line));
-                  // if (/^"/.test(line)) return h('p', {}, h('em', {}, text(line)));
-                  return h('p', {}, content);
-                })
-              ])
-            ])
-          ),
-          h('aside', { class: 'settings' }, [
-            chapter && (
-              h('div', {}, [
+                  ))
+                ])
+              )
+            ]),
+            !book && (
+              h('div', { class: 'table' }, [
                 h('a', {
-                  class: 'close',
-                  href: router.route({}),
+                  class: 'th text-left',
+                  'data-sort': settings.sort.field == 'name' && settings.sort.direction,
+                  href: '#',
                   onclick: (_, event) => {
                     event.preventDefault();
-                    return [ShowRecentBooks];
-                  },
-                  title: 'Back to bookshelf',
+                    let field = 'name', direction = 'asc';
+                    if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
+                    return [SaveSettings, { sort: { field, direction } }];
+                  }
+                }, h('span', {}, text('File'))),
+                h('a', {
+                  class: 'th text-right',
+                  'data-sort': settings.sort.field == 'size' && settings.sort.direction,
+                  href: '#',
+                  onclick: (_, event) => {
+                    event.preventDefault();
+                    let field = 'size', direction = 'asc';
+                    if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
+                    return [SaveSettings, { sort: { field, direction } }];
+                  }
+                }, h('span', {}, text('Size'))),
+                h('a', {
+                  class: 'th text-right',
+                  'data-sort': settings.sort.field == 'chapterCount' && settings.sort.direction,
+                  href: '#',
+                  onclick: (_, event) => {
+                    event.preventDefault();
+                    let field = 'chapterCount', direction = 'asc';
+                    if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
+                    return [SaveSettings, { sort: { field, direction } }];
+                  }
+                }, h('span', {}, text('Chapters'))),
+                h('a', {
+                  class: 'th text-right',
+                  'data-sort': settings.sort.field == 'updatedAt' && settings.sort.direction,
+                  href: '#',
+                  onclick: (_, event) => {
+                    event.preventDefault();
+                    let field = 'updatedAt', direction = 'desc';
+                    if ((settings.sort.field == field) && (settings.sort.direction == direction)) direction = ['asc', 'desc'].find(d => d != direction);
+                    return [SaveSettings, { sort: { field, direction } }];
+                  }
+                }, h('span', {}, text('Date'))),
+                h('span', { class: 'th' }, h('span', {})),
+                ...files.sort((a, z) => {
+                  let { field, direction } = settings.sort;
+                  let A = Book(a), Z = Book(z);
+                  let result;
+                  if (field == 'name') {
+                    result = A.name.localeCompare(Z.name, 'vi-VN', { sensitivity: 'accent' });
+                  } else if (field == 'size') {
+                    result = a[field] - z[field];
+                  } else if (field == 'updatedAt') {
+                    a = new Date(progress[A.id]?.[field] || 0);
+                    z = new Date(progress[Z.id]?.[field] || 0);
+                    result = a - z;
+                  } else if (field == 'chapterCount') {
+                    result = (progress[A.id]?.[field] || 1) - (progress[Z.id]?.[field] || 1);
+                  }
+                  if ((direction == 'desc') && (result != 0)) result = -result;
+                  return result;
+                }).flatMap(file => {
+                  let book = Book(file);
+                  let { chapterId, chapterIndex, chapterCount, updatedAt } = (progress[book.id] || {});
+                  return [
+                    h('div', { class: 'td' }, [
+                      h('a', {
+                        class: 'name',
+                        href: router.route({ book: book.id, chapter: chapterId }),
+                        onclick: (_, event) => {
+                          event.preventDefault();
+                          return [OpenBook, { bookId: book.id, chapterId }];
+                        }
+                      }, [
+                        text(book.name)
+                      ]),
+                      book.description && (
+                        h('small', { class: 'desc' }, text(book.description))
+                      )
+                    ]),
+                    h('div', { class: 'td text-right' }, [
+                      h('small', {}, text(formatSize(file.size)))
+                    ]),
+                    h('div', { class: 'td text-right' }, [
+                      h('small', {}, text(!chapterCount ? '-' : `${chapterIndex}/${chapterCount}`))
+                    ]),
+                    h('div', { class: 'td text-right' }, [
+                      h('small', {}, text(formatDate(updatedAt) || '-'))
+                    ]),
+                    h('div', { class: 'td' }, [
+                      h('a', { class: 'delete', onclick: [DeleteBook, { bookId: book.id }] }, [
+                        h('small', {}, text('delete'))
+                      ])
+                    ])
+                  ]
                 })
               ])
             ),
-            h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn'].map(color => (
-              h('button', {
-                class: [color, { 'checked:light': settings['color:light'] == color, 'checked:dark': settings['color:dark'] == color }],
-                onclick: () => [SaveSettings, { [`color:${getColorScheme()}`]: color }],
-                title: `Theme: ${color}`,
-              })
-            ))),
-            h('div', { class: 'paper-size' }, ['sm', 'md', 'lg', 'xl'].map(size => (
-              h('button', {
-                class: ['size', size, { selected: settings.paperSize == size }],
-                onclick: [SaveSettings, { paperSize: size }],
-                title: `Page size: ${size}`,
-              }, text(size))
-            ))),
             chapter && (
-              h('div', {}, [
-                h('button', {
-                  class: 'refresh',
-                  onclick: [RefreshBook, { bookId: book.id, chapterId: chapter.id }],
-                  title: 'Refresh book',
-                }),
-                h('button', {
-                  class: 'zen',
-                  onclick: [SaveSettings, { zen: !settings.zen }],
-                  title: 'Toggle Zen Mode',
-                }),
+              h('main', {}, [
+                h('article', {}, [
+                  ...chapter.content.split(/\n|<\/?\w+>/gi).map(line => {
+                    if (/^[-]+$/.test(line)) return h('hr', {});
+                    if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { class: 'text-center indent-none' }, text(line));
+                    let content = [], m;
+                    while ((m = /https?:\/\/\S+/.exec(line))) {
+                      if (m.index > 0) content.push(text(line.slice(0, m.index)));
+                      content.push(h('a', { href: m[0], target: '_blank' }, [text(m[0])]));
+                      line = line.slice(m.index + m[0].length);
+                    }
+                    if (line) content.push(text(line));
+                    // if (/^"/.test(line)) return h('p', {}, h('em', {}, text(line)));
+                    return h('p', {}, content);
+                  })
+                ])
               ])
-            )
-          ]),
-          h('dialog', { id: 'command-palette', open: commandPalette.open }, [
-            (result = book?.chapters.filter(c => latinize(c.title).toLowerCase().includes(commandPalette.q)) ?? []) && false,
-            h('form', {
-              onsubmit: (_, event) => {
-                event.preventDefault();
-                return [MultipleActions, [
-                  [OpenBook, { bookId: book.id, chapterId: result[commandPalette.selectedIndex]?.id }],
-                  [ToggleCommandPalette, { open: false }],
-                ]];
-              }
-            }, [
-              h('input', {
-                oninput: (_, event) => [MultipleActions, [
-                  [SetCommandQuery, event.target.value],
-                  [SelectCommand, 0],
-                  [HighlightMatches],
-                ]],
-              }),
-              h('input', { type: 'submit', hidden: true }),
-            ]),
-            result.length > 0 && h('ul', {}, [
-              ...result.map((c, index) => (
-                h('li', {
-                  class: { selected: (commandPalette.selectedIndex % result.length + result.length) % result.length == index }
-                },
+            ),
+            h('aside', { class: 'settings' }, [
+              chapter && (
+                h('div', {}, [
                   h('a', {
-                    href: router.route({ book: book.id, chapter: c.id }),
+                    class: 'close',
+                    href: router.route({}),
                     onclick: (_, event) => {
                       event.preventDefault();
-                      return [MultipleActions, [
-                        [SelectCommand, index],
-                        [OpenBook, { bookId: book.id, chapterId: c.id }],
-                        [ToggleCommandPalette, { open: false }],
-                      ]]
+                      return [ShowRecentBooks];
                     },
-                    title: c.title,
-                  },[
-                    text(c.title),
-                  ])
-                )
-              ))
+                    title: 'Back to bookshelf',
+                  })
+                ])
+              ),
+              h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn'].map(color => (
+                h('button', {
+                  class: [color, { 'checked:light': settings['color:light'] == color, 'checked:dark': settings['color:dark'] == color }],
+                  onclick: () => [SaveSettings, { [`color:${getColorScheme()}`]: color }],
+                  title: `Theme: ${color}`,
+                })
+              ))),
+              h('div', { class: 'paper-size' }, ['sm', 'md', 'lg', 'xl'].map(size => (
+                h('button', {
+                  class: ['size', size, { selected: settings.paperSize == size }],
+                  onclick: [SaveSettings, { paperSize: size }],
+                  title: `Page size: ${size}`,
+                }, text(size))
+              ))),
+              chapter && (
+                h('div', {}, [
+                  h('button', {
+                    class: 'refresh',
+                    onclick: [RefreshBook, { bookId: book.id, chapterId: chapter.id }],
+                    title: 'Refresh book',
+                  }),
+                  h('button', {
+                    class: 'zen',
+                    onclick: [SaveSettings, { zen: !settings.zen }],
+                    title: 'Toggle Zen Mode',
+                  }),
+                ])
+              )
+            ]),
+            h('dialog', { id: 'command-palette', open: commandPalette.open }, [
+              h('form', {
+                onsubmit: (_, event) => {
+                  event.preventDefault();
+                  return [MultipleActions, [
+                    [selectedCommand.action, selectedCommand.payload],
+                    [ToggleCommandPalette, { open: false }],
+                  ]];
+                }
+              }, [
+                h('input', {
+                  oninput: (_, event) => [MultipleActions, [
+                    [SetCommandQuery, event.target.value],
+                    [SelectCommand, 0],
+                    [HighlightMatches],
+                  ]],
+                }),
+                h('input', { type: 'submit', hidden: true }),
+              ]),
+              commands.length > 0 && h('ul', {}, [
+                ...commands.map((command, index) => (
+                  h('li', {
+                    class: { selected: command == selectedCommand }
+                  },
+                    h('a', {
+                      href: router.route({ book: command.payload.bookId, chapter: command.payload.chapterId }),
+                      onclick: (_, event) => {
+                        event.preventDefault();
+                        return [MultipleActions, [
+                          [SelectCommand, index],
+                          [command.action, command.payload],
+                          [ToggleCommandPalette, { open: false }],
+                        ]]
+                      },
+                      title: command.label,
+                    },[
+                      text(command.label),
+                    ])
+                  )
+                ))
+              ])
             ])
           ])
-        ])
-      )
+        );
+      }
     });
 
     function Book(file, fileContent, chapters) {

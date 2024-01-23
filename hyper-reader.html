@@ -543,6 +543,10 @@
         hr {
           background: var(--horizontal-line-color);
         }
+
+        ::highlight(name) {
+          color: var(--link-color);
+        }
       }
     }
 
@@ -1065,11 +1069,44 @@
         if (chapterIndex < 0) chapterIndex = 0;
         chapters[chapterIndex] = chapter;
 
+        dispatch(HighlightNames);
         dispatch(OpenBookDone, { book, chapter });
         dispatch(SaveProgress, { book, chapter });
         dispatch(ToggleCommandPalette, { open: false });
       }
     ];
+
+    let HighlightNames = (state) => [state, async () => {
+      await nextTick();
+
+      let ranges = [];
+      document.querySelectorAll('article p').forEach(el => {
+        el.childNodes.forEach(el => {
+          if (el.nodeType != Node.TEXT_NODE) return;
+
+          let nameRegex = buildRegex([
+            '{Word}(\\s{Word})+',
+            '{wb}a {Word}(?!{Word})',
+            '(?<!{Word}){wb}{Word} (thúc|di|ca|tổng){wb}',
+          ], {
+            'wb': '^|$|(?<=[^\\p{L}])|(?=[^\\p{L}])',
+            'Upper': '\\p{Lu}',
+            'Lower': '\\p{Ll}',
+            'Word': '{wb}{Upper}{Lower}*{wb}',
+          }, 'gu');
+
+          let match;
+          while((match = nameRegex.exec(el.textContent))) {
+            let range = new Range();
+            range.setStart(el, match.index);
+            range.setEnd(el, match.index + match[0].length);
+            ranges.push(range);
+          }
+        });
+      });
+      let hl = new Highlight(...ranges);
+      CSS.highlights.set('name', hl);
+    }];
 
     let OpenNextChapter = (state, indexDelta = 1) => [
       state,
@@ -2320,6 +2357,17 @@
     function getColorScheme() {
       if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
       return 'light';
+    }
+
+    function buildRegex(patterns, placeholders, flags) {
+      patterns = patterns.map((p, i) => `(?<Case${i+1}>${p})`).join('|');
+      let counts = Object.fromEntries(Object.keys(placeholders).map(k => [k, 0]));
+      for(let i = 1; i <= 10; i++) {
+        for(let placeholder in placeholders) {
+          patterns = patterns.replaceAll(`{${placeholder}}`, () => `(?<${placeholder}${++counts[placeholder]}>${placeholders[placeholder]})`);
+        }
+      }
+      return new RegExp(patterns, flags);
     }
   </script>
 </body>

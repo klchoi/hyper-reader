@@ -1071,8 +1071,11 @@
 
         dispatch(HighlightNames);
         dispatch(OpenBookDone, { book, chapter });
-        dispatch(SaveProgress, { book, chapter });
         dispatch(ToggleCommandPalette, { open: false });
+        clearTimeout(window.saveProgressTimer);
+        window.saveProgressTimer = setTimeout(() => {
+          dispatch(SaveProgress, { book, chapter });
+        }, 10000);
       }
     ];
 
@@ -1301,6 +1304,7 @@
       return [
         { ...state, book: null, chapter: null },
         (dispatch) => {
+          clearTimeout(window.saveProgressTimer);
           state.router.push({});
           document.title = 'Text Reader';
           requestAnimationFrame(() => {

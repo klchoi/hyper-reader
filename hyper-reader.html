@@ -831,19 +831,24 @@
       onKey('ArrowDown', SelectNextCommand, { target: dialog })(dispatch);
     };
 
-    let ToggleCommandPalette = (state, options) => [
-      {
-        ...state,
-        commandPalette: {
-          ...state.commandPalette,
-          open: options?.open != null ? !!options.open : !state.commandPalette.open,
+    let ToggleCommandPalette = (state, options) => {
+      let open = options?.open != null ? !!options.open : !state.commandPalette.open;
+      return [
+        {
+          ...state,
+          commandPalette: {
+            ...state.commandPalette,
+            open,
+          }
+        },
+        async () => {
+          if(open) {
+            await nextTick();
+            document.querySelector('#command-palette input').select();
+          }
         }
-      },
-      async () => {
-        await nextTick();
-        document.querySelector('#command-palette input').focus();
-      }
-    ];
+      ];
+    };
 
     let SelectCommand = (state, index) => [
       {

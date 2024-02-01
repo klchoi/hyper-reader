@@ -700,6 +700,7 @@
   <script type="module">
     import { h, text, app } from 'https://cdn.jsdelivr.net/npm/hyperapp/+esm';
     import { openDB } from 'https://cdn.jsdelivr.net/npm/idb/+esm';
+    import { generateColor as stc } from 'https://cdn.jsdelivr.net/npm/@marko19907/string-to-color/+esm'
 
     class HashRouter extends EventTarget {
       parse(hash) {
@@ -1087,33 +1088,47 @@
     let HighlightNames = (state) => [state, async () => {
       await nextTick();
 
-      let ranges = [];
+      CSS.highlights.clear();
+
+      let ranges = {};
       document.querySelectorAll('article p').forEach(el => {
         el.childNodes.forEach(el => {
           if (el.nodeType != Node.TEXT_NODE) return;
 
           let nameRegex = buildRegex([
-            '{Word}(\\s{Word})+',
-            '{wb}a {Word}(?!{Word})',
-            '(?<!{Word}){wb}{Word} (thúc|di|ca|tổng){wb}',
+            /{Word}(\s{Word})+/,
+            /{wb}a {Word}(?!{Word})/,
+            /(?<!{Word}){wb}{Word} (thúc|di|ca|tổng){wb}/,
+            /(tiểu) {Word}(?!{wb}{Word})/,
           ], {
-            'wb': '^|$|(?<=[^\\p{L}])|(?=[^\\p{L}])',
-            'Upper': '\\p{Lu}',
-            'Lower': '\\p{Ll}',
-            'Word': '{wb}{Upper}{Lower}*{wb}',
+            'wb': /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/,
+            'Upper': /\p{Lu}/,
+            'Lower': /\p{Ll}/,
+            'Word': /{wb}{Upper}{Lower}*{wb}/,
           }, 'gu');
 
-          let match;
-          while((match = nameRegex.exec(el.textContent))) {
+          for(let match of el.textContent.matchAll(nameRegex)) {
             let range = new Range();
             range.setStart(el, match.index);
             range.setEnd(el, match.index + match[0].length);
-            ranges.push(range);
+            let text = slug(match[0]);
+            if(!ranges[text]) ranges[text] = [];
+            ranges[text].push(range);
           }
         });
       });
-      let hl = new Highlight(...ranges);
-      CSS.highlights.set('name', hl);
+
+      for(let text in ranges) {
+        let color = stc(text);
+        CSS.highlights.set(text, new Highlight(...ranges[text]));
+        let styleEl = document.head.querySelector(`style[name="hl-${text}"]`);
+        if(!styleEl) {
+          styleEl = document.createElement('style');
+          styleEl.setAttribute('name', `hl-${text}`);
+          styleEl.textContent = `article ::highlight(${text}) { color: ${color}; }`;
+          document.head.appendChild(styleEl);
+        }
+      }
     }];
 
     let OpenNextChapter = (state, indexDelta = 1) => [
@@ -2369,11 +2384,11 @@
     }
 
     function buildRegex(patterns, placeholders, flags) {
-      patterns = patterns.map((p, i) => `(?<Case${i+1}>${p})`).join('|');
+      patterns = patterns.map((p, i) => `(?<Case${i+1}>${p.source || p})`).join('|');
       let counts = Object.fromEntries(Object.keys(placeholders).map(k => [k, 0]));
       for(let i = 1; i <= 10; i++) {
-        for(let placeholder in placeholders) {
-          patterns = patterns.replaceAll(`{${placeholder}}`, () => `(?<${placeholder}${++counts[placeholder]}>${placeholders[placeholder]})`);
+        for(let [p, r] of Object.entries(placeholders)) {
+          patterns = patterns.replaceAll(`{${p}}`, () => `(?<${p}${++counts[p]}>${r.source || r})`);
         }
       }
       return new RegExp(patterns, flags);

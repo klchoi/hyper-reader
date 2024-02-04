@@ -365,6 +365,20 @@
       color: var(--link-color);
     }
 
+    @property --scroll-progress {
+      syntax: '<percentage>';
+      initial-value: 100%;
+      inherits: false;
+    }
+    @keyframes scrollProgress {
+      0% {
+        --scroll-progress: 0%;
+      }
+      100% {
+        --scroll-progress: 100%;
+      }
+    }
+
     /** nav **/
     nav {
       height: 100vh;
@@ -494,6 +508,11 @@
       &::after {
         --rotate: -45deg;
       }
+
+      outline: 0;
+      background: radial-gradient(closest-side, var(--paper-background-color) 79%, transparent 80% 100%), conic-gradient(var(--link-color) var(--scroll-progress, 0%), var(--horizontal-line-color) 0);
+      animation: scrollProgress auto linear;
+      animation-timeline: scroll();
     }
     aside button.refresh {
       box-shadow: 0 3px 6px rgba(0, 0, 0, .2);

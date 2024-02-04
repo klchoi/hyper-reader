@@ -1196,16 +1196,27 @@
         //refresh recent books in state
         dispatch(LoadRecentBooks);
 
-        //open if stored only one book
-        if (files.length == 1) {
-          let { file } = files[0];
-          let book = Book(file);
+        let filesOpenInNewTab = files;
+        let fileOpenInCurrentTab = null;
+        if(state.book) {
+          //if this book is already open, open other files in new tabs
+          fileOpenInCurrentTab = files.find(file => (Book(file).id == state.book.id));
+          filesOpenInNewTab = files.filter(file => (file != fileOpenInCurrentTab));
+        } else {
+          //if no book is open, open the first file in current tab, other files in new tabs
+          [fileOpenInCurrentTab, ...filesOpenInNewTab] = files;
+        }
+
+        if(fileOpenInCurrentTab) {
+          let book = Book(fileOpenInCurrentTab);
           let chapterId = (await state.db.get('progress', book.id))?.chapterId;
           state.router.push({ book: book.id, chapterId });
           dispatch(OpenBook, { bookId: book.id, chapterId });
-        } else {
-          state.router.push({});
-          dispatch(ShowRecentBooks);
+        }
+        for(let { file } of filesOpenInNewTab) {
+          let book = Book(file);
+          let chapterId = (await state.db.get('progress', book.id))?.chapterId;
+          window.open(`#book=${book.id}&chapter=${chapterId}`, '_blank');
         }
       }
     ];

@@ -861,10 +861,11 @@
             open,
           }
         },
-        async () => {
+        async (dispatch) => {
           if(open) {
             await nextTick();
             document.querySelector('#command-palette input').select();
+            dispatch(HighlightMatches);
           }
         }
       ];

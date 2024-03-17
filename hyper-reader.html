@@ -537,6 +537,13 @@
         content: 'ℤ';
       }
     }
+    aside button.names-editor {
+      border-radius: 0.75ex;
+      outline-width: 0;
+      &::after {
+        content: 'ℕ';
+      }
+    }
 
     /** main **/
     main {
@@ -708,6 +715,60 @@
       }
     }
 
+    /** names editor **/
+    #names-editor[open] {
+      --width: calc(var(--paper-width) - 80px);
+      width: var(--width);
+      height: 80%;
+      position: fixed;
+      top: 10%;
+      left: calc((100% - var(--width)) / 2);
+      border-radius: 1.5ex;
+      overflow: hidden;
+      box-shadow: 0 10px 20px rgba(0,0,0,.2);
+      border: 1px solid var(--horizontal-line-color);
+      background: var(--body-background-color);
+      display: flex;
+      flex-direction: column;
+      gap: 0.7ex;
+      padding: 0.7ex;
+
+      form {
+        display: contents;
+
+        textarea {
+          background: var(--paper-background-color);
+          font-size: inherit;
+          padding: 1ex 1.3ex;
+          border: 1px solid var(--paper-outline-color);
+          border-radius: 0.8ex;
+          color: var(--body-font-color);
+          flex: 1;
+        }
+
+        button {
+          appearance: none;
+          background: transparent;
+          /**
+          &:hover,
+          &:focus,
+          &:active {
+            background: var(--paper-background-color);
+          }
+          /**/
+          color: var(--body-font-color);
+          width: 100%;
+          min-width: 25px;
+          display: grid;
+          place-content: center;
+          border-radius: 0.8ex;
+          cursor: pointer;
+          font-size: inherit;
+          line-height: 1.8;
+        }
+      }
+    }
+
     .text-left { text-align: left; }
     .text-right { text-align: right; }
     .text-center { text-align: center; }
@@ -771,8 +832,9 @@
     let InitDb = (state) => [
       state,
       async (dispatch) => {
-        let db = await openDB('text-reader', 22, {
-          upgrade(db, oldVersion, newVersion, transaction) {
+        let db = await openDB('text-reader', 23, {
+          upgrade(db, oldVersion, newVersion, transaction, events) {
+            console.log('upgrade db', { oldVersion, newVersion, transaction, events });
             let schemas = {
               files: {},
               fileContents: {},
@@ -780,6 +842,7 @@
               progress: {},
               books: {},
               chapters: {},
+              names: {},
             };
             for (let [store, keyOptions] of Object.entries(schemas)) {
               if (!db.objectStoreNames.contains(store)) {
@@ -1095,7 +1158,7 @@
         if (chapterIndex < 0) chapterIndex = 0;
         chapters[chapterIndex] = chapter;
 
-        dispatch(HighlightNames);
+        dispatch(LoadNames, { bookId: book.id });
         dispatch(OpenBookDone, { book, chapter });
         dispatch(ToggleCommandPalette, { open: false });
         clearTimeout(window.saveProgressTimer);
@@ -1105,6 +1168,33 @@
       }
     ];
 
+    let ToggleNamesEditor = (state, { open }) => ({ ...state, namesEditor: { ...state.namesEditor, open } });
+    let SetNames = (state, names) => ({ ...state, namesEditor: { ...state.namesEditor, names } });
+    let SaveNames = (state, { bookId, names }) => [state, async (dispatch) => {
+      await state.db.put('names', names, bookId);
+    }];
+    let LoadNames = (state, { bookId }) => [state, async (dispatch) => {
+      let names = await state.db.get('names', bookId);
+      dispatch(SetNames, names);
+      dispatch(CorrectNames);
+      dispatch(HighlightNames);
+    }];
+    let CorrectNames = (state) => {
+      let names = state.namesEditor.names;
+      if (names) {
+        names = names.split('\n');
+        let content = state.chapter.content;
+        for (let name of names) {
+          name = name.trim();
+          if (!name) continue;
+          let nameRegex = new RegExp(`(?<=^|[^\\p{L}])${name}(?=[^\\p{L}]|$)`, 'gui');
+          let correctedName = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
+          content = content.replaceAll(nameRegex, correctedName);
+        }
+        return { ...state, chapter: { ...state.chapter, content } };
+      }
+      return state;
+    };
     let HighlightNames = (state) => [state, async () => {
       await nextTick();
 
@@ -1403,7 +1493,11 @@
             open: false,
             q: '',
             selectedIndex: 0,
-          }
+          },
+          namesEditor: {
+            open: false,
+            names: '',
+          },
         },
         (dispatch) => {
           dispatch(InitRouter);
@@ -1414,12 +1508,12 @@
       ],
       dispatch: (dispatch) => {
         return (action, payload) => {
-          if (typeof action == 'function') {
+          if (!action) return;
+
+          if (typeof action == 'function' && action.name.match(/^[A-Z]/)) {
             let log = [action.name];
             if (payload !== undefined) log.push(payload);
             console.warn(...log);
-          } else if (Array.isArray(action)) {
-            //console.dir(action[0]);
           }
 
           dispatch(action, payload);
@@ -1430,7 +1524,7 @@
         [InitCommandPalette],
       ],
       node: document.body,
-      view: ({ router, files, book, chapter, progress, settings, commandPalette }) => {
+      view: ({ router, files, book, chapter, progress, settings, commandPalette, namesEditor }) => {
         let commands = [], selectedCommand;
         if(!book) {
           commands = files.map(f => Book(f))
@@ -1635,6 +1729,11 @@
                     onclick: [SaveSettings, { zen: !settings.zen }],
                     title: 'Toggle Zen Mode',
                   }),
+                  h('button', {
+                    class: 'names-editor',
+                    onclick: [ToggleNamesEditor, { open: true }],
+                    title: 'Edit names',
+                  }),
                 ])
               )
             ]),
@@ -1678,6 +1777,37 @@
                     ])
                   )
                 ))
+              ])
+            ]),
+            h('dialog', { id: 'names-editor', open: namesEditor.open }, [
+              h('form', {
+                onsubmit: (_, event) => {
+                  event.preventDefault();
+                  return [MultipleActions, [
+                    [ToggleNamesEditor, { open: false }],
+                    [SaveNames, { bookId: book.id, names: namesEditor.names }],
+                    [CorrectNames],
+                    [HighlightNames],
+                  ]];
+                }
+              }, [
+                h('textarea', {
+                  value: namesEditor.names,
+                  oninput: (_, event) => [SetNames, event.target.value],
+                  onkeydown: (_, event) => {
+                    if (event.key == 'Escape') {
+                      return [ToggleNamesEditor, { open: false }];
+                    } else if (event.key == 'Enter' && event.metaKey) {
+                      return [MultipleActions, [
+                        [ToggleNamesEditor, { open: false }],
+                        [SaveNames, { bookId: book.id, names: namesEditor.names }],
+                        [CorrectNames],
+                        [HighlightNames],
+                      ]];
+                    }
+                  },
+                }),
+                h('button', { type: 'submit' }, [text('Save')]),
               ])
             ])
           ])

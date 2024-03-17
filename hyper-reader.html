@@ -1571,27 +1571,37 @@
       node: document.body,
       view: ({ router, files, book, chapter, progress, settings, commandPalette, namesEditor }) => {
         let fixNames = text => correctNames(text, namesEditor.names);
-        let commands = [], selectedCommand;
+        let cachedCommands = window.cachedCommands = (window.cachedCommands || new Map());
+        let commands = [], selectedCommand, commandKey;
         if(!book) {
-          commands = files.map(f => Book(f))
-            .filter(book => latinize(book.name).toLowerCase().includes(commandPalette.q))
-            .map((book, index) => {
-              let { chapterId } = (progress[book.id] || {});
-              return {
-                label: book.name,
-                action: OpenBook,
-                payload: { bookId: book.id, chapterId },
-              }
-            });
+          commandKey = '';
+          if(!cachedCommands.has(commandKey)) {
+            cachedCommands.set(commandKey, files.map(f => Book(f))
+              .map((book, index) => {
+                let { chapterId } = (progress[book.id] || {});
+                return {
+                  label: book.name,
+                  action: OpenBook,
+                  payload: { bookId: book.id, chapterId },
+                  term: latinize(book.name).toLowerCase(),
+                };
+              })
+            );
+          }
         } else {
-          commands = book.chapters
-            .filter(chapter => latinize(fixNames(chapter.title)).toLowerCase().includes(commandPalette.q))
-            .map(chapter => ({
-              label: fixNames(chapter.title),
-              action: OpenBook,
-              payload: { bookId: book.id, chapterId: chapter.id },
-            }));
+          commandKey = book.id;
+          if(!cachedCommands.has(commandKey)) {
+            cachedCommands.set(commandKey, book.chapters
+              .map(chapter => ({
+                label: fixNames(chapter.title),
+                action: OpenBook,
+                payload: { bookId: book.id, chapterId: chapter.id },
+                term: latinize(chapter.title).toLowerCase(),
+              }))
+            );
+          }
         }
+        commands = cachedCommands.get(commandKey).filter(cmd => cmd.term.includes(commandPalette.q));
         selectedCommand = commands[(commandPalette.selectedIndex + commands.length) % commands.length];
         return (
           h('body', {}, [

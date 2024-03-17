@@ -1195,7 +1195,8 @@
 
       CSS.highlights.clear();
 
-      let ranges = {};
+      // collect names
+      let names = new Set();
       document.querySelectorAll('article p').forEach(el => {
         el.childNodes.forEach(el => {
           if (el.nodeType != Node.TEXT_NODE) return;
@@ -1203,22 +1204,41 @@
           let nameRegex = buildRegex([
             /{Word}(\s{Word})+/,
             /{wb}a {Word}(?!{Word})/,
-            /(?<!{Word}){wb}{Word} (thúc|di|ca|tổng){wb}/,
+            /(?<!{Word}){wb}{Word} (thúc|di|ca|tổng|lang|nô){wb}/,
             /(tiểu) {Word}(?!{wb}{Word})/,
           ], {
-            'wb': /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/,
+            'wb': /$|(?<=[^\p{L}])|(?=[^\p{L}])/,
             'Upper': /\p{Lu}/,
             'Lower': /\p{Ll}/,
             'Word': /{wb}{Upper}{Lower}*{wb}/,
           }, 'gu');
 
           for(let match of el.textContent.matchAll(nameRegex)) {
+            let name = match[0];
+            names.add(name);
+          }
+        });
+      });
+
+      // create ranges;
+      let ranges = {};
+      document.querySelectorAll('article p').forEach(el => {
+        el.childNodes.forEach(el => {
+          if (el.nodeType != Node.TEXT_NODE) return;
+
+          let nameRegex = buildRegex([
+            '{wb}(' + [...names].join('|') + '){wb}',
+          ], {
+            'wb': /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/,
+          }, 'gu');
+
+          for(let match of el.textContent.matchAll(nameRegex)) {
             let range = new Range();
             range.setStart(el, match.index);
             range.setEnd(el, match.index + match[0].length);
-            let text = slug(match[0]);
-            if(!ranges[text]) ranges[text] = [];
-            ranges[text].push(range);
+            let nameId = slug(match[0]);
+            if(!ranges[nameId]) ranges[nameId] = [];
+            ranges[nameId].push(range);
           }
         });
       });

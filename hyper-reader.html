@@ -1184,9 +1184,17 @@
       for(let name of names) {
         name = name.trim();
         if (!name) continue;
-        let nameRegex = new RegExp(`(?<=^|[^\\p{L}])${name}(?=[^\\p{L}]|$)`, 'gui');
-        let correctedName = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
-        content = content.replaceAll(nameRegex, correctedName);
+        let from, to;
+        if(name.includes('->')) {
+          [from, to] = name.split('->').map(n => n.trim());
+        } else if(name.includes('→')) {
+          [from, to] = name.split('→').map(n => n.trim());
+        } else {
+          from = name;
+          to = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
+        }
+        let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${from}(?=[^\\p{L}]|$)`, 'gui');
+        content = content.replaceAll(fromRegex, to);
       }
       return content;
     };

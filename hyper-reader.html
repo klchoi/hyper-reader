@@ -1221,7 +1221,7 @@
             /(?<!{Word}){wb}{Word} (thúc|di|ca|tổng|lang|nô){wb}/,
             /(tiểu) {Word}(?!{wb}{Word})/,
           ], {
-            'wb': /$|(?<=[^\p{L}])|(?=[^\p{L}])/,
+            'wb': /$|(?<=[^\p{L}"])|(?=[^\p{L}])/,
             'Upper': /\p{Lu}/,
             'Lower': /\p{Ll}/,
             'Word': /{wb}{Upper}{Lower}*{wb}/,

@@ -781,6 +781,7 @@
     import { h, text, app } from 'https://cdn.jsdelivr.net/npm/hyperapp/+esm';
     import { openDB } from 'https://cdn.jsdelivr.net/npm/idb/+esm';
     import { generateColor as stc } from 'https://cdn.jsdelivr.net/npm/@marko19907/string-to-color/+esm'
+    import _ from 'https://cdn.jsdelivr.net/npm/lodash-es/+esm'
 
     class HashRouter extends EventTarget {
       parse(hash) {
@@ -1178,7 +1179,7 @@
       dispatch(SetNames, names);
       dispatch(HighlightNames);
     }];
-    let correctNames = (content, names) => {
+    let correctNames = _.memoize((content, names) => {
       if(!names) return content;
       names = names.split('\n');
       // add short name automatically
@@ -1199,11 +1200,13 @@
           from = name;
           to = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
         }
-        let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${from}(?=[^\\p{L}]|$)`, 'gui');
-        content = content.replaceAll(fromRegex, to);
+        if(from) {
+          let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${from}(?=[^\\p{L}]|$)`, 'gui');
+          content = content.replaceAll(fromRegex, to);
+        }
       }
       return content;
-    };
+    });
     let HighlightNames = (state) => [state, async () => {
       await nextTick();
 
@@ -1536,6 +1539,9 @@
           namesEditor: {
             open: false,
             names: '',
+            form: {
+              names: '',
+            },
           },
         },
         (dispatch) => {
@@ -1564,6 +1570,7 @@
       ],
       node: document.body,
       view: ({ router, files, book, chapter, progress, settings, commandPalette, namesEditor }) => {
+        let fixNames = text => correctNames(text, namesEditor.names);
         let commands = [], selectedCommand;
         if(!book) {
           commands = files.map(f => Book(f))
@@ -1578,9 +1585,9 @@
             });
         } else {
           commands = book.chapters
-            .filter(chapter => latinize(chapter.title).toLowerCase().includes(commandPalette.q))
+            .filter(chapter => latinize(fixNames(chapter.title)).toLowerCase().includes(commandPalette.q))
             .map(chapter => ({
-              label: chapter.title,
+              label: fixNames(chapter.title),
               action: OpenBook,
               payload: { bookId: book.id, chapterId: chapter.id },
             }));
@@ -1599,9 +1606,9 @@
                           event.preventDefault();
                           return [OpenBook, { bookId: book.id, chapterId: c.id }];
                         },
-                        title: correctNames(c.title, namesEditor.names),
+                        title: fixNames(c.title),
                       }, [
-                        text(correctNames(c.title, namesEditor.names))
+                        text(fixNames(c.title))
                       ])
                     ])
                   ))
@@ -1712,7 +1719,7 @@
             chapter && (
               h('main', {}, [
                 h('article', {}, [
-                  ...correctNames(chapter.content, namesEditor.names).split(/\n|<\/?\w+>/gi).map(line => {
+                  ...fixNames(chapter.content).split(/\n|<\/?\w+>/gi).map(line => {
                     if (/^[-]+$/.test(line)) return h('hr', {});
                     if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { class: 'text-center indent-none' }, text(line));
                     let content = [], m;
@@ -1825,7 +1832,6 @@
                   return [MultipleActions, [
                     [ToggleNamesEditor, { open: false }],
                     [SaveNames, { bookId: book.id, names: namesEditor.names }],
-                    [CorrectNames],
                     [HighlightNames],
                   ]];
                 }
@@ -1840,7 +1846,6 @@
                       return [MultipleActions, [
                         [ToggleNamesEditor, { open: false }],
                         [SaveNames, { bookId: book.id, names: namesEditor.names }],
-                        [CorrectNames],
                         [HighlightNames],
                       ]];
                     }

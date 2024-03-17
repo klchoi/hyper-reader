@@ -1206,7 +1206,7 @@
         }
       }
       return content;
-    });
+    }, (content, names) => content + names);
     let HighlightNames = (state) => [state, async () => {
       await nextTick();
 

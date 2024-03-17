@@ -1176,24 +1176,19 @@
     let LoadNames = (state, { bookId }) => [state, async (dispatch) => {
       let names = await state.db.get('names', bookId);
       dispatch(SetNames, names);
-      dispatch(CorrectNames);
       dispatch(HighlightNames);
     }];
-    let CorrectNames = (state) => {
-      let names = state.namesEditor.names;
-      if (names) {
-        names = names.split('\n');
-        let content = state.chapter.content;
-        for (let name of names) {
-          name = name.trim();
-          if (!name) continue;
-          let nameRegex = new RegExp(`(?<=^|[^\\p{L}])${name}(?=[^\\p{L}]|$)`, 'gui');
-          let correctedName = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
-          content = content.replaceAll(nameRegex, correctedName);
-        }
-        return { ...state, chapter: { ...state.chapter, content } };
+    let correctNames = (content, names) => {
+      if(!names) return content;
+      names = names.split('\n');
+      for(let name of names) {
+        name = name.trim();
+        if (!name) continue;
+        let nameRegex = new RegExp(`(?<=^|[^\\p{L}])${name}(?=[^\\p{L}]|$)`, 'gui');
+        let correctedName = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
+        content = content.replaceAll(nameRegex, correctedName);
       }
-      return state;
+      return content;
     };
     let HighlightNames = (state) => [state, async () => {
       await nextTick();
@@ -1228,14 +1223,24 @@
         });
       });
 
-      for(let text in ranges) {
-        let color = stc(text);
-        CSS.highlights.set(text, new Highlight(...ranges[text]));
-        let styleEl = document.head.querySelector(`style[name="hl-${text}"]`);
+      // merge sub ranges
+      let nameIds = Object.keys(ranges).sort((a, z) => z.length - a.length);
+      for(let nameId in ranges) {
+        let fullNameId = nameIds.find(id => id.endsWith('-' + nameId));
+        if(fullNameId) {
+          ranges[fullNameId].push(...ranges[nameId]);
+          delete ranges[nameId];
+        }
+      }
+
+      for(let nameId in ranges) {
+        let color = stc(nameId);
+        CSS.highlights.set(nameId, new Highlight(...ranges[nameId]));
+        let styleEl = document.head.querySelector(`style[name="hl-${nameId}"]`);
         if(!styleEl) {
           styleEl = document.createElement('style');
-          styleEl.setAttribute('name', `hl-${text}`);
-          styleEl.textContent = `article ::highlight(${text}) { color: ${color}; }`;
+          styleEl.setAttribute('name', `hl-${nameId}`);
+          styleEl.textContent = `article ::highlight(${nameId}) { color: ${color}; }`;
           document.head.appendChild(styleEl);
         }
       }
@@ -1560,9 +1565,9 @@
                           event.preventDefault();
                           return [OpenBook, { bookId: book.id, chapterId: c.id }];
                         },
-                        title: c.title,
+                        title: correctNames(c.title, namesEditor.names),
                       }, [
-                        text(c.title)
+                        text(correctNames(c.title, namesEditor.names))
                       ])
                     ])
                   ))
@@ -1673,7 +1678,7 @@
             chapter && (
               h('main', {}, [
                 h('article', {}, [
-                  ...chapter.content.split(/\n|<\/?\w+>/gi).map(line => {
+                  ...correctNames(chapter.content, namesEditor.names).split(/\n|<\/?\w+>/gi).map(line => {
                     if (/^[-]+$/.test(line)) return h('hr', {});
                     if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { class: 'text-center indent-none' }, text(line));
                     let content = [], m;

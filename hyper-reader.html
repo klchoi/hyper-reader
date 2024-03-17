@@ -1181,6 +1181,12 @@
     let correctNames = (content, names) => {
       if(!names) return content;
       names = names.split('\n');
+      // add short name automatically
+      for(let name of names) {
+        if(name.includes('->') || name.includes('→')) continue;
+        name = name.split(/\s/);
+        if(name.length == 3) names.push(name[1] + ' ' + name[2]);
+      }
       for(let name of names) {
         name = name.trim();
         if (!name) continue;

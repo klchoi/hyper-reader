@@ -1184,18 +1184,16 @@
       names = names.split('\n');
       // add short name automatically
       for(let name of names) {
-        if(name.includes('->') || name.includes('→')) continue;
+        if(name.match(/->|→/)) continue;
         name = name.split(/\s/);
         if(name.length == 3 || name.length == 4) names.push(name.at(-2) + ' ' + name.at(-1));
       }
       for(let name of names) {
         name = name.trim();
         if (!name) continue;
-        let from, to;
-        if(name.includes('->')) {
-          [from, to] = name.split('->').map(n => n.trim());
-        } else if(name.includes('→')) {
-          [from, to] = name.split('→').map(n => n.trim());
+        let [from, to] = name.split(/->|→/).map(n => n?.trim());
+        if(to != undefined) {
+          to = to.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
         } else {
           from = name;
           to = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
@@ -1219,12 +1217,8 @@
         for(let name of names) {
           name = name.trim();
           if (!name) continue;
-          let from, to;
-          if(name.includes('->')) {
-            [from, to] = name.split('->').map(n => n.trim());
-          } else if(name.includes('→')) {
-            [from, to] = name.split('→').map(n => n.trim());
-          } else {
+          let [from, to] = name.split(/->|→/).map(n => n?.trim());
+          if(to == undefined) {
             from = name;
             to = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
           }
@@ -1241,17 +1235,17 @@
           if (el.nodeType != Node.TEXT_NODE) return;
 
           let nameRegex = buildRegex([
-            /{Word}(\s{Word})+/,
+            /{NameBegin}{Word}(\s{Word}){1,3}/,
             /{wb}a {Word}(?!{Word})/,
-            /(?<!{Word}){wb}{Word} (thúc|di|ca|tổng|lang|nô){wb}/,
-            /nhạc phụ|nhạc mẫu/,
+            /{NameBegin}{Word} (thúc|di|ca|tỷ|tổng|lang|nô|bá bá|bá phụ|bá mẫu|đại tỷ|đại ca){wb}/,
             /(tiểu) {Word}(?!{wb}{Word})/,
             knowNames.join('|'),
           ], {
-            'wb': /$|(?<![^\p{L}] )(?<=[^\p{L}"])|(?=[^\p{L}])/,
+            'wb': /$|(?<=[^\p{L}])|(?=[^\p{L}])/,
             'Upper': /\p{Lu}/,
             'Lower': /\p{Ll}/,
             'Word': /{wb}{Upper}{Lower}*{wb}/,
+            'NameBegin': /(?<!^|[.:"] |"|{Word} )/,
           }, 'gu');
 
           for(let match of el.textContent.matchAll(nameRegex)) {
@@ -2623,7 +2617,7 @@
     }
 
     function buildRegex(patterns, placeholders, flags) {
-      patterns = patterns.map((p, i) => `(?<Case${i+1}>${p.source || p})`).join('|');
+      patterns = patterns.filter(Boolean).map((p, i) => `(?<Case${i+1}>${p.source || p})`).join('|');
       let counts = Object.fromEntries(Object.keys(placeholders).map(k => [k, 0]));
       for(let i = 1; i <= 10; i++) {
         for(let [p, r] of Object.entries(placeholders)) {

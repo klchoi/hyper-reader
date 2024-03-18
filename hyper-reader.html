@@ -1186,7 +1186,7 @@
       for(let name of names) {
         if(name.includes('->') || name.includes('→')) continue;
         name = name.split(/\s/);
-        if(name.length == 3) names.push(name[1] + ' ' + name[2]);
+        if(name.length == 3 || name.length == 4) names.push(name.at(-2) + ' ' + name.at(-1));
       }
       for(let name of names) {
         name = name.trim();
@@ -1212,9 +1212,31 @@
 
       CSS.highlights.clear();
 
+      // names from editor
+      let knowNames = [];
+      if(state.namesEditor.names) {
+        let names = (state.namesEditor.names || '').split('\n');
+        for(let name of names) {
+          name = name.trim();
+          if (!name) continue;
+          let from, to;
+          if(name.includes('->')) {
+            [from, to] = name.split('->').map(n => n.trim());
+          } else if(name.includes('→')) {
+            [from, to] = name.split('→').map(n => n.trim());
+          } else {
+            from = name;
+            to = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
+          }
+          if(to) {
+            knowNames.push(to);
+          }
+        }
+      }
+
       // collect names
       let names = new Set();
-      document.querySelectorAll('article p').forEach(el => {
+      document.querySelectorAll('article p, nav a').forEach(el => {
         el.childNodes.forEach(el => {
           if (el.nodeType != Node.TEXT_NODE) return;
 
@@ -1222,9 +1244,11 @@
             /{Word}(\s{Word})+/,
             /{wb}a {Word}(?!{Word})/,
             /(?<!{Word}){wb}{Word} (thúc|di|ca|tổng|lang|nô){wb}/,
+            /nhạc phụ|nhạc mẫu/,
             /(tiểu) {Word}(?!{wb}{Word})/,
+            knowNames.join('|'),
           ], {
-            'wb': /$|(?<=[^\p{L}"])|(?=[^\p{L}])/,
+            'wb': /$|(?<![^\p{L}] )(?<=[^\p{L}"])|(?=[^\p{L}])/,
             'Upper': /\p{Lu}/,
             'Lower': /\p{Ll}/,
             'Word': /{wb}{Upper}{Lower}*{wb}/,
@@ -1239,7 +1263,7 @@
 
       // create ranges;
       let ranges = {};
-      document.querySelectorAll('article p').forEach(el => {
+      document.querySelectorAll('article p, nav a').forEach(el => {
         el.childNodes.forEach(el => {
           if (el.nodeType != Node.TEXT_NODE) return;
 
@@ -1277,7 +1301,7 @@
         if(!styleEl) {
           styleEl = document.createElement('style');
           styleEl.setAttribute('name', `hl-${nameId}`);
-          styleEl.textContent = `article ::highlight(${nameId}) { color: ${color}; }`;
+          styleEl.textContent = `::highlight(${nameId}) { color: ${color} !important; }`;
           document.head.appendChild(styleEl);
         }
       }

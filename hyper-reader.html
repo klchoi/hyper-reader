@@ -1214,6 +1214,12 @@
       let knowNames = [];
       if(state.namesEditor.names) {
         let names = (state.namesEditor.names || '').split('\n');
+        // add short name automatically
+        for(let name of names) {
+          if(name.match(/->|→/)) continue;
+          name = name.split(/\s/);
+          if(name.length == 3 || name.length == 4) names.push(name.at(-2) + ' ' + name.at(-1));
+        }
         for(let name of names) {
           name = name.trim();
           if (!name) continue;
@@ -1237,7 +1243,7 @@
           let nameRegex = buildRegex([
             /{NameBegin}{Word}(\s{Word}){1,3}/,
             /{wb}a {Word}(?!{Word})/,
-            /{NameBegin}{Word} (thúc|di|ca|tỷ|tổng|lang|nô|bá bá|bá phụ|bá mẫu|đại tỷ|đại ca){wb}/,
+            /{NameBegin}{Word} (thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá bá|bá phụ|bá mẫu|đại tỷ|đại ca){wb}/,
             /(tiểu) {Word}(?!{wb}{Word})/,
             knowNames.join('|'),
           ], {
@@ -1245,12 +1251,14 @@
             'Upper': /\p{Lu}/,
             'Lower': /\p{Ll}/,
             'Word': /{wb}{Upper}{Lower}*{wb}/,
-            'NameBegin': /(?<!^|[.:"] |"|{Word} )/,
+            'NameBegin': /(?<!^|[.:"'!?()[\]] ?|{Word} )/,
           }, 'gu');
 
           for(let match of el.textContent.matchAll(nameRegex)) {
             let name = match[0];
             names.add(name);
+            name = name.split(/\s/);
+            if(name.length == 3 || name.length == 4) names.add(name.at(-2) + ' ' + name.at(-1));
           }
         });
       });

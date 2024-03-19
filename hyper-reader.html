@@ -1592,10 +1592,13 @@
         let cachedCommands = window.cachedCommands = (window.cachedCommands || new Map());
         let commands = [], selectedCommand, commandKey;
         if(!book) {
-          commandKey = '';
-          if(!cachedCommands.has(commandKey)) {
-            cachedCommands.set(commandKey, files.map(f => Book(f))
-              .map((book, index) => {
+          commands = simpleCache({
+            key: 'commands/books',
+            fallbackValue: [],
+            getHash() { return files.length; },
+            getValue() {
+              return files.map((file, index) => {
+                let book = Book(file);
                 let { chapterId } = (progress[book.id] || {});
                 return {
                   label: book.name,
@@ -1603,23 +1606,28 @@
                   payload: { bookId: book.id, chapterId },
                   term: latinize(book.name).toLowerCase(),
                 };
-              })
-            );
-          }
+              });
+            },
+          });
         } else {
-          commandKey = book.id;
-          if(!cachedCommands.has(commandKey)) {
-            cachedCommands.set(commandKey, book.chapters
-              .map(chapter => ({
+          commands = simpleCache({
+            key: 'commands/books/' + book.id,
+            fallbackValue: [],
+            getHash() {
+              let file = files.find(f => Book(f).id == book.id);
+              return file.size;
+            },
+            getValue() {
+              return book.chapters.map(chapter => ({
                 label: fixNames(chapter.title),
                 action: OpenBook,
                 payload: { bookId: book.id, chapterId: chapter.id },
                 term: latinize(chapter.title).toLowerCase(),
-              }))
-            );
-          }
+              }));
+            },
+          });
         }
-        commands = cachedCommands.get(commandKey).filter(cmd => cmd.term.includes(commandPalette.q));
+        commands = commands.filter(cmd => cmd.term.includes(commandPalette.q)) ?? [];
         selectedCommand = commands[(commandPalette.selectedIndex + commands.length) % commands.length];
         return (
           h('body', {}, [
@@ -2625,6 +2633,19 @@
         }
       }
       return new RegExp(patterns, flags);
+    }
+
+    function simpleCache({ key, getValue, getHash, fallbackValue }) {
+      try {
+        let cache = globalThis.__simpleCache || (globalThis.__simpleCache = {});
+        let hash = getHash();
+        if (!(key in cache) || cache[key].hash != hash) {
+          cache[key] = { value: getValue(), hash };
+        }
+        return cache[key].value;
+      } catch {
+        return fallbackValue;
+      }
     }
   </script>
 </body>

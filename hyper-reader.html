@@ -1179,7 +1179,7 @@
       dispatch(SetNames, names);
       dispatch(HighlightNames);
     }];
-    let correctNames = _.memoize((content, names) => {
+    memoize(function correctNames(content, names) {
       if(!names) return content;
       names = names.split('\n');
       // add short name automatically
@@ -1193,10 +1193,10 @@
         if (!name) continue;
         let [from, to] = name.split(/->|→/).map(n => n?.trim());
         if(to != undefined) {
-          to = to.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
+          to = useCase(from, to);
         } else {
           from = name;
-          to = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
+          to = titleCase(name);
         }
         if(from) {
           let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${from}(?=[^\\p{L}]|$)`, 'gui');
@@ -1204,7 +1204,7 @@
         }
       }
       return content;
-    }, (content, names) => content + names);
+    });
     let HighlightNames = (state) => [state, async () => {
       await nextTick();
 
@@ -1226,33 +1226,32 @@
           let [from, to] = name.split(/->|→/).map(n => n?.trim());
           if(to == undefined) {
             from = name;
-            to = name.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
+            to = titleCase(name);
           }
-          if(to) {
+          if(to && getCase(to) != 'lower') {
             knowNames.push(to);
           }
         }
       }
 
       // collect names
+      let nameRegex = buildRegex([
+        /{NameBegin}{Word}(\s{Word}){1,3}/,
+        /{wb}a {Word}(?!{Word})/,
+        /{NameBegin}{Word} (thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá bá|bá phụ|bá mẫu|đại tỷ|đại ca){wb}/,
+        /(tiểu|lão) {Word}(?!{wb}{Word})/,
+        knowNames.join('|'),
+      ], {
+        'wb': /$|(?<=[^\p{L}])|(?=[^\p{L}])/,
+        'Upper': /\p{Lu}/,
+        'Lower': /\p{Ll}/,
+        'Word': /{wb}{Upper}{Lower}*{wb}/,
+        'NameBegin': /(?<!^|[.:"'!?()[\]] ?|{Word} )/,
+      }, 'gu');
       let names = new Set();
       document.querySelectorAll('article p, nav a').forEach(el => {
         el.childNodes.forEach(el => {
           if (el.nodeType != Node.TEXT_NODE) return;
-
-          let nameRegex = buildRegex([
-            /{NameBegin}{Word}(\s{Word}){1,3}/,
-            /{wb}a {Word}(?!{Word})/,
-            /{NameBegin}{Word} (thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá bá|bá phụ|bá mẫu|đại tỷ|đại ca){wb}/,
-            /(tiểu) {Word}(?!{wb}{Word})/,
-            knowNames.join('|'),
-          ], {
-            'wb': /$|(?<=[^\p{L}])|(?=[^\p{L}])/,
-            'Upper': /\p{Lu}/,
-            'Lower': /\p{Ll}/,
-            'Word': /{wb}{Upper}{Lower}*{wb}/,
-            'NameBegin': /(?<!^|[.:"'!?()[\]] ?|{Word} )/,
-          }, 'gu');
 
           for(let match of el.textContent.matchAll(nameRegex)) {
             let name = match[0];
@@ -1262,25 +1261,25 @@
           }
         });
       });
+      console.log({names})
 
       // create ranges;
+      nameRegex = buildRegex([
+        '{wb}(' + [...names].join('|') + '){wb}',
+      ], {
+        'wb': /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/,
+      }, 'gui');
+      console.log('nameRegex:', nameRegex);
       let ranges = {};
       document.querySelectorAll('article p, nav a').forEach(el => {
         el.childNodes.forEach(el => {
           if (el.nodeType != Node.TEXT_NODE) return;
 
-          let nameRegex = buildRegex([
-            '{wb}(' + [...names].join('|') + '){wb}',
-          ], {
-            'wb': /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/,
-          }, 'gu');
-          console.log(nameRegex)
-
           for(let match of el.textContent.matchAll(nameRegex)) {
             let range = new Range();
             range.setStart(el, match.index);
             range.setEnd(el, match.index + match[0].length);
-            let nameId = slug(match[0]);
+            let nameId = match[0].toLowerCase();
             if(!ranges[nameId]) ranges[nameId] = [];
             ranges[nameId].push(range);
           }
@@ -1291,7 +1290,7 @@
       let nameIds = Object.keys(ranges).sort((a, z) => z.length - a.length);
       console.debug(Object.keys(ranges));
       for(let nameId in ranges) {
-        let fullNameId = nameIds.find(id => id.endsWith('-' + nameId));
+        let fullNameId = nameIds.find(id => id.endsWith(' ' + nameId));
         if(fullNameId) {
           ranges[fullNameId].push(...ranges[nameId]);
           delete ranges[nameId];
@@ -1302,12 +1301,13 @@
 
       for(let nameId in ranges) {
         let color = stc(nameId);
-        CSS.highlights.set(nameId, new Highlight(...ranges[nameId]));
-        let styleEl = document.head.querySelector(`style[name="hl-${nameId}"]`);
+        let styleId = slug(nameId);
+        CSS.highlights.set(styleId, new Highlight(...ranges[nameId]));
+        let styleEl = document.head.querySelector(`style[name="hl-${styleId}"]`);
         if(!styleEl) {
           styleEl = document.createElement('style');
-          styleEl.setAttribute('name', `hl-${nameId}`);
-          styleEl.textContent = `::highlight(${nameId}) { color: ${color} !important; }`;
+          styleEl.setAttribute('name', `hl-${styleId}`);
+          styleEl.textContent = `::highlight(${styleId}) { text-decoration: underline 5px solid ${color} !important; text-underline-offset: 6px; }`;
           document.head.appendChild(styleEl);
         }
       }
@@ -2818,6 +2818,44 @@
         return fallbackValue;
       }
     }
+
+    function titleCase(s) {
+      return s.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, c => c.toUpperCase());
+    }
+
+    function memoize(f) {
+      let memoized = _.memoize(f, (...args) => JSON.stringify(args));
+      globalThis[f.name] = memoized;
+      return memoized;
+    }
+
+    function getCase(word) {
+      if (word == word.toUpperCase()) return 'upper';
+      if (word == word.toLowerCase()) return 'lower';
+      if (word[0] == word[0].toUpperCase()) return 'title';
+    }
+
+    function toCase(word, _case) {
+      if (_case == 'upper') return word.toUpperCase();
+      if (_case == 'lower') return word.toLowerCase();
+      if (_case == 'title') return titleCase(word);
+      return word;
+    }
+
+    memoize(function useCase(src, dst) {
+      if (getCase(src) == 'lower' && getCase(dst) == 'lower') return titleCase(dst);
+      let srcWords = src.split(' ');
+      let dstWords = dst.split(' ');
+      if (srcWords.length == dstWords.length) {
+        let cases = srcWords.map((srcWord, i) => {
+          if (getCase(srcWord) != getCase(dstWords[i])) return getCase(dstWords[i]);
+        });
+        return function applyCase(s) {
+          return s.split(' ').map((word, i) => toCase(dstWords[i], cases[i] || getCase(word))).join(' ');
+        }
+      }
+      return dst;
+    });
   </script>
 </body>
 </html>

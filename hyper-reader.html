@@ -780,8 +780,9 @@
   <script type="module">
     import { h, text, app } from 'https://cdn.jsdelivr.net/npm/hyperapp/+esm';
     import { openDB } from 'https://cdn.jsdelivr.net/npm/idb/+esm';
-    import { generateColor as stc } from 'https://cdn.jsdelivr.net/npm/@marko19907/string-to-color/+esm'
-    import _ from 'https://cdn.jsdelivr.net/npm/lodash-es/+esm'
+    // import { generateColor as stc } from 'https://cdn.jsdelivr.net/npm/@marko19907/string-to-color/+esm';
+    import _ from 'https://cdn.jsdelivr.net/npm/lodash-es/+esm';
+    import chromaJs from 'https://cdn.jsdelivr.net/npm/chroma-js@2.4/+esm';
 
     class HashRouter extends EventTarget {
       parse(hash) {
@@ -1172,6 +1173,7 @@
     let ToggleNamesEditor = (state, { open }) => ({ ...state, namesEditor: { ...state.namesEditor, open } });
     let SetNames = (state, names) => ({ ...state, namesEditor: { ...state.namesEditor, names } });
     let SaveNames = (state, { bookId, names }) => [state, async (dispatch) => {
+      names = names.trim() + '\n';
       await state.db.put('names', names, bookId);
     }];
     let LoadNames = (state, { bookId }) => [state, async (dispatch) => {
@@ -1200,7 +1202,18 @@
         }
         if(from) {
           let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${from}(?=[^\\p{L}]|$)`, 'gui');
-          content = content.replaceAll(fromRegex, to);
+          content = content.replaceAll(fromRegex, name => {
+            if(typeof to == 'function') name = to(name);
+            else name = to;
+            name = name.split(' ').map(w => {
+              return toCase({
+                'mưa': 'vũ',
+                'nhẹ': 'khinh',
+                'mây': 'vân',
+              }[w.toLowerCase()] || w, getCase(w));
+            }).join(' ');
+            return name;
+          });
         }
       }
       return content;
@@ -1217,6 +1230,7 @@
         // add short name automatically
         for(let name of names) {
           if(name.match(/->|→/)) continue;
+          name = name.trim();
           name = name.split(/\s/);
           if(name.length == 3 || name.length == 4) names.push(name.at(-2) + ' ' + name.at(-1));
         }
@@ -1229,6 +1243,14 @@
             to = titleCase(name);
           }
           if(to && getCase(to) != 'lower') {
+            to = to.split(' ').map(w => {
+              return toCase({
+                'mưa': 'vũ',
+                'nhẹ': 'khinh',
+                'mây': 'vân',
+                'mặt': 'nhan',
+              }[w.toLowerCase()] || w, getCase(w));
+            }).join(' ');
             knowNames.push(to);
           }
         }
@@ -1236,11 +1258,12 @@
 
       // collect names
       let nameRegex = buildRegex([
+        knowNames.join('|'),
         /{NameBegin}{Word}(\s{Word}){1,3}/,
         /{wb}a {Word}(?!{Word})/,
-        /{NameBegin}{Word} (thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá bá|bá phụ|bá mẫu|đại tỷ|đại ca){wb}/,
-        /(tiểu|lão) {Word}(?!{wb}{Word})/,
-        knowNames.join('|'),
+        /{NameBegin}({Word} )?{Word} (ba( ba)?|mụ mụ|mẹ|thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá( bá)?|bá phụ|bá mẫu|đại tỷ|đại ca|lão bà){wb}/,
+        /cô cô|thúc thúc|bá bá|thẩm thẩm|nhạc phụ|nhạc mẫu|bá phụ|bá mẫu/,
+        /(tiểu|lão) {Word}(?!{wb}{Word})( tử)?/,
       ], {
         'wb': /$|(?<=[^\p{L}])|(?=[^\p{L}])/,
         'Upper': /\p{Lu}/,
@@ -1261,7 +1284,10 @@
           }
         });
       });
-      console.log({names})
+      names = [...names].sort((a, z) => {
+        return z.length - a.length;
+      });
+      //console.log({names})
 
       // create ranges;
       nameRegex = buildRegex([
@@ -1269,7 +1295,7 @@
       ], {
         'wb': /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/,
       }, 'gui');
-      console.log('nameRegex:', nameRegex);
+      //console.log('nameRegex:', nameRegex);
       let ranges = {};
       document.querySelectorAll('article p, nav a').forEach(el => {
         el.childNodes.forEach(el => {
@@ -1282,13 +1308,19 @@
             let nameId = match[0].toLowerCase();
             if(!ranges[nameId]) ranges[nameId] = [];
             ranges[nameId].push(range);
+            //console.debug('HighlightNames', 'found', {
+            //  name: match[0],
+            //  excerp: el.textContent.slice(Math.max(0, match.index - 50), match.index + match[0].length + 50),
+            //  nameId,
+            //  range,
+            //});
           }
         });
       });
 
       // merge sub ranges
       let nameIds = Object.keys(ranges).sort((a, z) => z.length - a.length);
-      console.debug(Object.keys(ranges));
+      //console.debug(Object.keys(ranges));
       for(let nameId in ranges) {
         let fullNameId = nameIds.find(id => id.endsWith(' ' + nameId));
         if(fullNameId) {
@@ -1296,18 +1328,30 @@
           delete ranges[nameId];
         }
       }
-      console.debug(Object.keys(ranges));
-      console.debug((ranges));
+      //console.debug(Object.keys(ranges));
+      //console.debug((ranges));
 
       for(let nameId in ranges) {
-        let color = stc(nameId);
-        let styleId = slug(nameId);
-        CSS.highlights.set(styleId, new Highlight(...ranges[nameId]));
-        let styleEl = document.head.querySelector(`style[name="hl-${styleId}"]`);
+        let hash = ((hashCode(nameId) % 360) + 360) % 360;
+        let color = chromaJs.hcl(hash, 100, 70);
+        let styleId = 'hl-' + hash;
+        let highlight = new Highlight();
+        for(let range of ranges[nameId]) {
+          highlight.add(range);
+          //console.debug('HighlightNames', 'highlight', range.toString(), {
+          //  nameId,
+          //  range,
+          //  color,
+          //  styleId,
+          //});
+        }
+        CSS.highlights.set(styleId, highlight);
+        let styleEl = document.head.querySelector(`style[name="${styleId}"]`);
         if(!styleEl) {
           styleEl = document.createElement('style');
-          styleEl.setAttribute('name', `hl-${styleId}`);
-          styleEl.textContent = `::highlight(${styleId}) { text-decoration: underline 5px solid ${color} !important; text-underline-offset: 6px; }`;
+          styleEl.setAttribute('name', styleId);
+          // styleEl.textContent = `::highlight(${styleId}) { text-decoration: underline 5px solid ${color} !important; text-underline-offset: 6px; text-decoration-skip-ink: none; }`;
+          styleEl.textContent = `::highlight(${styleId}) { color: ${color} !important; }`;
           document.head.appendChild(styleEl);
         }
       }
@@ -1589,7 +1633,7 @@
           if (typeof action == 'function' && action.name.match(/^[A-Z]/)) {
             let log = [action.name];
             if (payload !== undefined) log.push(payload);
-            console.warn(...log);
+            //console.warn(...log);
           }
 
           dispatch(action, payload);
@@ -1851,9 +1895,11 @@
                 }),
                 h('input', { type: 'submit', hidden: true }),
               ]),
+              //commandPalette.q && h('style', {}, text(`#command-palette [data-term]:not([data-term*="${commandPalette.q}"]) { display: none; }`)),
               commands.length > 0 && h('ul', {}, [
                 ...commands.map((command, index) => (
                   h('li', {
+                    'data-term': command.term,
                     class: { selected: command == selectedCommand }
                   },
                     h('a', {
@@ -1953,6 +1999,7 @@
       text = text.replace(/([:—]{2,})/gm, c => c.slice(0, 1));
       text = text.replace(/(:)[^\s\w]+\s*/gm, '$1 ');
       text = text.replace(/^\s*"\s+|\s+"\s*$/gm, '"');
+      // text = text.replace(/(?<=[.,:] *)"\n/g, '\n"');
       //"QQ Group 712797052"
       text = text.replace(/\s?"?QQ Group \d+"?/gu, '');
       //tìm sách a "Cuộc đời này không phụ diên đuôi tình" cá nhân cải biên
@@ -1988,9 +2035,6 @@
           if (!title) title = this.chapType + ' ' + (this.i + 1);
           if (!printed) {
             printed = true;
-            if (title.includes('26')) {
-              console.warn('diz', this);
-            }
           }
           return title;
         },
@@ -2057,7 +2101,9 @@
     function extractChapters(filename, text, { name }) {
       let NUMERIC = '(\\d{1,4}(\\.\\d{1,2})*)';
       let NUMERIC_DECIMAL = '(\\d{1,4}(\\.\\d{1,2})+)';
-      let NUMERIC_WORDS = '(mười( (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( (mốt|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín)|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+|[MDCLXVI]+';
+      let LEAD_NUMERIC_WORDS = '(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
+      let TAIL_NUMERIC_WORDS = '(mười( (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( (mốt|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín)|[MDCLXVI]+|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
+      let NUMERIC_WORDS = `${LEAD_NUMERIC_WORDS}|${TAIL_NUMERIC_WORDS}`;
       let patterns = [
         /*
         【xanh biếc lữ du tiên】 bộ 2 tự chương
@@ -2091,7 +2137,7 @@
         */
         //Chương 23:
         //Phiên ngoại Chương 18:
-        '^(Phiên Ngoại )?CHAP_TYPE CHAP_NUM:$',
+        // '^(Phiên Ngoại )?CHAP_TYPE CHAP_NUM:$',
         //Chương 1: Tân niên đặc biệt thiên (thượng)
         //Phiên Ngoại Chương 8: Treo đầu dê bán thịt chó
         //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
@@ -2118,6 +2164,8 @@
         '^' + name + ' \\(CHAP_NUM\\)',
         //2019-7-19 mười lăm
         '^DATE CHAP_TEXT',
+        //Ngoại truyện nhất
+        '^CHAP_TYPE CHAP_TEXT',
         //Mười hai, nửa năm sau cuộc sống vẫn đang tiếp tục. Phố xá như trước thái bình.
         '^CHAP_TEXT[,] TITLE$',
         //Quyển thứ hai Chương 11: Mỹ mẫu cầu xin
@@ -2278,6 +2326,10 @@
         '^Thứ CHAP_TEXT nói$',
         //001 ta và thê tử viên viện
         '^CHAP_NUM TITLE',
+        //Đệ nhất bộ thứ 04 chương
+        '^Đệ BOOK_TEXT BOOK_TYPE thứ CHAP_NUM CHAP_TYPE',
+        //Tiếp theo thứ 05 chương
+        '^Tiếp theo thứ CHAP_NUM CHAP_TYPE',
       ];
       let matches = [];
       for (let pattern of patterns) {
@@ -2294,16 +2346,22 @@
           .replace('HALF_TYPE', `(?<halfType>(tiết))`)
           .replace('HALF_NUM', `(?<halfNum>${NUMERIC})`)
           .replace('HALF_TEXT', `(?<halfText>(?<=\\()(thượng|trung|hạ|${NUMERIC_WORDS})(?=\\))|(?<=thứ )${NUMERIC_WORDS})`)
-          .replace('CHAP_TYPE', '(?<chapType>(chương|hồi|thiên))')
+          .replace(/CHAP_TEXT(?=.*?CHAP_TYPE)/, 'CHAP_TEXT:LEAD')
+          .replace(/(?<=CHAP_TYPE.*?)CHAP_TEXT/, 'CHAP_TEXT:TAIL')
+          .replace('CHAP_TYPE', '(?<chapType>(chương|hồi|thiên|ngoại truyện))')
           .replace('CHAP_NUM_DECIMAL', `(?<chapNum>${NUMERIC_DECIMAL})`)
           .replace('CHAP_NUM', `(?<chapNum>${NUMERIC})`)
+          .replace('CHAP_TEXT:LEAD', `(?<chapText>cuối|kết|${LEAD_NUMERIC_WORDS})`)
+          .replace('CHAP_TEXT:TAIL', `(?<chapText>cuối|kết|${TAIL_NUMERIC_WORDS})`)
           .replace('CHAP_TEXT', `(?<chapText>cuối|kết|${NUMERIC_WORDS})`);
         let regex = new RegExp(source, 'gimu');
         let result = [...text.matchAll(regex)];
-        console.debug({ pattern, regex, result });
+        //console.debug({ pattern, regex, result });
         matches.push(...result.map(m => ({ pattern, regex, index: m.index, ...m.groups, text: m[0] })));
       }
-      matches.forEach(m => {
+      let falsePositives = [];
+      matches.forEach((m, index) => {
+        let shouldDelete = false;
         for (let f of ['chapText', 'bookText', 'halfText']) {
           if (m[f]) {
             if (/^[MDCLXVI]+$/i.test(m[f])) {
@@ -2333,6 +2391,7 @@
                 prev = current;
               }
               m[f] = totalValue;
+              if(Number.isNaN(totalValue)) falsePositives.push(m);
             } else {
               let c = m[f].toLowerCase();
               let vn = {
@@ -2365,8 +2424,9 @@
           }
         }
       });
+      matches = matches.filter(m => !falsePositives.includes(m));
       matches.sort((a, z) => a.index - z.index);
-      debug({ matches });
+      //debug({ matches });
 
       if (matches.length < 2) {
         let paragraphsPerChapter = 60;
@@ -2380,6 +2440,7 @@
       matches.forEach(m => {
         chapters.push(Chapter(m, { chapters, filename, text }));
       });
+      //console.log({chapters})
 
       dedupeChapters(chapters);
       lockContinuous(chapters);
@@ -2903,6 +2964,16 @@
         }
       }
       return dst;
+    });
+
+    memoize(function hashCode(str) {
+      let hash = 0;
+      if (str.length === 0) return hash;
+      for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        hash = hash & hash;
+      }
+      return hash;
     });
   </script>
 </body>

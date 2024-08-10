@@ -359,6 +359,30 @@
         --selection-bg: #cadcdf;
       }
     }
+    .settings .colors button.kiselevka,
+    :root[data-color\:light=kiselevka] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: #6e8d9f;
+        --body-background-color: #0f1921;
+        --paper-background-color: #14222c;
+        --paper-outline-color: #1e3140;
+        --link-color: #3ea3aa;
+        --horizontal-line-color: #2d3941;
+        --selection-bg: #153d4f;
+      }
+    }
+    .settings .colors button.kiselevka,
+    :root[data-color\:dark=kiselevka] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: #6e8d9f;
+        --body-background-color: #0f1921;
+        --paper-background-color: #14222c;
+        --paper-outline-color: #1e3140;
+        --link-color: #3ea3aa;
+        --horizontal-line-color: #2d3941;
+        --selection-bg: #153d4f;
+      }
+    }
 
     :root,
     :root[data-paper-size=sm] { --paper-width: 90ex; }
@@ -1866,7 +1890,7 @@
                   })
                 ])
               ),
-              h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn', 'solarized'].map(color => (
+              h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn', 'solarized', 'kiselevka'].map(color => (
                 h('button', {
                   class: [color, { 'checked:light': settings['color:light'] == color, 'checked:dark': settings['color:dark'] == color }],
                   onclick: () => [SaveSettings, { [`color:${getColorScheme()}`]: color }],

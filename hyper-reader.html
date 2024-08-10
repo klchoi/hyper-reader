@@ -335,6 +335,30 @@
         --selection-bg: var(--rp-dawn-highlight-med);
       }
     }
+    .settings .colors button.solarized,
+    :root[data-color\:light=solarized] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: #002a35;
+        --body-background-color: #f3edda;
+        --paper-background-color: #fdf6e3;
+        --paper-outline-color: #e0d9c6;
+        --link-color: #288bd1;
+        --horizontal-line-color: #9faaa8;
+        --selection-bg: #cadcdf;
+      }
+    }
+    .settings .colors button.solarized,
+    :root[data-color\:dark=solarized] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: #002a35;
+        --body-background-color: #f3edda;
+        --paper-background-color: #fdf6e3;
+        --paper-outline-color: #e0d9c6;
+        --link-color: #288bd1;
+        --horizontal-line-color: #9faaa8;
+        --selection-bg: #cadcdf;
+      }
+    }
 
     :root,
     :root[data-paper-size=sm] { --paper-width: 90ex; }
@@ -1842,7 +1866,7 @@
                   })
                 ])
               ),
-              h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn'].map(color => (
+              h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn', 'solarized'].map(color => (
                 h('button', {
                   class: [color, { 'checked:light': settings['color:light'] == color, 'checked:dark': settings['color:dark'] == color }],
                   onclick: () => [SaveSettings, { [`color:${getColorScheme()}`]: color }],

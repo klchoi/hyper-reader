@@ -2382,6 +2382,7 @@
       });
 
       dedupeChapters(chapters);
+      lockContinuous(chapters);
       mergeShortChapters(chapters, 1000);
       cleanupChapters(chapters);
       addPrologue(chapters, filename, text);
@@ -2401,12 +2402,12 @@
       if (c) {
         Object.assign(ch._, {
           title: c._.title,
-          chapNum: c._.chapNum,
+          chapNo: c._.chapNo,
           chapText: c._.chapText,
-          bookNum: c._.bookNum,
+          bookNo: c._.bookNo,
           bookText: c._.bookText,
           bookType: c._.bookType,
-          halfNum: c._.halfNum,
+          halfNo: c._.halfNo,
           halfText: c._.halfText,
           halfType: c._.halfType,
         });
@@ -2427,6 +2428,50 @@
           // console.log('dedupe', [ch.title, ci.title]);
           mergeBehind(chapters, i, 'dedupe');
         }
+      }
+    }
+
+    function lockContinuous(chapters, lookupRange = 5) {
+      //look behind
+      for(let i = 1; i < chapters.length; i++) {
+        let ci = chapters[i];
+        if(!ci.chapNo) continue;
+        console.group('Look behind', ci.chapNo);
+        console.log(ci.chapNo, ci.title);
+        for(let h = i - 1; h >= 0 && h >= i - lookupRange; h--) {
+          let ch = chapters[h];
+          let shouldLock = false;
+          if(ch.chapNo + 1 == ci.chapNo) shouldLock = true;
+          else if((ch.chapNo == ci.chapNo) && ch.halfNo && (ch.halfNo + 1 == ci.halfNo)) shouldLock = true;
+          if(shouldLock) {
+            console.info('Lock', { ch: ch.title, ci: ci.title });
+            ch.locked = true;
+            ci.locked = true;
+            break;
+          }
+        }
+        console.groupEnd();
+      }
+      //look ahead
+      for(let i = chapters.length - 2; i >= 0; i--) {
+        let ci = chapters[i];
+        if(!ci.chapNo) continue;
+        if(ci.locked) continue;
+        console.group('Look ahead', ci.chapNo);
+        console.log(ci.chapNo, ci.title);
+        for(let j = i + 1; j < chapters.length && j < i + lookupRange; j++) {
+          let cj = chapters[j];
+          let shouldLock = false;
+          if(ci.chapNo + 1 == cj.chapNo) shouldLock = true;
+          else if((ci.chapNo == cj.chapNo) && ci.halfNo && (ci.halfNo + 1 == cj.halfNo)) shouldLock = true;
+          if(shouldLock) {
+            console.info('Lock', { ci: ci.title, cj: cj.title });
+            ci.locked = true;
+            cj.locked = true;
+            break;
+          }
+        }
+        console.groupEnd();
       }
     }
 
@@ -2474,7 +2519,9 @@
         let [h, j] = [i-1, i+1];
         let [ch, ci, cj] = [chapters[h], chapters[i], chapters[j]];
         if ((ci.length / ci.merged) < minLength) {
-          console.warn('should merge', ci.id, ci.length)
+          if(ci.locked) continue;
+          console.group('merge');
+          console.warn(ci.id);
           let fields = [];
           if (ci.bookNo) fields.push('bookNo');
           if (ci.chapter != null) fields.push('chapter');
@@ -2490,10 +2537,11 @@
               console.log(chapters, j, 'short with name');
               mergeBehind(chapters, j, 'short with name');
             } else {
-              console.log(chapters, i, 'short');
+              console.log('short', { ch: ch.title, ci: ci.title, cj: cj.title });
               mergeBehind(chapters, i, 'short');
             }
           }
+          console.groupEnd();
         }
       }
     }

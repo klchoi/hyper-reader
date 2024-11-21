@@ -383,6 +383,9 @@
         --selection-bg: #153d4f;
       }
     }
+    :root[data-color\:dark] {
+      --body-font-smoothing: antialiased;
+    }
 
     :root,
     :root[data-paper-size=sm] { --paper-width: 90ex; }
@@ -2190,7 +2193,7 @@
         //Phiên Ngoại Chương 8: Treo đầu dê bán thịt chó
         //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
         //Hồi 2: · phẫn vũ nữ khinh thân dụ địch tù, nhu vú to thát tử loạn tâm trí
-        '(^|(?<=\\W ))(Phiên Ngoại )?CHAP_TYPE CHAP_NUM([^\\p{L}\\p{N}]+TITLE)?$',
+        '(^|(?<=\\W ))(Phiên Ngoại )?CHAP_TYPE CHAP_NUM([^\\p{L}\\p{N}\\n]+TITLE)?$',
         //Ngũ
         //Hai mươi mốt
         '^CHAP_TEXT$',
@@ -2267,6 +2270,8 @@
         '^CHAP_NUM\\)$',
         //2,
         '^CHAP_NUM,$',
+        //Chương 157: (1)
+        '^CHAP_TYPE CHAP_NUM: \\(HALF_NUM\\)',
         //Tự mẫu một ngày (hạ)
         '^(?<!.*CHAP_TYPE.*TITLE) \\(HALF_TEXT\\)$',
         //Thứ 1002 chương lữ mộng đẹp cảnh nhã nhàn bá mẫu (nhị)
@@ -2308,10 +2313,14 @@
         '^\\(còn tiếp\\)\\(CHAP_TEXT\\)',
         //Mười bốn "Tiểu Chí như thế nào còn không có rời giường, ngươi không gọi hắn ăn điểm tâm a."
         //'^CHAP_TEXT',
+        //Chương 1:
+        '^CHAP_TYPE CHAP_NUM:',
         //【Chương 1:
         '^【CHAP_TYPE CHAP_NUM: TITLE',
         //22.
         '^CHAP_NUM\\.$',
+        //09. Thi chạy
+        '^CHAP_NUM\\. TITLE$',
         //Đại phụng gõ mõ cầm canh nhân chi xanh miết #1 tác giả: Hố ni
         '^NAME #CHAP_NUM',
         //(hạ)
@@ -2378,7 +2387,23 @@
         '^Đệ BOOK_TEXT BOOK_TYPE thứ CHAP_NUM CHAP_TYPE',
         //Tiếp theo thứ 05 chương
         '^Tiếp theo thứ CHAP_NUM CHAP_TYPE',
-      ];
+        //Thứ 084 dâm mỹ hình ảnh
+        '^Thứ CHAP_NUM TITLE$',
+      ].sort((a, z) => {
+        let specificity = (s) => {
+          let specificity = 0;
+          let r = /[A-Z_]{2,}/g;
+          let m;
+          while((m = r.exec(s))) {
+            if(m.includes('_NUM')) specificity += 11;
+            else specificity += 10;
+          }
+          return specificity;
+        };
+        if(specificity(a) > specificity(z)) return -1;
+        if(specificity(a) < specificity(z)) return 1;
+        return 0;
+      });
       let matches = [];
       for (let pattern of patterns) {
         let source = pattern
@@ -2388,7 +2413,7 @@
           .replace('TITLE_SHORT', '(?<titleShort>[^\n】]{1,50}\\.*)')
           .replace('TITLE', '(?<title>[^\n】]+\\.*)')
           .replace('BOOK_TITLE', '(?<bookTitle>[^\n】]+\\.*)')
-          .replace('BOOK_TYPE', '(?<bookType>(quyển|tập|bộ|cuốn))')
+          .replace('BOOK_TYPE', '(?<bookType>(quyển|tập|bộ|cuốn|quý))')
           .replace('BOOK_NUM', `(?<bookNum>${NUMERIC})`)
           .replace('BOOK_TEXT', `(?<bookText>${NUMERIC_WORDS})`)
           .replace('HALF_TYPE', `(?<halfType>(tiết))`)
@@ -2488,15 +2513,258 @@
       matches.forEach(m => {
         chapters.push(Chapter(m, { chapters, filename, text }));
       });
-      //console.log({chapters})
 
-      dedupeChapters(chapters);
-      lockContinuous(chapters);
-      mergeShortChapters(chapters, 1000);
-      cleanupChapters(chapters);
-      addPrologue(chapters, filename, text);
+      let logResultSnapshot = [];
+      let log = (label) => {
+        let logResult = chapters.map(c => ({
+          locked: c.locked != null ? true : undefined,
+          lockType: c.locked,
+          mergeDirection: c.mergeDirection,
+          mergeReason: c.mergeReason,
+          bookType: c._.bookType,
+          bookNum: c._.bookNum,
+          bookTitle: c._.bookTitle,
+          chapType: c._.chapType,
+          chapNum: c._.chapNum,
+          halfType: c._.halfType,
+          halfNum: c._.halfNum,
+          text: c._.text,
+          // pattern: c._.pattern,
+          // title: c._.title || c._.titleShort,
+        }));
+        console.groupCollapsed(label);
+        let action = /\w+/.exec(label)[0];
+        if(logResultSnapshot.length == logResult.length) {
+          console.table(logResult.map((chapter, i) => ({
+            action: JSON.stringify(chapter) != JSON.stringify(logResultSnapshot[i]) ? action : undefined,
+            ...chapter,
+          })));
+        } else {
+          console.table(logResult);
+        }
+        console.groupEnd(label);
+        logResultSnapshot = logResult;
+      }
+
+      log('parse result');
+      for(let f of [
+        dedupeByIndex,
+        merge,
+        lockCertain,
+        merge,
+        dedupeChapters,
+        lockContinuous,
+        analyzeUncertains,
+        analyzeUncertains,
+        dedupeChapters,
+        merge,
+        splitLongChapters,
+      ]) {
+        console.groupCollapsed(f.name);
+        f(chapters);
+        console.groupEnd(f.name);
+        log(f.name + ' result');
+      }
+      // mergeShortChapters(chapters, 2000);
+      // log('merge short');
+
+      // cleanupChapters(chapters);
+      // addPrologue(chapters, filename, text);
 
       return chapters;
+    }
+
+    function merge(chapters) {
+      //merge up
+      for(let i = chapters.length - 1; i > 0; i--) {
+        let ci = chapters[i];
+        if(ci.mergeDirection == 'up') {
+          mergeBehind(chapters, i, ci.mergeReason);
+        }
+      }
+      for(let i = 0; i < chapters.length - 1; i++) {
+        let ci = chapters[i];
+        if(ci.mergeDirection == 'down') {
+          // mergeBehind()
+        }
+      }
+    }
+
+    function analyzeUncertains(chapters) {
+      for(let i = 0; i < chapters.length; i++) {
+        let ci = chapters[i];
+        if(ci.locked) continue; //ignore certain chapters
+        let ch, cj;
+        for(let h = i - 1; h >= 0; h--) {
+          if(chapters[h].locked) {
+            ch = chapters[h];
+            break;
+          }
+        }
+        for(let j = i + 1; j < chapters.length; j++) {
+          if(chapters[j].locked) {
+            cj = chapters[j];
+            break;
+          }
+        }
+        if(ch && cj) {
+          if((Number(ch._.chapNum) == Number(cj._.chapNum)) || ((Number(ch._.chapNum) + 1) == Number(cj._.chapNum))) {
+            if(ci._.halfNum && (ci.halfNum != ch._.halfNum)) {
+              console.group('keep separated half');
+              console.log([ch?._.text, ci._.text, cj?._.text]);
+              console.groupEnd();
+              ci._.chapNum = ch._.chapNum;
+              ci.mergeDirection = 'keep';
+              ci.mergeReason = 'separated half';
+            } else {
+              console.group('merge up');
+              console.log([ch?._.text, ci._.text, cj?._.text])
+              console.log([ch?._.text, cj?._.text]);
+              console.groupEnd();
+              ci.mergeDirection = 'up';
+              ci.mergeReason = 'same chapNum as prev/next';
+            }
+          } else if((Number(ch._.chapNum) <= Number(ci._.chapNum)) && (Number(ci._.chapNum) <= Number(cj._.chapNum))) {
+            console.group('lock');
+            console.log([ch?._.text, ci._.text, cj?._.text]);
+            console.groupEnd();
+            ci.locked = 'continuous';
+          } else if(Number(cj._.chapNum) == 1) {
+            console.group('merge end of book');
+            console.log([ch?._.text, ci._.text, cj?._.text])
+            console.log([ch?._.text, cj?._.text]);
+            console.groupEnd();
+            ci.mergeDirection = 'up';
+            ci.mergeReason = 'end of book';
+          }
+        } else if(ch) {
+          if(ci._.halfNum && (ci.halfNum != ch._.halfNum)) {
+            console.group('keep separated half');
+            console.log([ch?._.text, ci._.text, cj?._.text]);
+            console.groupEnd();
+            ci._.chapNum = ch._.chapNum;
+            ci.mergeDirection = 'keep';
+            ci.mergeReason = 'separated half';
+          } else {
+            console.group('merge all up');
+            console.log([ch?._.text, ci._.text, cj?._.text]);
+            console.log([ch?._.text]);
+            console.groupEnd();
+            ci.mergeDirection = 'up';
+            ci.mergeReason = 'merge all';
+          }
+        } else if(cj) {
+          if(ci._.halfNum && (ci.halfNum != cj._.halfNum)) {
+            console.group('keep separated half');
+            console.log([ch?._.text, ci._.text, cj?._.text]);
+            console.groupEnd();
+            ci._.chapNum = cj._.chapNum;
+            ci.mergeDirection = 'keep';
+            ci.mergeReason = 'separated half';
+          } else {
+            console.group('merge all down');
+            console.log([ch?._.text, ci._.text, cj?._.text]);
+            console.log([cj?._.text]);
+            console.groupEnd();
+            ci.mergeDirection = 'down';
+            ci.mergeReason = 'merge all';
+          }
+        }
+      }
+    }
+
+    function lockCertain(chapters) {
+      for(let ci of chapters) {
+        if(ci._.chapNum && ci._.chapType?.toLowerCase() == 'chương') {
+          console.log('Lock', [ci._.text]);
+          ci.locked = 'certain';
+        }
+      }
+    }
+
+    function lockContinuous(chapters, lookupRange = 10) {
+      let locked = [];
+      //look behind
+      console.group('Look behind');
+      for(let i = 1; i < chapters.length; i++) {
+        let ci = chapters[i];
+        if(!ci._.chapNum) continue;
+        for(let h = i - 1; h >= 0 && h >= i - lookupRange; h--) {
+          let ch = chapters[h];
+          let shouldLock = false;
+          if(Number(ch._.chapNum) + 1 == Number(ci._.chapNum)) shouldLock = true;
+          else if((ch._.chapNum == ci._.chapNum) && ch._.halfNum && (Number(ch._.halfNum) + 1 == Number(ci._.halfNum))) shouldLock = true;
+          if(shouldLock) {
+            console.log('Lock', [ch._.text, ci._.text]);
+            ch.locked = 'continuous';
+            ci.locked = 'continuous';
+            break;
+          }
+        }
+      }
+      console.groupEnd('Look behind');
+      console.group('Look ahead');
+      //look ahead
+      for(let i = chapters.length - 2; i >= 0; i--) {
+        let ci = chapters[i];
+        if(!ci._.chapNum) continue;
+        if(ci.locked) continue;
+        for(let j = i + 1; j < chapters.length && j < i + lookupRange; j++) {
+          let cj = chapters[j];
+          let shouldLock = false;
+          if(Number(ci._.chapNum) + 1 == Number(cj._.chapNum)) shouldLock = true;
+          else if((ci._.chapNum == cj._.chapNum) && ci._.halfNum && (Number(ci._.halfNum) + 1 == Number(cj._.halfNum))) shouldLock = true;
+          if(shouldLock) {
+            console.log('Lock', [ci._.text, cj._.text]);
+            ci.locked = 'continuous';
+            cj.locked = 'continuous';
+            break;
+          }
+        }
+      }
+      console.groupEnd('Look ahead');
+    }
+
+    function splitLongChapters(chapters) {
+      let averageLength = 1500; //1500 words per chapter
+      let lockedWords = 0;
+      let lockedChapters = 0;
+      for(let ci of chapters) {
+        if(ci.locked) {
+          let words = ci.content.split(/\s+/).length;
+          console.log('Certain words:', [ci._.text], words)
+          lockedWords += words;
+          lockedChapters++;
+        }
+      }
+      if(lockedChapters > 0) averageLength = Math.floor(lockedWords / lockedChapters);
+      console.log({lockedChapters});
+      return;
+      for(let i = chapters.length-1; i >= 0; i--) {
+        let [ci, cj] = [chapters[i], chapters[i+1]];
+        let ciLength = ci.endIndex - ci.startIndex;
+        if(ciLength <= maxLength) continue;
+        let partsCount = Math.floor(ciLength / maxLength);
+        if(cj) {
+          if(Number(ci._.chapNum) + 1 != Number(cj._.chapNum)) {
+            partsCount = Number(cj._.chapNum) - Number(ci._.chapNum);
+            step = 'chapNum';
+          } else if(ci._.chapNum == cj._.chapNum && ci._.halfNum && Number(ci._.halfNum) + 1 != Number(cj._.halfNum)) {
+            partsCount = Number(cj._.halfNum) - Number(ci._.halfNum);
+            step = 'partNum';
+          }
+        }
+        console.log('Split', [ci._.text], 'into', partsCount, 'chapters');
+        let parts = [];
+        let index = ci.startIndex;
+        let partLength = ci.content.length / partsCount;
+        for(let i = 1; i < partsCount; i++) {
+          let endIndex = ci.content.slice(index + partlength).indexOf('\n');
+          parts.push(endIndex);
+          index = endIndex;
+        }
+        // for(let )
+      }
     }
 
     function mergeBehind(chapters, i, reason) {
@@ -2511,12 +2779,12 @@
       if (c) {
         Object.assign(ch._, {
           title: c._.title,
-          chapNo: c._.chapNo,
+          chapNum: c._.chapNum,
           chapText: c._.chapText,
-          bookNo: c._.bookNo,
+          bookNum: c._.bookNum,
           bookText: c._.bookText,
           bookType: c._.bookType,
-          halfNo: c._.halfNo,
+          halfNum: c._.halfNum,
           halfText: c._.halfText,
           halfType: c._.halfType,
         });
@@ -2527,60 +2795,50 @@
     }
 
     function dedupeChapters(chapters) {
-      for (let i = chapters.length - 1; i > 0; i--) {
-        let h = i-1;
-        let [ch, ci] = [chapters[h], chapters[i]];
-        let shouldMerge = false;
-        if (ch.startIndex == ci.startIndex) shouldMerge = true;
-        if (ch.chapNo != null && ch.chapNo == ci.chapNo && ch.half == ci.half) shouldMerge = true;
-        if (shouldMerge) {
-          // console.log('dedupe', [ch.title, ci.title]);
-          mergeBehind(chapters, i, 'dedupe');
+      let shouldMerge = (i, j) => {
+        let [ci, cj] = [chapters[i], chapters[j]];
+        if(!cj) return false;
+        if(!ci.locked) return false;
+        if(!cj.locked) return false;
+        if(ci._.chapNum && (ci._.chapNum == cj._.chapNum)) {
+          //same chap num
+          if(ci._.halfNum == cj._.halfNum) {
+            //same half num
+            return true;
+          }
+          if((ci._.halfNum && !cj._.halfNum) || (!ci._.halfNum && cj._.halfNum)) {
+            //probably same half num
+            return true;
+          }
         }
+        return false;
+      };
+      let i = 0;
+      while(i < chapters.length) {
+        let j = i+1;
+        while(j < chapters.length) {
+          if(shouldMerge(i, j)) {
+            let [ci, cj] = [chapters[i], chapters[j]];
+            console.log('Dedupe', [ci._.text, cj._.text]);
+            cj.mergeDirection = 'up';
+            cj.mergeReason = 'dedupe';
+            j++;
+          } else {
+            break;
+          }
+        }
+        i = j;
       }
     }
 
-    function lockContinuous(chapters, lookupRange = 5) {
-      //look behind
-      for(let i = 1; i < chapters.length; i++) {
-        let ci = chapters[i];
-        if(!ci.chapNo) continue;
-        console.group('Look behind', ci.chapNo);
-        console.log(ci.chapNo, ci.title);
-        for(let h = i - 1; h >= 0 && h >= i - lookupRange; h--) {
-          let ch = chapters[h];
-          let shouldLock = false;
-          if(ch.chapNo + 1 == ci.chapNo) shouldLock = true;
-          else if((ch.chapNo == ci.chapNo) && ch.halfNo && (ch.halfNo + 1 == ci.halfNo)) shouldLock = true;
-          if(shouldLock) {
-            console.info('Lock', { ch: ch.title, ci: ci.title });
-            ch.locked = true;
-            ci.locked = true;
-            break;
-          }
+    function dedupeByIndex(chapters) {
+      for(let i = 0; i < chapters.length-1; i++) {
+        let [ci, cj] = [chapters[i], chapters[i+1]];
+        if(ci.startIndex + 100 >= cj.startIndex) {
+          console.log('Dedupe', [ci._.text, cj._.text]);
+          cj.mergeDirection = 'up';
+          cj.mergeReason = 'dedupe';
         }
-        console.groupEnd();
-      }
-      //look ahead
-      for(let i = chapters.length - 2; i >= 0; i--) {
-        let ci = chapters[i];
-        if(!ci.chapNo) continue;
-        if(ci.locked) continue;
-        console.group('Look ahead', ci.chapNo);
-        console.log(ci.chapNo, ci.title);
-        for(let j = i + 1; j < chapters.length && j < i + lookupRange; j++) {
-          let cj = chapters[j];
-          let shouldLock = false;
-          if(ci.chapNo + 1 == cj.chapNo) shouldLock = true;
-          else if((ci.chapNo == cj.chapNo) && ci.halfNo && (ci.halfNo + 1 == cj.halfNo)) shouldLock = true;
-          if(shouldLock) {
-            console.info('Lock', { ci: ci.title, cj: cj.title });
-            ci.locked = true;
-            cj.locked = true;
-            break;
-          }
-        }
-        console.groupEnd();
       }
     }
 
@@ -2624,12 +2882,35 @@
     }
 
     function mergeShortChapters(chapters, minLength = 2_000) {
+      for(let i = 0; i < chapters.length; i++) {
+        let ci = chapters[i];
+        if(ci.mergeDirection) continue;
+        if(ci.length > minLength) continue;
+        let fields = [];
+        if (ci._.bookNum) fields.push('bookNum');
+        if (ci._.chapNum != null) fields.push('chapNum');
+        if (ci._.halfNum) fields.push('halfNum');
+        if(fields.length > 0) {
+          for(let h = i - 1; h >= 0; h--) {
+            let ch = chapters[h];
+            if(ch.mergeDirection == 'up') continue;
+            if(!ch.locked) continue;
+            if (fields.every(f => ch._[f] == ci._[f])) {
+              console.log('merge', h, '<-', i);
+              ci.mergeDirection = 'up';
+              ci.mergeReason = 'short and dupe of prev';
+              break;
+            }
+          }
+        }
+      }
+      return;
       for (let i = chapters.length - 1; i > 0; i--) {
         let [h, j] = [i-1, i+1];
         let [ch, ci, cj] = [chapters[h], chapters[i], chapters[j]];
         if ((ci.length / ci.merged) < minLength) {
           if(ci.locked) continue;
-          console.group('merge');
+          console.group('merge short');
           console.warn(ci.id);
           let fields = [];
           if (ci.bookNo) fields.push('bookNo');
@@ -2637,20 +2918,28 @@
           if (ci.half) fields.push('half');
           if (fields.every(f => ch[f] == ci[f])) {
             console.log(chapters, i, 'short and dupe of prev');
-            mergeBehind(chapters, i, 'short and dupe of prev');
+            // mergeBehind(chapters, i, 'short and dupe of prev');
+            ci.mergeDirection = 'up';
+            ci.mergeReason = 'short and dupe of prev';
           } else if (cj && fields.every(f => cj[f] == ci[f])) {
             console.log(chapters, j, 'short and dupe of next');
-            mergeBehind(chapters, j, 'short and dupe of next');
+            // mergeBehind(chapters, j, 'short and dupe of next');
+            ci.mergeDirection = 'up';
+            ci.mergeReason = 'short and dupe of next';
           } else if (fields.length == 0 || (fields.length == 1 && fields[0] == 'chapter')) {
             if (ci._.name && cj) {
               console.log(chapters, j, 'short with name');
-              mergeBehind(chapters, j, 'short with name');
+              // mergeBehind(chapters, j, 'short with name');
+              ci.mergeDirection = 'up';
+              ci.mergeReason = 'short with name';
             } else {
               console.log('short', { ch: ch.title, ci: ci.title, cj: cj.title });
-              mergeBehind(chapters, i, 'short');
+              // mergeBehind(chapters, i, 'short');
+              ci.mergeDirection = 'up';
+              ci.mergeReason = 'short';
             }
           }
-          console.groupEnd();
+          console.groupEnd('merge short');
         }
       }
     }

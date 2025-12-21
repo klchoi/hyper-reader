@@ -1,0 +1,20 @@
+{
+  "name": "hyper-reader",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klchoi/hyper-reader.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/klchoi/hyper-reader/issues"
+  },
+  "homepage": "https://github.com/klchoi/hyper-reader#readme",
+  "description": ""
+}

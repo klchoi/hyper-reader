@@ -17,7 +17,7 @@
     @font-face {
       font-family: Reader;
       font-weight: 500;
-      src: local('WorkSans-Medium');
+      src: local('WorkSans-Regular_Medium');
     }
 
     /** reset **/
@@ -50,6 +50,12 @@
     }
     small {
       font-size: 0.875em;
+    }
+
+    body {
+      /* Disables pull-to-refresh and overscroll glow effect.
+         Still keeps swipe navigations. */
+      overscroll-behavior-y: none;
     }
 
     /** rose pine **/
@@ -2051,6 +2057,7 @@
       text = text.replace(/([:—]{2,})/gm, c => c.slice(0, 1));
       text = text.replace(/(:)[^\s\w]+\s*/gm, '$1 ');
       text = text.replace(/^\s*"\s+|\s+"\s*$/gm, '"');
+      text = text.replace(/(\n[^\n"]+)(")(\n\s*)([^\n"]+"\n)/gm, '$1$3$2$4');
       // text = text.replace(/(?<=[.,:] *)"\n/g, '\n"');
       //"QQ Group 712797052"
       text = text.replace(/\s?"?QQ Group \d+"?/gu, '');
@@ -2153,8 +2160,11 @@
     function extractChapters(filename, text, { name }) {
       let NUMERIC = '(\\d{1,4}(\\.\\d{1,2})*)';
       let NUMERIC_DECIMAL = '(\\d{1,4}(\\.\\d{1,2})+)';
-      let LEAD_NUMERIC_WORDS = '(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
-      let TAIL_NUMERIC_WORDS = '(mười( (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( (mốt|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín)|[MDCLXVI]+|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
+      let ROMAN_NUMBER = '[MDCLXVI]+';
+      let CHINESE_NUMBER = '(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập|bách|thiên|vạn|ức)( +(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập|bách|thiên|vạn|ức))*';
+      let VIETNAMESE_NUMBER = '(không|một|mốt|hai|ba|bốn|tư|năm|lăm|sáu|bảy|tám|chín|mười|linh|mươi|trăm|ngàn|nghìn|triệu|tỷ)( +(không|một|mốt|hai|ba|bốn|tư|năm|lăm|sáu|bảy|tám|chín|mười|linh|mươi|trăm|ngàn|nghìn|triệu|tỷ))*';
+      let LEAD_NUMERIC_WORDS = `${CHINESE_NUMBER}`;
+      let TAIL_NUMERIC_WORDS = `${VIETNAMESE_NUMBER}|${ROMAN_NUMBER}|${CHINESE_NUMBER}`;
       let NUMERIC_WORDS = `${LEAD_NUMERIC_WORDS}|${TAIL_NUMERIC_WORDS}`;
       let patterns = [
         /*
@@ -2216,6 +2226,8 @@
         '^' + name + ' \\(CHAP_NUM\\)',
         //2019-7-19 mười lăm
         '^DATE CHAP_TEXT',
+        //Chương thứ một ngàn không trăm mười hai văn
+        '^CHAP_TYPE thứ CHAP_TEXT văn',
         //Ngoại truyện nhất
         '^CHAP_TYPE CHAP_TEXT',
         //Mười hai, nửa năm sau cuộc sống vẫn đang tiếp tục. Phố xá như trước thái bình.
@@ -2438,58 +2450,9 @@
         let shouldDelete = false;
         for (let f of ['chapText', 'bookText', 'halfText']) {
           if (m[f]) {
-            if (/^[MDCLXVI]+$/i.test(m[f])) {
-              let val = {
-                I: 1,
-                V: 5,
-                X: 10,
-                L: 50,
-                C: 100,
-                D: 500,
-                M: 1000,
-              };
-              let totalValue = 0;
-              let value = 0;
-              let prev = 0;
-              for (let c of m[f]) {
-                let current = val[c];
-                if (current > prev) {
-                  // Undo the addition that was done, turn it into subtraction
-                  totalValue -= 2 * value;
-                }
-                if (current != prev) { // Different symbol?
-                  value = 0; // reset the sum for the new symbol
-                }
-                value += current; // keep adding same symbols
-                totalValue += current;
-                prev = current;
-              }
-              m[f] = totalValue;
-              if(Number.isNaN(totalValue)) falsePositives.push(m);
-            } else {
-              let c = m[f].toLowerCase();
-              let vn = {
-                'mươi$|(?<=.)(thập|bách|thiên|vạn)$': 0,
-                'mươi': '',
-                '(mười|thập)(?=.+)|m[ộố]t|nhất': 1,
-                'hai|nhị': 2,
-                'ba|tam': 3,
-                'bốn|tứ': 4,
-                '[nl]ăm|ngũ': 5,
-                'sáu|lục': 6,
-                'bảy|thất': 7,
-                'tám|bát': 8,
-                'chín|cửu': 9,
-                'mười|thập': 10,
-              };
-              Object.entries(vn).forEach(([w, i]) => {
-                w = new RegExp(w, 'gimu');
-                c = c.replace(w, i);
-              });
-              c = c.replace(/\s/g, '');
-              c = Number.parseInt(c);
-              if (!Number.isNaN(c)) m[f] = Number.parseInt(c);
-            }
+            let number = romanToDecimal(m[f]) || chineseNumberToDecimal(m[f]) || vietnameseNumberToDecimal(m[f]);
+            console.log('diz', m, number);
+            if(number) m[f] = number;
           }
         }
         for (let f of ['chapNum', 'bookNum']) {
@@ -3313,6 +3276,157 @@
       }
       return hash;
     });
+
+    function vietnameseNumberToDecimal(text) {
+      const digitWords = {
+        'không': 0,
+        'một': 1,
+        'mốt': 1,
+        'hai': 2,
+        'ba': 3,
+        'bốn': 4,
+        'tư': 4,
+        'năm': 5,
+        'lăm': 5,
+        'sáu': 6,
+        'bảy': 7,
+        'tám': 8,
+        'chín': 9
+      };
+
+      const scaleWords = {
+        'mươi': 10,
+        'trăm': 100,
+        'ngàn': 1000,
+        'nghìn': 1000,
+        'triệu': 1000000,
+        'tỷ': 1000000000
+      };
+
+      let tokens = text.toLowerCase().trim().split(/\s+/);
+      let total = 0;
+      let current = 0;
+      let temp = 0;
+      let lastScale = Infinity;
+
+      for (let i = 0; i < tokens.length; i++) {
+        const word = tokens[i];
+
+        if (digitWords.hasOwnProperty(word)) {
+          temp = digitWords[word];
+        } else if (word === 'mươi') {
+          if (temp === 0) temp = 1;
+          current += temp * 10;
+          temp = 0;
+        } else if (word === 'trăm') {
+          if (temp === 0 && current === 0) return 0; // e.g., "trăm" without a digit before
+          current += temp * 100;
+          temp = 0;
+        } else if (scaleWords.hasOwnProperty(word)) {
+          current += temp;
+          temp = 0;
+
+          let scale = scaleWords[word];
+          if (scale >= lastScale) return 0; // scales must decrease in value
+          total += current * scale;
+          lastScale = scale;
+          current = 0;
+        } else {
+          // Invalid word
+          return 0;
+        }
+      }
+
+      total += current + temp;
+
+      return total;
+    }
+
+    function chineseNumberToDecimal(text) {
+      const digits = {
+        'nhất': 1, 'nhị': 2, 'tam': 3, 'tứ': 4, 'ngũ': 5,
+        'lục': 6, 'thất': 7, 'bát': 8, 'cửu': 9
+      };
+
+      const multipliers = {
+        'thập': 10,
+        'bách': 100,
+        'thiên': 1000,
+        'vạn': 10000,
+        'ức': 100000000
+      };
+
+      let tokens = text.toLowerCase().trim().split(/\s+/);
+      let total = 0;
+      let current = 0;
+      let temp = 0;
+      let lastMultiplier = 1;
+
+      for (let i = 0; i < tokens.length; i++) {
+        const word = tokens[i];
+
+        if (digits[word]) {
+          temp = digits[word];
+        } else if (multipliers[word]) {
+          if (temp === 0 && word === 'thập') temp = 1; // e.g., "thập tứ" = 10 + 4
+          current += temp * multipliers[word];
+          temp = 0;
+        } else {
+          return 0; // invalid word
+        }
+      }
+
+      total = current + temp;
+      return total;
+    }
+
+    function romanToDecimal(roman) {
+      const romanValues = {
+        I: 1, V: 5, X: 10, L: 50,
+        C: 100, D: 500, M: 1000
+      };
+
+      if (!/^[IVXLCDM]+$/.test(roman.toUpperCase())) return 0;
+
+      roman = roman.toUpperCase();
+      let total = 0;
+      let prev = 0;
+
+      for (let i = roman.length - 1; i >= 0; i--) {
+        let current = romanValues[roman[i]];
+        if (!current) return 0;
+
+        if (current < prev) {
+          total -= current;
+        } else {
+          total += current;
+        }
+
+        prev = current;
+      }
+
+      // Re-encode to Roman to validate structure
+      if (decimalToRoman(total) !== roman) return 0;
+
+      return total;
+    }
+
+    function decimalToRoman(num) {
+      const romanMap = [
+        ["M", 1000], ["CM", 900], ["D", 500], ["CD", 400],
+        ["C", 100], ["XC", 90], ["L", 50], ["XL", 40],
+        ["X", 10], ["IX", 9], ["V", 5], ["IV", 4], ["I", 1]
+      ];
+
+      let result = "";
+      for (const [symbol, value] of romanMap) {
+        while (num >= value) {
+          result += symbol;
+          num -= value;
+        }
+      }
+      return result;
+    }
   </script>
 </body>
 </html>

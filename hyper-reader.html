@@ -6,18 +6,14 @@
   <title>Text Reader</title>
   <style>
     @font-face {
-      font-family: Reader1;
-      src: local('LMRoman12-Regular'), url('https://mirror.kku.ac.th/CTAN/fonts/lm/fonts/opentype/public/lm/lmroman12-regular.otf') format('opentype');
-    }
-    @font-face {
       font-family: Reader;
       font-weight: 400;
-      src: local('WorkSans-Regular');
+      src: local('SourceSerif4Roman-Regular');
     }
     @font-face {
       font-family: Reader;
       font-weight: 500;
-      src: local('WorkSans-Medium');
+      src: local('SourceSerif4Roman-Medium');
     }
 
     /** reset **/
@@ -113,7 +109,6 @@
     /** variables **/
     :root {
       --nav-width: 300px;
-      --aside-width: 60px;
       --gap: 1rem;
       --paper-padding: calc(var(--gap) * 3);
       cursor: default;
@@ -383,6 +378,31 @@
         --selection-bg: #153d4f;
       }
     }
+    .settings .colors button.gruvbox,
+    :root[data-color\:light=gruvbox] {
+      @media (prefers-color-scheme:light) {
+        --body-font-color: #282828;
+        --body-background-color: #ecdcb3;
+        --dialog-background-color: #d9c8a4;
+        --paper-background-color: #f2e5bc;
+        --paper-outline-color: #c8b899;
+        --horizontal-line-color: #c8b899;
+        --selection-bg: #bac6ab;
+      }
+    }
+    .settings .colors button.gruvbox,
+    :root[data-color\:dark=gruvbox] {
+      @media (prefers-color-scheme:dark) {
+        --body-font-color: #fbf1c7;
+        --body-background-color: #393634;
+        --dialog-background-color: #4c4642;
+        --paper-background-color: #1d2021;
+        --paper-outline-color: #5b534d;
+        --horizontal-line-color: #5b534d;
+        --selection-bg: #353f3d;
+        --link-color: #8ec07c;
+      }
+    }
     :root[data-color\:dark] {
       --body-font-smoothing: antialiased;
     }
@@ -393,6 +413,10 @@
     :root[data-paper-size=lg] { --paper-width: 160ex; }
     :root[data-paper-size=xl] { --paper-width: 100%; }
 
+    * {
+      font-family: inherit;
+    }
+
     *::selection {
       background-color: var(--selection-bg);
     }
@@ -400,13 +424,13 @@
     /** layout **/
     body {
       display: grid;
-      grid-template-columns: minmax(var(--nav-width), 1fr) minmax(auto, calc(var(--paper-width) + 2*var(--paper-padding))) minmax(var(--aside-width), 1fr);
+      grid-template-columns: minmax(var(--nav-width), 1fr) minmax(auto, calc(var(--paper-width) + 2*var(--paper-padding))) auto;
     }
 
     /** global **/
     html,
     body {
-      font: 16pt/1.4 Reader;
+      font: 18pt/1.4 Reader;
       color: var(--body-font-color);
       background: var(--body-background-color);
       font-variant-numeric: oldstyle-nums tabular-nums slashed-zero;
@@ -414,6 +438,12 @@
     }
     a {
       color: var(--link-color);
+    }
+
+    dialog {
+      background-color: var(--dialog-background-color, --body-background-color);
+      box-shadow: 0 10px 20px rgba(0,0,0,.2);
+      border: 1px solid var(--horizontal-line-color);
     }
 
     @property --scroll-progress {
@@ -493,22 +523,22 @@
       color: var(--body-font-color);
       outline: 1px solid var(--horizontal-line-color);
       width: 100%;
-      min-width: 25px;
+      min-width: 24px;
       aspect-ratio: 1;
       display: grid;
       place-content: center;
       border-radius: 50%;
       cursor: pointer;
+      padding: calc(var(--gap) * .25)
     }
     aside > div {
-      padding-top: var(--gap);
-      padding-bottom: var(--gap);
-      padding-left: var(--gap);
-      padding-right: var(--gap);
+      padding-top: calc(var(--gap) * .75);
+      padding-bottom: calc(var(--gap) * .75);
+      padding-left: calc(var(--gap) * .75);
+      padding-right: calc(var(--gap) * .75);
       display: flex;
       flex-direction: column;
       row-gap: calc(var(--gap) * .5);
-      width: var(--aside-width);
     }
     aside > div + div {
       position: relative;
@@ -526,6 +556,7 @@
       opacity: 0.5;
     }
     aside .colors button {
+      border-radius: 2em;
       &::before {
         content: var(--checkmark);
         font-size: .7em;
@@ -565,33 +596,23 @@
       animation: scrollProgress auto linear;
       animation-timeline: scroll();
     }
-    aside button.refresh {
-      box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
-      &::after {
-        content: '↻';
-        font-size: 1rem;
-        position: relative;
-        top: -1px;
-      }
-    }
-    aside .paper-size button {
-      border-radius: 0.75ex;
+
+    aside button {
+      border-radius: 1em;
+      corner-shape: squircle;
       outline-width: 0;
+
       &.selected {
         font-weight: bold;
       }
-    }
-    aside button.zen {
-      border-radius: 0.75ex;
-      outline-width: 0;
-      &::after {
+
+      &.refresh::after {
+        content: 'ℝ';
+      }
+      &.zen::after {
         content: 'ℤ';
       }
-    }
-    aside button.names-editor {
-      border-radius: 0.75ex;
-      outline-width: 0;
-      &::after {
+      &.names-editor::after {
         content: 'ℕ';
       }
     }
@@ -776,9 +797,6 @@
       left: calc((100% - var(--width)) / 2);
       border-radius: 1.5ex;
       overflow: hidden;
-      box-shadow: 0 10px 20px rgba(0,0,0,.2);
-      border: 1px solid var(--horizontal-line-color);
-      background: var(--body-background-color);
       display: flex;
       flex-direction: column;
       gap: 0.7ex;
@@ -1893,7 +1911,7 @@
                   })
                 ])
               ),
-              h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn', 'solarized', 'kiselevka'].map(color => (
+              h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn', 'solarized', 'kiselevka', 'gruvbox'].map(color => (
                 h('button', {
                   class: [color, { 'checked:light': settings['color:light'] == color, 'checked:dark': settings['color:dark'] == color }],
                   onclick: () => [SaveSettings, { [`color:${getColorScheme()}`]: color }],
@@ -2389,6 +2407,18 @@
         '^Tiếp theo thứ CHAP_NUM CHAP_TYPE',
         //Thứ 084 dâm mỹ hình ảnh
         '^Thứ CHAP_NUM TITLE$',
+        //14(dẫn sói vào nhà tam)
+        '^CHAP_NUM\\(TITLE\\)$',
+        '^NAME CHAP_NUM\\(TITLE\\)$',
+        //16, ức chế không được dục vọng
+        '^CHAP_NUM, TITLE$',
+        //3.40 sinh mệnh cái khe
+        '^BOOK_NUM.CHAP_NUM TITLE$',
+        //【3.17 vận mệnh là duy nhất giải】
+        '^【BOOK_NUM.CHAP_NUM TITLE】$',
+        //Thứ 1 cuốn thứ 3 chương xuất phát
+        '^Thứ BOOK_NUM cuốn thứ CHAP_NUM chương TITLE$',
+        '^※※※$',
       ].sort((a, z) => {
         let specificity = (s) => {
           let specificity = 0;

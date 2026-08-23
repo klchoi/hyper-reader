@@ -1472,27 +1472,37 @@
         //refresh recent books in state
         dispatch(LoadRecentBooks);
 
-        let filesOpenInNewTab = files;
-        let fileOpenInCurrentTab = null;
+        let books = files.map(({ file }) => Book(file));
+
+        let booksOpenInNewTab = books;
+        let bookOpenInCurrentTab = null;
         if(state.book) {
           //if this book is already open, open other files in new tabs
-          fileOpenInCurrentTab = files.find(file => (Book(file).id == state.book.id));
-          filesOpenInNewTab = files.filter(file => (file != fileOpenInCurrentTab));
+          bookOpenInCurrentTab = books.find(book => (book.id == state.book.id));
+          booksOpenInNewTab = books.filter(book => (book != bookOpenInCurrentTab));
         } else {
           //if no book is open, open the first file in current tab, other files in new tabs
-          [fileOpenInCurrentTab, ...filesOpenInNewTab] = files;
+          [bookOpenInCurrentTab, ...booksOpenInNewTab] = books;
         }
 
-        if(fileOpenInCurrentTab) {
-          let book = Book(fileOpenInCurrentTab);
-          let chapterId = (await state.db.get('progress', book.id))?.chapterId;
-          state.router.push({ book: book.id, chapterId });
-          dispatch(OpenBook, { bookId: book.id, chapterId });
+        //resolve every chapter up front: an await between two window.open calls loses the
+        //drop's user activation, so every tab after the first gets blocked by the popup blocker
+        let chapterIds = new Map(await Promise.all(books.map(async (book) => (
+          [book.id, (await state.db.get('progress', book.id))?.chapterId]
+        ))));
+
+        let blocked = booksOpenInNewTab.filter(book => (
+          !window.open(state.router.route({ book: book.id, chapter: chapterIds.get(book.id) }), '_blank')
+        ));
+        if (blocked.length) {
+          console.info('Blocked by the popup blocker, opened in the library only:', blocked.map(book => book.name));
         }
-        for(let { file } of filesOpenInNewTab) {
-          let book = Book(file);
-          let chapterId = (await state.db.get('progress', book.id))?.chapterId;
-          window.open(`#book=${book.id}&chapter=${chapterId}`, '_blank');
+
+        if(bookOpenInCurrentTab) {
+          let book = bookOpenInCurrentTab;
+          let chapterId = chapterIds.get(book.id);
+          state.router.push({ book: book.id, chapter: chapterId });
+          dispatch(OpenBook, { bookId: book.id, chapterId });
         }
       }
     ];

@@ -1287,6 +1287,14 @@
       }
       return content;
     });
+    // hue per name id, kept for the whole session: the same character can show up
+    // as `Lý Tiêu Dao` in one chapter and only as `Tiêu Dao` in the next, so
+    // hashing whichever id survives the merge below would recolor them mid-book
+    let nameHues = new Map();
+    let shortNameId = (nameId) => {
+      let words = nameId.split(' ');
+      if(words.length == 3 || words.length == 4) return words.slice(-2).join(' ');
+    };
     let HighlightNames = (state) => [state, async () => {
       await nextTick();
 
@@ -1390,10 +1398,13 @@
       // merge sub ranges
       let nameIds = Object.keys(ranges).sort((a, z) => z.length - a.length);
       //console.debug(Object.keys(ranges));
+      let aliases = {};
       for(let nameId in ranges) {
         let fullNameId = nameIds.find(id => id.endsWith(' ' + nameId));
-        if(fullNameId) {
+        if(fullNameId && ranges[fullNameId]) {
           ranges[fullNameId].push(...ranges[nameId]);
+          if(!aliases[fullNameId]) aliases[fullNameId] = [fullNameId];
+          aliases[fullNameId].push(nameId);
           delete ranges[nameId];
         }
       }
@@ -1401,9 +1412,19 @@
       //console.debug((ranges));
 
       for(let nameId in ranges) {
-        let hash = ((hashCode(nameId) % 360) + 360) % 360;
-        let color = chromaJs.hcl(hash, 100, 70);
-        let styleId = 'hl-' + hash;
+        // reuse the hue of any id this character is already known by, including the
+        // short name derived from a full one, so it stays the same across chapters
+        let ids = aliases[nameId] || [nameId];
+        let shortIds = ids.map(shortNameId).filter(id => id && !ids.includes(id));
+        let hue = [...ids, ...shortIds].map(id => nameHues.get(id)).find(hue => hue != undefined);
+        if(hue == undefined) hue = ((hashCode(nameId) % 360) + 360) % 360;
+        for(let id of ids) nameHues.set(id, hue);
+        for(let id of shortIds) if(!nameHues.has(id)) nameHues.set(id, hue);
+
+        let color = chromaJs.hcl(hue, 100, 70);
+        // keyed by name, not by hue: distinct names do collide on a hue, and
+        // CSS.highlights.set would then drop one of their highlights entirely
+        let styleId = 'hl-' + (hashCode(nameId) >>> 0).toString(36);
         let highlight = new Highlight();
         for(let range of ranges[nameId]) {
           highlight.add(range);
@@ -1419,10 +1440,10 @@
         if(!styleEl) {
           styleEl = document.createElement('style');
           styleEl.setAttribute('name', styleId);
-          // styleEl.textContent = `::highlight(${styleId}) { text-decoration: underline 5px solid ${color} !important; text-underline-offset: 6px; text-decoration-skip-ink: none; }`;
-          styleEl.textContent = `::highlight(${styleId}) { color: ${color} !important; }`;
           document.head.appendChild(styleEl);
         }
+        // styleEl.textContent = `::highlight(${styleId}) { text-decoration: underline 5px solid ${color} !important; text-underline-offset: 6px; text-decoration-skip-ink: none; }`;
+        styleEl.textContent = `::highlight(${styleId}) { color: ${color} !important; }`;
       }
     }];
 

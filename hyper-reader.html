@@ -1299,14 +1299,31 @@
         }
       ];
     };
-    let nameWords = {
-      'mưa': 'vũ',
-      'nhẹ': 'khinh',
-      'mây': 'vân',
-    };
+    // a translation often leaves the plain Vietnamese word where the name wants the
+    // Sino-Vietnamese one: `Công Tôn ngày` for `Công Tôn Thiên`. First word of each
+    // group is the one a name is written with, the rest are what to also look for
+    let nameWordGroups = [
+      ['vũ', 'mưa'],
+      ['khinh', 'nhẹ'],
+      ['vân', 'mây'],
+      ['nhan', 'mặt'],
+      ['thiên', 'ngày'],
+    ];
+    let nameWords = Object.fromEntries(nameWordGroups.flatMap(([nameWord, ...others]) => (
+      others.map(other => [other, nameWord])
+    )));
     let mapNameWords = (name) => name.split(' ')
       .map(word => toCase(nameWords[word.toLowerCase()] || word, getCase(word)))
       .join(' ');
+    // match a listed name however its words were translated. only for names of two
+    // words or more: on its own `ngày` is the everyday word far more often than a name
+    let nameWordPattern = (name) => {
+      if(!name.trim().includes(' ')) return name;
+      return name.replace(/\p{L}+/gu, word => {
+        let group = nameWordGroups.find(group => group.includes(word.toLowerCase()));
+        return group ? `(?:${group.join('|')})` : word;
+      });
+    };
     // the name a `from -> to` entry ends up written as in the text, which is what
     // the highlighter has to look for: anything else and the edit reads as detected
     let editedName = (entry) => {
@@ -1342,7 +1359,7 @@
           to = titleCase(name);
         }
         if(from) {
-          let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${from}(?=[^\\p{L}]|$)`, 'gui');
+          let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${nameWordPattern(from)}(?=[^\\p{L}]|$)`, 'gui');
           content = content.replaceAll(fromRegex, name => (
             mapNameWords(typeof to == 'function' ? to(name) : to)
           ));

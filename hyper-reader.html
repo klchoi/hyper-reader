@@ -1299,6 +1299,27 @@
         }
       ];
     };
+    let nameWords = {
+      'mưa': 'vũ',
+      'nhẹ': 'khinh',
+      'mây': 'vân',
+    };
+    let mapNameWords = (name) => name.split(' ')
+      .map(word => toCase(nameWords[word.toLowerCase()] || word, getCase(word)))
+      .join(' ');
+    // the name a `from -> to` entry ends up written as in the text, which is what
+    // the highlighter has to look for: anything else and the edit reads as detected
+    let editedName = (entry) => {
+      let [from, to] = entry.split(/->|→/).map(n => n?.trim());
+      if(to == undefined) {
+        from = entry;
+        to = titleCase(entry);
+      } else {
+        to = useCase(from, to);
+      }
+      if(typeof to == 'function') to = to(from);
+      return to && mapNameWords(to);
+    };
     memoize(function correctNames(content, names) {
       if(!names) return content;
       // every name on the same line is the same person, so each one still gets
@@ -1322,18 +1343,9 @@
         }
         if(from) {
           let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${from}(?=[^\\p{L}]|$)`, 'gui');
-          content = content.replaceAll(fromRegex, name => {
-            if(typeof to == 'function') name = to(name);
-            else name = to;
-            name = name.split(' ').map(w => {
-              return toCase({
-                'mưa': 'vũ',
-                'nhẹ': 'khinh',
-                'mây': 'vân',
-              }[w.toLowerCase()] || w, getCase(w));
-            }).join(' ');
-            return name;
-          });
+          content = content.replaceAll(fromRegex, name => (
+            mapNameWords(typeof to == 'function' ? to(name) : to)
+          ));
         }
       }
       return content;
@@ -1439,18 +1451,10 @@
         for(let name of line.split(',')) {
           name = name.trim();
           if (!name) continue;
-          let to = name.split(/->|→/)[1]?.trim();
-          let hasArrow = to != undefined;
-          if(!hasArrow) to = titleCase(name);
+          let hasArrow = /->|→/.test(name);
+          let to = editedName(name);
+          // a lowercase entry is a wording fix, not a name to highlight
           if(to && getCase(to) != 'lower') {
-            to = to.split(' ').map(w => {
-              return toCase({
-                'mưa': 'vũ',
-                'nhẹ': 'khinh',
-                'mây': 'vân',
-                'mặt': 'nhan',
-              }[w.toLowerCase()] || w, getCase(w));
-            }).join(' ');
             lineNames.push(to);
             // add short name automatically
             let shortName = hasArrow ? undefined : shortNameId(to);

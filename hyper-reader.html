@@ -1252,7 +1252,9 @@
     }];
     memoize(function correctNames(content, names) {
       if(!names) return content;
-      names = names.split('\n');
+      // every name on the same line is the same person, so each one still gets
+      // corrected on its own; `aliasOf` in HighlightNames is what ties them together
+      names = names.split(/[\n,]/);
       // add short name automatically
       for(let name of names) {
         if(name.match(/->|→/)) continue;
@@ -1292,7 +1294,7 @@
     // hashing whichever id survives the merge below would recolor them mid-book
     let nameHues = new Map();
     let shortNameId = (nameId) => {
-      let words = nameId.split(' ');
+      let words = nameId.trim().split(/\s+/);
       if(words.length == 3 || words.length == 4) return words.slice(-2).join(' ');
     };
     let HighlightNames = (state) => [state, async () => {
@@ -1302,23 +1304,16 @@
 
       // names from editor
       let knowNames = [];
-      if(state.namesEditor.names) {
-        let names = (state.namesEditor.names || '').split('\n');
-        // add short name automatically
-        for(let name of names) {
-          if(name.match(/->|→/)) continue;
-          name = name.trim();
-          name = name.split(/\s/);
-          if(name.length == 3 || name.length == 4) names.push(name.at(-2) + ' ' + name.at(-1));
-        }
-        for(let name of names) {
+      let aliasOf = new Map();
+      for(let line of (state.namesEditor.names || '').split('\n')) {
+        // every name on the same line is the same person
+        let lineNames = [];
+        for(let name of line.split(',')) {
           name = name.trim();
           if (!name) continue;
-          let [from, to] = name.split(/->|→/).map(n => n?.trim());
-          if(to == undefined) {
-            from = name;
-            to = titleCase(name);
-          }
+          let to = name.split(/->|→/)[1]?.trim();
+          let hasArrow = to != undefined;
+          if(!hasArrow) to = titleCase(name);
           if(to && getCase(to) != 'lower') {
             to = to.split(' ').map(w => {
               return toCase({
@@ -1328,8 +1323,17 @@
                 'mặt': 'nhan',
               }[w.toLowerCase()] || w, getCase(w));
             }).join(' ');
-            knowNames.push(to);
+            lineNames.push(to);
+            // add short name automatically
+            let shortName = hasArrow ? undefined : shortNameId(to);
+            if(shortName) lineNames.push(shortName);
           }
+        }
+        knowNames.push(...lineNames);
+        // the first name on the line names the person, the rest point back to it
+        let [canonicalId, ...aliasIds] = lineNames.map(name => name.toLowerCase());
+        for(let aliasId of aliasIds) {
+          if(aliasId != canonicalId && !aliasOf.has(aliasId)) aliasOf.set(aliasId, canonicalId);
         }
       }
 
@@ -1400,6 +1404,8 @@
       //console.debug(Object.keys(ranges));
       let aliases = {};
       for(let nameId in ranges) {
+        // an explicit alias already says who this is, don't guess from the suffix
+        if(aliasOf.has(nameId)) continue;
         let fullNameId = nameIds.find(id => id.endsWith(' ' + nameId));
         if(fullNameId && ranges[fullNameId]) {
           ranges[fullNameId].push(...ranges[nameId]);
@@ -1411,25 +1417,38 @@
       //console.debug(Object.keys(ranges));
       //console.debug((ranges));
 
+      // one group per person: names the editor lists on the same line share a key,
+      // which is also the key their hue is remembered under
+      let groups = {};
       for(let nameId in ranges) {
+        let groupId = aliasOf.get(nameId) || nameId;
+        if(!groups[groupId]) groups[groupId] = { ids: [], ranges: [] };
+        groups[groupId].ids.push(...(aliases[nameId] || [nameId]));
+        groups[groupId].ranges.push(...ranges[nameId]);
+      }
+      //console.debug(Object.keys(groups));
+
+      for(let groupId in groups) {
         // reuse the hue of any id this character is already known by, including the
         // short name derived from a full one, so it stays the same across chapters
-        let ids = aliases[nameId] || [nameId];
-        let shortIds = ids.map(shortNameId).filter(id => id && !ids.includes(id));
-        let hue = [...ids, ...shortIds].map(id => nameHues.get(id)).find(hue => hue != undefined);
-        if(hue == undefined) hue = ((hashCode(nameId) % 360) + 360) % 360;
-        for(let id of ids) nameHues.set(id, hue);
+        let { ids, ranges: groupRanges } = groups[groupId];
+        // a short name the editor gave to somebody else is not this person's
+        let shortIds = ids.map(shortNameId)
+          .filter(id => id && !ids.includes(id) && (aliasOf.get(id) || groupId) == groupId);
+        let hue = [groupId, ...ids, ...shortIds].map(id => nameHues.get(id)).find(hue => hue != undefined);
+        if(hue == undefined) hue = ((hashCode(groupId) % 360) + 360) % 360;
+        for(let id of [groupId, ...ids]) nameHues.set(id, hue);
         for(let id of shortIds) if(!nameHues.has(id)) nameHues.set(id, hue);
 
         let color = chromaJs.hcl(hue, 100, 70);
         // keyed by name, not by hue: distinct names do collide on a hue, and
         // CSS.highlights.set would then drop one of their highlights entirely
-        let styleId = 'hl-' + (hashCode(nameId) >>> 0).toString(36);
+        let styleId = 'hl-' + (hashCode(groupId) >>> 0).toString(36);
         let highlight = new Highlight();
-        for(let range of ranges[nameId]) {
+        for(let range of groupRanges) {
           highlight.add(range);
           //console.debug('HighlightNames', 'highlight', range.toString(), {
-          //  nameId,
+          //  groupId,
           //  range,
           //  color,
           //  styleId,

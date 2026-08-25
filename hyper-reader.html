@@ -1027,6 +1027,7 @@
             await nextTick();
             document.querySelector('#command-palette input').select();
             dispatch(HighlightMatches);
+            dispatch(HighlightNames, commandPaletteNames);
           }
         }
       ];
@@ -1294,6 +1295,7 @@
           getSelection().removeAllRanges();
           dispatch(SaveNames, { bookId: state.book.id, names });
           dispatch(HighlightNames);
+          dispatch(HighlightNames, commandPaletteNames);
         }
       ];
     };
@@ -1348,8 +1350,8 @@
     let nameIdsOf = (names) => (names || '').split(/[\n,]/)
       .map(name => name.split(/->|→/).at(-1).trim().toLowerCase())
       .filter(Boolean);
-    // text node -> the names found in it, for hit testing the pointer
-    let detectedNames = new Map();
+    // scope prefix -> (text node -> the names found in it), for hit testing the pointer
+    let detectedNames = {};
     let isWordChar = (char) => char != undefined && /[\p{L}\p{N}]/u.test(char);
     // a partially selected word counts as the whole word
     let wholeWords = (range) => {
@@ -1406,18 +1408,27 @@
     let detectedNameAt = (x, y) => {
       let caret = caretAt(x, y);
       if(!caret) return;
-      return (detectedNames.get(caret.node) || []).find(({ range }) => (
-        caret.offset >= range.startOffset && caret.offset <= range.endOffset &&
-        [...range.getClientRects()].some(rect => (
-          x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-        ))
-      ));
+      for(let byNode of Object.values(detectedNames)) {
+        let found = (byNode.get(caret.node) || []).find(({ range }) => (
+          caret.offset >= range.startOffset && caret.offset <= range.endOffset &&
+          [...range.getClientRects()].some(rect => (
+            x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+          ))
+        ));
+        if(found) return found;
+      }
     };
-    let HighlightNames = (state) => [state, async () => {
+    // the article and the command palette are highlighted independently, each pass
+    // owning its own style ids, so one can be refreshed without redoing the other
+    let articleNames = { selector: 'article p, nav a', prefix: 'hl' };
+    let commandPaletteNames = { selector: '#command-palette a', prefix: 'cp' };
+    let HighlightNames = (state, { selector, prefix } = articleNames) => [state, async () => {
       await nextTick();
 
-      CSS.highlights.clear();
-      detectedNames = new Map();
+      for(let styleId of [...CSS.highlights.keys()]) {
+        if(styleId.startsWith(prefix + '-')) CSS.highlights.delete(styleId);
+      }
+      detectedNames[prefix] = new Map();
 
       // names from editor
       let knowNames = [];
@@ -1472,7 +1483,7 @@
         'NameBegin': /(?<!^|[.:"'!?()[\]] ?|{Word} )/,
       }, 'gu');
       let names = new Set();
-      document.querySelectorAll('article p, nav a').forEach(el => {
+      document.querySelectorAll(selector).forEach(el => {
         el.childNodes.forEach(el => {
           if (el.nodeType != Node.TEXT_NODE) return;
 
@@ -1488,6 +1499,8 @@
         return z.length - a.length;
       });
       //console.log({names})
+      // an empty alternation below would match the empty string everywhere
+      if(!names.length) return;
 
       // create ranges;
       nameRegex = buildRegex([
@@ -1497,7 +1510,7 @@
       }, 'gui');
       //console.log('nameRegex:', nameRegex);
       let ranges = {};
-      document.querySelectorAll('article p, nav a').forEach(el => {
+      document.querySelectorAll(selector).forEach(el => {
         el.childNodes.forEach(el => {
           if (el.nodeType != Node.TEXT_NODE) return;
 
@@ -1511,8 +1524,8 @@
             ranges[nameId].push(found);
             // only names still missing from the list are worth pointing at
             if(!found.known) {
-              if(!detectedNames.has(el)) detectedNames.set(el, []);
-              detectedNames.get(el).push(found);
+              if(!detectedNames[prefix].has(el)) detectedNames[prefix].set(el, []);
+              detectedNames[prefix].get(el).push(found);
             }
             //console.debug('HighlightNames', 'found', {
             //  name: match[0],
@@ -1568,7 +1581,7 @@
         let color = chromaJs.hcl(hue, 100, 70);
         // keyed by name, not by hue: distinct names do collide on a hue, and
         // CSS.highlights.set would then drop one of their highlights entirely
-        let styleId = 'hl-' + (hashCode(groupId) >>> 0).toString(36);
+        let styleId = prefix + '-' + (hashCode(groupId) >>> 0).toString(36);
         // a name already in the list only gets its color, one still missing from it
         // also gets a dashed underline, so it reads as something to click
         for(let [suffix, known] of [['', true], ['-new', false]]) {
@@ -1607,11 +1620,11 @@
         let range = wholeWords(selection.getRangeAt(0));
         let el = range.commonAncestorContainer;
         if(el.nodeType == Node.TEXT_NODE) el = el.parentElement;
-        if(!el?.closest('article, nav')) return;
+        if(!el?.closest('article, nav, #command-palette')) return;
         let name = asName(range);
         if(name) return addNameAt(range, name);
       };
-      let busy = () => document.querySelector('dialog[open]');
+      let busy = () => document.querySelector('#names-editor[open]');
       let hoveredName = (x, y) => {
         // a selection is the more explicit ask, let it win
         if(!getSelection().isCollapsed) return;
@@ -1963,15 +1976,20 @@
             fallbackValue: [],
             getHash() {
               let file = files.find(f => Book(f).id == book.id);
-              return file.size;
+              // the labels are corrected names, so a name edit changes them
+              return [file.size, namesEditor.names].join('/');
             },
             getValue() {
-              return book.chapters.map(chapter => ({
-                label: fixNames(chapter.title),
-                action: OpenBook,
-                payload: { bookId: book.id, chapterId: chapter.id },
-                term: latinize(chapter.title).toLowerCase(),
-              }));
+              return book.chapters.map(chapter => {
+                let label = fixNames(chapter.title);
+                return {
+                  label,
+                  action: OpenBook,
+                  payload: { bookId: book.id, chapterId: chapter.id },
+                  // searchable under both spellings, corrected and original
+                  term: latinize([label, chapter.title].join(' | ')).toLowerCase(),
+                };
+              });
             },
           });
         }
@@ -2182,6 +2200,7 @@
                     [SetCommandQuery, event.target.value],
                     [SelectCommand, 0],
                     [HighlightMatches],
+                    [HighlightNames, commandPaletteNames],
                   ]],
                 }),
                 h('input', { type: 'submit', hidden: true }),

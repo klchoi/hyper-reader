@@ -838,6 +838,33 @@
       }
     }
 
+    /** add name button **/
+    #add-name {
+      position: fixed;
+      z-index: 10;
+      transform: translate3d(-50%, -100%, 0);
+      appearance: none;
+      background: var(--paper-background-color);
+      color: var(--link-color);
+      outline: 1px solid var(--horizontal-line-color);
+      box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
+      border-radius: 0.8ex;
+      corner-shape: squircle;
+      padding: 0.1ex 0.8ex;
+      font: inherit;
+      font-size: 0.7rem;
+      line-height: 1.7;
+      white-space: nowrap;
+      max-width: 40ch;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+
+      &:hover {
+        color: var(--body-font-color);
+      }
+    }
+
     .text-left { text-align: left; }
     .text-right { text-align: right; }
     .text-center { text-align: center; }
@@ -1250,6 +1277,26 @@
       dispatch(SetNames, names);
       dispatch(HighlightNames);
     }];
+    let sameAddName = (a, z) => a?.name == z?.name && a?.top == z?.top && a?.left == z?.left;
+    let ShowAddName = (state, addName) => {
+      // mousemove and selectionchange fire a lot, don't re-render for nothing
+      if(sameAddName(state.namesEditor.addName, addName)) return state;
+      return { ...state, namesEditor: { ...state.namesEditor, addName } };
+    };
+    let AddName = (state, { name }) => {
+      if(!state.book) return ShowAddName(state, null);
+      let names = (state.namesEditor.names || '').trim();
+      if(nameIdsOf(names).includes(name.toLowerCase())) return ShowAddName(state, null);
+      names = (names ? names + '\n' : '') + name + '\n';
+      return [
+        { ...state, namesEditor: { ...state.namesEditor, names, addName: null } },
+        (dispatch) => {
+          getSelection().removeAllRanges();
+          dispatch(SaveNames, { bookId: state.book.id, names });
+          dispatch(HighlightNames);
+        }
+      ];
+    };
     memoize(function correctNames(content, names) {
       if(!names) return content;
       // every name on the same line is the same person, so each one still gets
@@ -1297,10 +1344,80 @@
       let words = nameId.trim().split(/\s+/);
       if(words.length == 3 || words.length == 4) return words.slice(-2).join(' ');
     };
+    // every name the editor already knows about, one id per entry
+    let nameIdsOf = (names) => (names || '').split(/[\n,]/)
+      .map(name => name.split(/->|→/).at(-1).trim().toLowerCase())
+      .filter(Boolean);
+    // text node -> the names found in it, for hit testing the pointer
+    let detectedNames = new Map();
+    let isWordChar = (char) => char != undefined && /[\p{L}\p{N}]/u.test(char);
+    // a partially selected word counts as the whole word
+    let wholeWords = (range) => {
+      range = range.cloneRange();
+      let { startContainer, endContainer } = range;
+      if(startContainer.nodeType == Node.TEXT_NODE) {
+        let text = startContainer.textContent;
+        // only when the selection really starts inside a word, not next to one
+        while(isWordChar(text[range.startOffset]) && isWordChar(text[range.startOffset - 1])) {
+          range.setStart(startContainer, range.startOffset - 1);
+        }
+      }
+      if(endContainer.nodeType == Node.TEXT_NODE) {
+        let text = endContainer.textContent;
+        while(isWordChar(text[range.endOffset - 1]) && isWordChar(text[range.endOffset])) {
+          range.setEnd(endContainer, range.endOffset + 1);
+        }
+      }
+      return range;
+    };
+    let asName = (range) => {
+      let name = range.toString()
+        .replace(/\s+/g, ' ')
+        .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+      if(name.length > 80 || !/\p{L}/u.test(name)) return;
+      return name;
+    };
+    // where to float the button: centered on top of what it would add, but always
+    // far enough inside the viewport to stay clickable
+    let addNameAt = (range, name) => {
+      let rect = range.getBoundingClientRect();
+      if(!rect.width && !rect.height) return;
+      return {
+        name,
+        top: Math.round(Math.max(rect.top, 30)),
+        left: Math.round(_.clamp(rect.left + rect.width / 2, 60, innerWidth - 60)),
+      };
+    };
+    let setHighlightStyle = (styleId, css) => {
+      let styleEl = document.head.querySelector(`style[name="${styleId}"]`);
+      if(!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.setAttribute('name', styleId);
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = `::highlight(${styleId}) { ${css} }`;
+    };
+    let caretAt = (x, y) => {
+      let position = document.caretPositionFromPoint?.(x, y);
+      if(position) return { node: position.offsetNode, offset: position.offset };
+      let range = document.caretRangeFromPoint?.(x, y);
+      if(range) return { node: range.startContainer, offset: range.startOffset };
+    };
+    let detectedNameAt = (x, y) => {
+      let caret = caretAt(x, y);
+      if(!caret) return;
+      return (detectedNames.get(caret.node) || []).find(({ range }) => (
+        caret.offset >= range.startOffset && caret.offset <= range.endOffset &&
+        [...range.getClientRects()].some(rect => (
+          x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+        ))
+      ));
+    };
     let HighlightNames = (state) => [state, async () => {
       await nextTick();
 
       CSS.highlights.clear();
+      detectedNames = new Map();
 
       // names from editor
       let knowNames = [];
@@ -1336,6 +1453,8 @@
           if(aliasId != canonicalId && !aliasOf.has(aliasId)) aliasOf.set(aliasId, canonicalId);
         }
       }
+
+      let knowNameIds = new Set(knowNames.map(name => name.toLowerCase()));
 
       // collect names
       let nameRegex = buildRegex([
@@ -1387,8 +1506,14 @@
             range.setStart(el, match.index);
             range.setEnd(el, match.index + match[0].length);
             let nameId = match[0].toLowerCase();
+            let found = { range, name: match[0], known: knowNameIds.has(nameId) };
             if(!ranges[nameId]) ranges[nameId] = [];
-            ranges[nameId].push(range);
+            ranges[nameId].push(found);
+            // only names still missing from the list are worth pointing at
+            if(!found.known) {
+              if(!detectedNames.has(el)) detectedNames.set(el, []);
+              detectedNames.get(el).push(found);
+            }
             //console.debug('HighlightNames', 'found', {
             //  name: match[0],
             //  excerp: el.textContent.slice(Math.max(0, match.index - 50), match.index + match[0].length + 50),
@@ -1444,27 +1569,72 @@
         // keyed by name, not by hue: distinct names do collide on a hue, and
         // CSS.highlights.set would then drop one of their highlights entirely
         let styleId = 'hl-' + (hashCode(groupId) >>> 0).toString(36);
-        let highlight = new Highlight();
-        for(let range of groupRanges) {
-          highlight.add(range);
-          //console.debug('HighlightNames', 'highlight', range.toString(), {
-          //  groupId,
-          //  range,
-          //  color,
-          //  styleId,
-          //});
+        // a name already in the list only gets its color, one still missing from it
+        // also gets a dashed underline, so it reads as something to click
+        for(let [suffix, known] of [['', true], ['-new', false]]) {
+          let found = groupRanges.filter(found => found.known == known);
+          if(!found.length) continue;
+          let highlight = new Highlight();
+          for(let { range } of found) {
+            highlight.add(range);
+            //console.debug('HighlightNames', 'highlight', range.toString(), {
+            //  groupId,
+            //  range,
+            //  color,
+            //  styleId,
+            //});
+          }
+          CSS.highlights.set(styleId + suffix, highlight);
+          setHighlightStyle(styleId + suffix, [
+            `color: ${color} !important;`,
+            known ? '' : 'text-decoration: underline 1px dashed !important; text-underline-offset: 0.3em; text-decoration-skip-ink: none;',
+          ].join(' '));
         }
-        CSS.highlights.set(styleId, highlight);
-        let styleEl = document.head.querySelector(`style[name="${styleId}"]`);
-        if(!styleEl) {
-          styleEl = document.createElement('style');
-          styleEl.setAttribute('name', styleId);
-          document.head.appendChild(styleEl);
-        }
-        // styleEl.textContent = `::highlight(${styleId}) { text-decoration: underline 5px solid ${color} !important; text-underline-offset: 6px; text-decoration-skip-ink: none; }`;
-        styleEl.textContent = `::highlight(${styleId}) { color: ${color} !important; }`;
       }
     }];
+
+    let InitAddNameButton = (dispatch) => {
+      let hideTimer;
+      let show = (addName) => {
+        clearTimeout(hideTimer);
+        if(addName) dispatch(ShowAddName, addName);
+        // a small grace period, the pointer has to travel to the button
+        else hideTimer = setTimeout(() => dispatch(ShowAddName, null), 300);
+      };
+      let selectedName = () => {
+        let selection = getSelection();
+        if(!selection.rangeCount || selection.isCollapsed) return;
+        let range = wholeWords(selection.getRangeAt(0));
+        let el = range.commonAncestorContainer;
+        if(el.nodeType == Node.TEXT_NODE) el = el.parentElement;
+        if(!el?.closest('article, nav')) return;
+        let name = asName(range);
+        if(name) return addNameAt(range, name);
+      };
+      let busy = () => document.querySelector('dialog[open]');
+      let hoveredName = (x, y) => {
+        // a selection is the more explicit ask, let it win
+        if(!getSelection().isCollapsed) return;
+        let found = detectedNameAt(x, y);
+        if(found) return addNameAt(found.range, found.name);
+      };
+      let onMouseMove = (event) => {
+        // moving onto the button itself must not take it away
+        if(event.target.closest?.('#add-name')) return clearTimeout(hideTimer);
+        show(!busy() && (selectedName() || hoveredName(event.clientX, event.clientY)));
+      };
+      let onSelectionChange = () => show(!busy() && selectedName());
+      addEventListener('mousemove', onMouseMove);
+      // the button is fixed, so a scroll slides the name out from under it
+      addEventListener('scroll', onSelectionChange, { capture: true, passive: true });
+      document.addEventListener('selectionchange', onSelectionChange);
+      return () => {
+        clearTimeout(hideTimer);
+        removeEventListener('mousemove', onMouseMove);
+        removeEventListener('scroll', onSelectionChange, { capture: true });
+        document.removeEventListener('selectionchange', onSelectionChange);
+      };
+    };
 
     let OpenNextChapter = (state, indexDelta = 1) => [
       state,
@@ -1733,6 +1903,7 @@
           namesEditor: {
             open: false,
             names: '',
+            addName: null,
             form: {
               names: '',
             },
@@ -1761,6 +1932,7 @@
       subscriptions: (state) => [
         [InitKeyboardNavigator],
         [InitCommandPalette],
+        [InitAddNameButton],
       ],
       node: document.body,
       view: ({ router, files, book, chapter, progress, settings, commandPalette, namesEditor }) => {
@@ -2067,7 +2239,17 @@
                 }),
                 h('button', { type: 'submit' }, [text('Save')]),
               ])
-            ])
+            ]),
+            namesEditor.addName && (
+              h('button', {
+                id: 'add-name',
+                style: { top: `${namesEditor.addName.top}px`, left: `${namesEditor.addName.left}px` },
+                // keep the selection and the button alive long enough to be clicked
+                onmousedown: (state, event) => (event.preventDefault(), state),
+                onclick: [AddName, { name: namesEditor.addName.name }],
+                title: 'Add to names list',
+              }, text(`+ ${namesEditor.addName.name}`))
+            )
           ])
         );
       }

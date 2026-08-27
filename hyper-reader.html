@@ -1409,10 +1409,18 @@
       return name;
     };
     // where to float the button: centered on top of what it would add, but always
-    // far enough inside the viewport to stay clickable
-    let addNameAt = (range, name) => {
-      let rect = range.getBoundingClientRect();
-      if(!rect.width && !rect.height) return;
+    // far enough inside the viewport to stay clickable. a name wrapped over two
+    // lines has one rect per line, and their union spans the whole column, so
+    // anchor to the line the pointer is on instead of to the union
+    let addNameAt = (range, name, x, y) => {
+      let rects = [...range.getClientRects()].filter(rect => rect.width || rect.height);
+      if(!rects.length) return;
+      // vertical distance first: the pointer sits between two lines far more often
+      // than it sits past the end of the one it is on
+      let rect = y == undefined ? rects[0] : _.minBy(rects, rect => (
+        Math.max(rect.top - y, y - rect.bottom, 0) * 1e4 +
+        Math.max(rect.left - x, x - rect.right, 0)
+      ));
       return {
         name,
         top: Math.round(Math.max(rect.top, 30)),
@@ -1661,6 +1669,9 @@
 
     let InitAddNameButton = (dispatch) => {
       let hideTimer;
+      // the last pointer position, so a selection that wraps over two lines can be
+      // anchored to the line being dragged over, not to the first one
+      let pointer = {};
       let show = (addName) => {
         clearTimeout(hideTimer);
         if(addName) dispatch(ShowAddName, addName);
@@ -1675,18 +1686,19 @@
         if(el.nodeType == Node.TEXT_NODE) el = el.parentElement;
         if(!el?.closest('article, nav, #command-palette')) return;
         let name = asName(range);
-        if(name) return addNameAt(range, name);
+        if(name) return addNameAt(range, name, pointer.x, pointer.y);
       };
       let busy = () => document.querySelector('#names-editor[open]');
       let hoveredName = (x, y) => {
         // a selection is the more explicit ask, let it win
         if(!getSelection().isCollapsed) return;
         let found = detectedNameAt(x, y);
-        if(found) return addNameAt(found.range, found.name);
+        if(found) return addNameAt(found.range, found.name, x, y);
       };
       let onMouseMove = (event) => {
         // moving onto the button itself must not take it away
         if(event.target.closest?.('#add-name')) return clearTimeout(hideTimer);
+        pointer = { x: event.clientX, y: event.clientY };
         show(!busy() && (selectedName() || hoveredName(event.clientX, event.clientY)));
       };
       let onSelectionChange = () => show(!busy() && selectedName());

@@ -843,25 +843,39 @@
       position: fixed;
       z-index: 10;
       transform: translate3d(-50%, -100%, 0);
-      appearance: none;
+      display: flex;
+      flex-direction: column;
       background: var(--paper-background-color);
-      color: var(--link-color);
       outline: 1px solid var(--horizontal-line-color);
       box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
       border-radius: 0.8ex;
       corner-shape: squircle;
-      padding: 0.1ex 0.8ex;
-      font: inherit;
-      font-size: 0.7rem;
-      line-height: 1.7;
-      white-space: nowrap;
       max-width: 40ch;
       overflow: hidden;
-      text-overflow: ellipsis;
-      cursor: pointer;
 
-      &:hover {
-        color: var(--body-font-color);
+      button {
+        appearance: none;
+        border: 0;
+        background: none;
+        color: var(--link-color);
+        padding: 0.2ex 0.8ex;
+        font: inherit;
+        font-size: 0.7rem;
+        line-height: 1.7;
+        white-space: nowrap;
+        text-align: left;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        cursor: pointer;
+
+        &:hover {
+          color: var(--body-font-color);
+        }
+
+        /* one row per person to bind the name to, and the plain add last */
+        & + button {
+          border-top: 1px solid var(--horizontal-line-color);
+        }
       }
     }
 
@@ -1282,13 +1296,26 @@
     let ShowAddName = (state, addName) => {
       // mousemove and selectionchange fire a lot, don't re-render for nothing
       if(sameAddName(state.namesEditor.addName, addName)) return state;
+      // who this name could be, worked out here because only the state knows the list
+      if(addName) addName = { ...addName, aliases: aliasCandidates(state.namesEditor.names, addName.name) };
       return { ...state, namesEditor: { ...state.namesEditor, addName } };
     };
-    let AddName = (state, { name }) => {
+    // `alias` is the person this name belongs to: it joins their line instead of
+    // starting one of its own, which is what puts them in the same color group
+    let AddName = (state, { name, alias }) => {
       if(!state.book) return ShowAddName(state, null);
       let names = (state.namesEditor.names || '').trim();
       if(nameIdsOf(names).includes(name.toLowerCase())) return ShowAddName(state, null);
-      names = (names ? names + '\n' : '') + name + '\n';
+      if(alias) {
+        let lines = names.split('\n');
+        let line = listedNames(names).findIndex(lineNames => lineNames[0] == alias);
+        // the list was edited out from under the button, don't guess where to put it
+        if(line < 0) return ShowAddName(state, null);
+        lines[line] = lines[line].trimEnd() + ', ' + name;
+        names = lines.join('\n') + '\n';
+      } else {
+        names = (names ? names + '\n' : '') + name + '\n';
+      }
       return [
         { ...state, namesEditor: { ...state.namesEditor, names, addName: null } },
         (dispatch) => {
@@ -1379,6 +1406,54 @@
     let nameIdsOf = (names) => (names || '').split(/[\n,]/)
       .map(name => name.split(/->|→/).at(-1).trim().toLowerCase())
       .filter(Boolean);
+    // one entry per line of the editor, in the same order, so a line can be found
+    // again by what it holds. Every name on a line is the same person and the first
+    // one names them; the auto short name rides along with the name it comes from
+    let listedNames = (names) => (names || '').split('\n').map(line => {
+      let lineNames = [];
+      for(let entry of line.split(',')) {
+        entry = entry.trim();
+        if(!entry) continue;
+        let hasArrow = /->|→/.test(entry);
+        let to = editedName(entry);
+        // a lowercase entry is a wording fix, not a name to highlight
+        if(!to || getCase(to) == 'lower') continue;
+        lineNames.push(to);
+        // add short name automatically
+        let shortName = hasArrow ? undefined : shortNameId(to);
+        if(shortName) lineNames.push(shortName);
+      }
+      return lineNames;
+    });
+    let nameWordsOf = (name) => name.toLowerCase().split(/\s+/).filter(Boolean);
+    // `Lôi Lôi` is nobody new, it is what somebody calls `Lục Nguyệt Lôi`: every word
+    // it is written with is a word of the full name. The suffix merge in
+    // HighlightNames only catches the names that *end* the same way, so these are
+    // offered as a second row on the add button - guessed at, never assumed
+    let aliasCandidates = (names, name) => {
+      let words = nameWordsOf(name);
+      let nameId = name.toLowerCase();
+      let candidates = [];
+      for(let lineNames of listedNames(names)) {
+        if(!lineNames.length) continue;
+        // already this person's name, there is nothing left to bind
+        if(lineNames.some(listed => listed.toLowerCase() == nameId)) return [];
+        let derivedFrom = lineNames
+          .map(nameWordsOf)
+          .filter(listedWords => words.every(word => listedWords.includes(word)));
+        if(!derivedFrom.length) continue;
+        candidates.push({
+          // the first name on the line is the one that names the person
+          canonical: lineNames[0],
+          // a nickname is made from the end of a name far more often than its start
+          onLastWord: derivedFrom.some(listedWords => words.includes(listedWords.at(-1))),
+          length: Math.min(...derivedFrom.map(listedWords => listedWords.length)),
+        });
+      }
+      return _.sortBy(candidates, [candidate => !candidate.onLastWord, 'length'])
+        .slice(0, 3)
+        .map(candidate => candidate.canonical);
+    };
     // scope prefix -> (text node -> the names found in it), for hit testing the pointer
     let detectedNames = {};
     let isWordChar = (char) => char != undefined && /[\p{L}\p{N}]/u.test(char);
@@ -1470,22 +1545,7 @@
       // names from editor
       let knowNames = [];
       let aliasOf = new Map();
-      for(let line of (state.namesEditor.names || '').split('\n')) {
-        // every name on the same line is the same person
-        let lineNames = [];
-        for(let name of line.split(',')) {
-          name = name.trim();
-          if (!name) continue;
-          let hasArrow = /->|→/.test(name);
-          let to = editedName(name);
-          // a lowercase entry is a wording fix, not a name to highlight
-          if(to && getCase(to) != 'lower') {
-            lineNames.push(to);
-            // add short name automatically
-            let shortName = hasArrow ? undefined : shortNameId(to);
-            if(shortName) lineNames.push(shortName);
-          }
-        }
+      for(let lineNames of listedNames(state.namesEditor.names)) {
         knowNames.push(...lineNames);
         // the first name on the line names the person, the rest point back to it
         let [canonicalId, ...aliasIds] = lineNames.map(name => name.toLowerCase());
@@ -2325,14 +2385,27 @@
               ])
             ]),
             namesEditor.addName && (
-              h('button', {
+              h('div', {
                 id: 'add-name',
-                style: { top: `${namesEditor.addName.top}px`, left: `${namesEditor.addName.left}px` },
+                style: {
+                  // it grows upwards, so every row above the last needs room over the name
+                  top: `${Math.max(namesEditor.addName.top, 30 + namesEditor.addName.aliases.length * 24)}px`,
+                  left: `${namesEditor.addName.left}px`,
+                },
                 // keep the selection and the button alive long enough to be clicked
                 onmousedown: (state, event) => (event.preventDefault(), state),
-                onclick: [AddName, { name: namesEditor.addName.name }],
-                title: 'Add to names list',
-              }, text(`+ ${namesEditor.addName.name}`))
+              }, [
+                // a name made of words of a name already listed is most likely that
+                // person under another name, so offer them before a new entry
+                ...namesEditor.addName.aliases.map(canonical => h('button', {
+                  onclick: [AddName, { name: namesEditor.addName.name, alias: canonical }],
+                  title: `Add ${namesEditor.addName.name} as another name of ${canonical}`,
+                }, text(`+ ${canonical}`))),
+                h('button', {
+                  onclick: [AddName, { name: namesEditor.addName.name }],
+                  title: 'Add to names list',
+                }, text(`+ ${namesEditor.addName.name}`)),
+              ])
             )
           ])
         );

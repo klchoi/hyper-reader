@@ -1219,32 +1219,71 @@
       }
     ];
 
+    // an absent url param reads as null, and Number(null) is a perfectly good 0
+    let toOffset = (value) => {
+      if(value == null || value === '') return;
+      value = Number(value);
+      if(Number.isFinite(value)) return value;
+    };
     // the chapter a character offset falls in: the last one starting at or before it.
     // an offset outlives a re-parse that retitles a chapter, which its slug never did
     let chapterAt = (chapters, offset) => {
-      // an absent url param reads as null, and Number(null) is a perfectly good 0
-      if(offset == null || offset === '') return;
-      offset = Number(offset);
-      if(!Number.isFinite(offset)) return;
+      offset = toOffset(offset);
+      if(offset == null) return;
       let placed = chapters.filter(chapter => chapter.offset != null);
       return _.findLast(placed, chapter => chapter.offset <= offset) || placed[0];
+    };
+    // one paragraph per line, each with the offset it starts at in the book. The
+    // reader sees the names corrected, and that changes lengths, so the offsets are
+    // read off the text as stored
+    let lineSeparator = /\n|<\/?\w+>/gi;
+    let chapterLines = (chapter, fixNames) => {
+      let fixed = fixNames(chapter.content).split(lineSeparator);
+      let lines = [];
+      let at = 0;
+      for(let m of chapter.content.matchAll(lineSeparator)) {
+        lines.push({ text: chapter.content.slice(at, m.index), offset: chapter.offset + at });
+        at = m.index + m[0].length;
+      }
+      lines.push({ text: chapter.content.slice(at), offset: chapter.offset + at });
+      // a correction that split or joined a line would shift every line after it
+      if(fixed.length == lines.length) lines.forEach((line, i) => line.text = fixed[i]);
+      return lines;
+    };
+    // where the reader is: the topmost paragraph the page has not scrolled past. They
+    // come in document order, so a binary search costs a chapter of any length only a
+    // handful of measurements
+    let offsetAtTop = () => {
+      let paragraphs = document.querySelectorAll('article [data-offset]');
+      if(!paragraphs.length) return;
+      let low = 0, high = paragraphs.length - 1;
+      while(low < high) {
+        let middle = (low + high) >> 1;
+        if(paragraphs[middle].getBoundingClientRect().bottom > 0) high = middle;
+        else low = middle + 1;
+      }
+      return Number(paragraphs[low].dataset.offset);
     };
     // where in a book to reopen: its offset, or - for a bookmark or a progress record
     // written before offsets - the chapter id it still names
     let bookRoute = ({ bookId, offset, chapterId }) => (
       offset != null ? { book: bookId, offset } : { book: bookId, chapter: chapterId }
     );
-    let OpenBookDone = (state, { book, chapter }) => [
+    let OpenBookDone = (state, { book, chapter, offset }) => [
       { ...state, book, chapter },
       (dispatch) => {
-        let route = bookRoute({ bookId: book.id, offset: chapter.offset, chapterId: chapter.id });
+        let route = bookRoute({ bookId: book.id, offset: offset ?? chapter.offset, chapterId: chapter.id });
         if (state.book?.id == book.id) state.router.replace(route);
         else state.router.push(route);
 
         document.title = [...new Set([book.name, chapter.title])].join(' | ');
 
         requestAnimationFrame(() => {
-          scroll(0, 0);
+          // a link into the middle of a chapter opens where it points
+          let paragraphs = [...document.querySelectorAll('article [data-offset]')];
+          let at = _.findLast(paragraphs, el => Number(el.dataset.offset) <= offset);
+          if (at && at != paragraphs[0]) at.scrollIntoView({ block: 'start' });
+          else scroll(0, 0);
 
           //scroll bookmark into view
           let bookmark = document.querySelector('nav .active');
@@ -1284,6 +1323,8 @@
         let listed = chapterAt(book.chapters, offset)
           || book.chapters.find(c => c.id == chapterId)
           || book.chapters[0];
+        // an offset inside the chapter is a place on its page, not just the chapter
+        let position = Math.max(toOffset(offset) ?? 0, listed.offset ?? 0);
 
         let chapter = await state.db.get('chapters', bookId + '/' + listed.id);
         if (!chapter) {
@@ -1295,11 +1336,11 @@
         chapter = { ...chapter, offset: listed.offset };
 
         dispatch(LoadNames, { bookId: book.id });
-        dispatch(OpenBookDone, { book, chapter });
+        dispatch(OpenBookDone, { book, chapter, offset: position });
         dispatch(ToggleCommandPalette, { open: false });
         clearTimeout(window.saveProgressTimer);
         window.saveProgressTimer = setTimeout(() => {
-          dispatch(SaveProgress, { book, chapter });
+          dispatch(SaveProgress, { book, chapter, offset: position });
         }, 10000);
       }
     ];
@@ -1821,13 +1862,50 @@
       }
     ];
 
+    // the url follows the reader down the page. It returns the same state on purpose:
+    // a scroll must not re-render the chapter it is scrolling
+    let TrackReadingOffset = (state, offset) => {
+      if (!state.book || !state.chapter) return state;
+      // the page can still be showing the chapter we just left
+      let start = state.chapter.offset;
+      if (!(offset >= start && offset <= start + state.chapter.content.length)) return state;
+      if (toOffset(state.router.get('offset')) == offset) return state;
+      return [
+        state,
+        (dispatch) => {
+          state.router.replace(bookRoute({ bookId: state.book.id, offset }));
+          clearTimeout(window.saveProgressTimer);
+          window.saveProgressTimer = setTimeout(() => {
+            dispatch(SaveProgress, { book: state.book, chapter: state.chapter, offset });
+          }, 3000);
+        }
+      ];
+    };
+    let InitReadingOffset = (dispatch) => {
+      let timer;
+      let onScroll = () => {
+        clearTimeout(timer);
+        // history.replaceState is rate limited, a scroll fires far more often than that
+        timer = setTimeout(() => {
+          let offset = offsetAtTop();
+          if (offset != null) dispatch(TrackReadingOffset, offset);
+        }, 200);
+      };
+      // no capture: scrolling the chapter list is not reading
+      addEventListener('scroll', onScroll, { passive: true });
+      return () => {
+        clearTimeout(timer);
+        removeEventListener('scroll', onScroll);
+      };
+    };
+
     let SaveProgressDone = (state, { book, progress }) => ({ ...state, progress: { ...state.progress, [book.id]: progress } });
-    let SaveProgress = (state, { book, chapter }) => {
+    let SaveProgress = (state, { book, chapter, offset }) => {
       return [
         state,
         async (dispatch) => {
           let progress = (await state.db.get('progress', book.id) || {});
-          progress.offset = chapter.offset;
+          progress.offset = offset ?? chapter.offset;
           progress.chapterId = chapter.id;
           progress.chapterIndex = book.chapters.findIndex(c => c.id == chapter.id) + (book.chapters[0].id ? 1 : 0);
           progress.chapterCount = (book.chapters[0].id ? book.chapters.length : book.chapters.length - 1);
@@ -2109,6 +2187,7 @@
         [InitKeyboardNavigator],
         [InitCommandPalette],
         [InitAddNameButton],
+        [InitReadingOffset],
       ],
       node: document.body,
       view: ({ router, files, book, chapter, progress, settings, commandPalette, namesEditor }) => {
@@ -2284,9 +2363,9 @@
             chapter && (
               h('main', {}, [
                 h('article', {}, [
-                  ...fixNames(chapter.content).split(/\n|<\/?\w+>/gi).map(line => {
-                    if (/^[-]+$/.test(line)) return h('hr', {});
-                    if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { class: 'text-center indent-none' }, text(line));
+                  ...chapterLines(chapter, fixNames).map(({ text: line, offset }) => {
+                    if (/^[-]+$/.test(line)) return h('hr', { 'data-offset': offset });
+                    if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { 'data-offset': offset, class: 'text-center indent-none' }, text(line));
                     let content = [], m;
                     while ((m = /https?:\/\/\S+/.exec(line))) {
                       if (m.index > 0) content.push(text(line.slice(0, m.index)));
@@ -2295,7 +2374,7 @@
                     }
                     if (line) content.push(text(line));
                     // if (/^"/.test(line)) return h('p', {}, h('em', {}, text(line)));
-                    return h('p', {}, content);
+                    return h('p', { 'data-offset': offset }, content);
                   })
                 ])
               ])

@@ -1426,12 +1426,22 @@
       return lineNames;
     });
     let nameWordsOf = (name) => name.toLowerCase().split(/\s+/).filter(Boolean);
-    // `Lôi Lôi` is nobody new, it is what somebody calls `Lục Nguyệt Lôi`: every word
-    // it is written with is a word of the full name. The suffix merge in
-    // HighlightNames only catches the names that *end* the same way, so these are
-    // offered as a second row on the add button - guessed at, never assumed
+    // `tiểu`, `lão` and `a` name nobody, they are how somebody is addressed - the
+    // same words namePatterns detects a name behind. What is left of `Tiểu Lôi Tử`
+    // once they are gone is the `Lôi` the name is really made of
+    let honorifics = ['a', 'tiểu', 'lão'];
+    let plainNameWords = (words) => {
+      if(words.length < 2 || !honorifics.includes(words[0])) return words;
+      words = words.slice(1);
+      if(words.length > 1 && words.at(-1) == 'tử') words = words.slice(0, -1);
+      return words;
+    };
+    // `Lôi Lôi` and `Tiểu Lôi` are nobody new, they are what somebody calls
+    // `Lục Nguyệt Lôi`: every word they are written with is a word of the full name.
+    // The suffix merge in HighlightNames only catches the names that *end* the same
+    // way, so these are offered as a row on the add button - guessed at, never assumed
     let aliasCandidates = (names, name) => {
-      let words = nameWordsOf(name);
+      let words = plainNameWords(nameWordsOf(name));
       let nameId = name.toLowerCase();
       let candidates = [];
       for(let lineNames of listedNames(names)) {

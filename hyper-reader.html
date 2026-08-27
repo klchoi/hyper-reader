@@ -1428,12 +1428,15 @@
     let nameWordsOf = (name) => name.toLowerCase().split(/\s+/).filter(Boolean);
     // `tiểu`, `lão` and `a` name nobody, they are how somebody is addressed - the
     // same words namePatterns detects a name behind. What is left of `Tiểu Lôi Tử`
-    // once they are gone is the `Lôi` the name is really made of
-    let honorifics = ['a', 'tiểu', 'lão'];
+    // or `Lôi Nhi` once they are gone is the `Lôi` the name is really made of
+    let honorificPrefixes = ['a', 'tiểu', 'lão'];
     let plainNameWords = (words) => {
-      if(words.length < 2 || !honorifics.includes(words[0])) return words;
-      words = words.slice(1);
-      if(words.length > 1 && words.at(-1) == 'tử') words = words.slice(0, -1);
+      let prefixed = words.length > 1 && honorificPrefixes.includes(words[0]);
+      if(prefixed) words = words.slice(1);
+      // `nhi` is a fond form of any name, `tử` only ever tags along with a prefix:
+      // on its own `Khổng Tử` is a whole name, not a `Khổng` being addressed
+      let suffixes = prefixed ? ['nhi', 'tử'] : ['nhi'];
+      if(words.length > 1 && suffixes.includes(words.at(-1))) words = words.slice(0, -1);
       return words;
     };
     // `Lôi Lôi` and `Tiểu Lôi` are nobody new, they are what somebody calls

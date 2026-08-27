@@ -2639,6 +2639,10 @@
         get rawContent() {
           return text.slice(this.startIndex, this.endIndex);
         },
+        // what the reader would see on the page, heading line and all
+        get paragraphs() {
+          return this.content.split('\n').filter(line => line.trim()).length;
+        },
         get chapter() {
           return _.chapNum || _.chapText;
         },
@@ -3107,6 +3111,8 @@
         analyzeUncertains,
         dedupeChapters,
         merge,
+        mergeShortChapters,
+        merge,
         splitLongChapters,
       ]) {
         console.groupCollapsed(f.name);
@@ -3114,9 +3120,6 @@
         console.groupEnd(f.name);
         log(f.name + ' result');
       }
-      // mergeShortChapters(chapters, 2000);
-      // log('merge short');
-
       // cleanupChapters(chapters);
       // addPrologue(chapters, filename, text);
 
@@ -3456,29 +3459,26 @@
       }
     }
 
-    function mergeShortChapters(chapters, minLength = 2_000) {
+    // a chapter of a paragraph or two is hardly ever a chapter: it is the text caught
+    // between a heading that was not one and the next real one. It joins the chapter
+    // before it, or the one after when it opens the book. A numbered chapter the
+    // parser is sure of is left alone however short it is - some books really are
+    // written in one-paragraph chapters, and they are not ours to glue together
+    function mergeShortChapters(chapters, minParagraphs = 3) {
       for(let i = 0; i < chapters.length; i++) {
         let ci = chapters[i];
         if(ci.mergeDirection) continue;
-        if(ci.length > minLength) continue;
-        let fields = [];
-        if (ci._.bookNum) fields.push('bookNum');
-        if (ci._.chapNum != null) fields.push('chapNum');
-        if (ci._.halfNum) fields.push('halfNum');
-        if(fields.length > 0) {
-          for(let h = i - 1; h >= 0; h--) {
-            let ch = chapters[h];
-            if(ch.mergeDirection == 'up') continue;
-            if(!ch.locked) continue;
-            if (fields.every(f => ch._[f] == ci._[f])) {
-              console.log('merge', h, '<-', i);
-              ci.mergeDirection = 'up';
-              ci.mergeReason = 'short and dupe of prev';
-              break;
-            }
-          }
-        }
+        if(ci.locked) continue;
+        if(ci.paragraphs >= minParagraphs) continue;
+        let direction = i > 0 ? 'up' : (chapters[i+1] ? 'down' : null);
+        if(!direction) continue;
+        console.log('Short', [ci._.text], ci.paragraphs, 'paragraph(s), merge', direction);
+        ci.mergeDirection = direction;
+        ci.mergeReason = 'short';
       }
+    }
+
+    function mergeShortChapters0(chapters, minLength = 2_000) {
       return;
       for (let i = chapters.length - 1; i > 0; i--) {
         let [h, j] = [i-1, i+1];

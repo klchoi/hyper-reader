@@ -994,7 +994,7 @@
           if (!to.book) {
             dispatch(ShowRecentBooks);
           } else {
-            dispatch(OpenBook, { bookId: to.book, chapterId: to.chapter });
+            dispatch(OpenBook, { bookId: to.book, offset: to.offset, chapterId: to.chapter });
           }
         });
       }
@@ -1211,20 +1211,35 @@
       state,
       (dispatch) => {
         let bookId = state.router.get('book');
+        let offset = state.router.get('offset');
         let chapterId = state.router.get('chapter');
         if (bookId) {
-          dispatch(OpenBook, { bookId, chapterId })
+          dispatch(OpenBook, { bookId, offset, chapterId })
         }
       }
     ];
 
+    // the chapter a character offset falls in: the last one starting at or before it.
+    // an offset outlives a re-parse that retitles a chapter, which its slug never did
+    let chapterAt = (chapters, offset) => {
+      // an absent url param reads as null, and Number(null) is a perfectly good 0
+      if(offset == null || offset === '') return;
+      offset = Number(offset);
+      if(!Number.isFinite(offset)) return;
+      let placed = chapters.filter(chapter => chapter.offset != null);
+      return _.findLast(placed, chapter => chapter.offset <= offset) || placed[0];
+    };
+    // where in a book to reopen: its offset, or - for a bookmark or a progress record
+    // written before offsets - the chapter id it still names
+    let bookRoute = ({ bookId, offset, chapterId }) => (
+      offset != null ? { book: bookId, offset } : { book: bookId, chapter: chapterId }
+    );
     let OpenBookDone = (state, { book, chapter }) => [
       { ...state, book, chapter },
       (dispatch) => {
-        if (state.book?.id == book.id)
-          state.router.replace({ book: book.id, chapter: chapter.id });
-        else
-          state.router.push({ book: book.id, chapter: chapter.id });
+        let route = bookRoute({ bookId: book.id, offset: chapter.offset, chapterId: chapter.id });
+        if (state.book?.id == book.id) state.router.replace(route);
+        else state.router.push(route);
 
         document.title = [...new Set([book.name, chapter.title])].join(' | ');
 
@@ -1240,36 +1255,44 @@
         });
       }
     ];
-    let OpenBook = (state, { bookId, chapterId, migrate = true, retry = true }) => [
+    // `offset` says where to open, `chapterId` is only what an older bookmark or
+    // progress record has instead. Both may be missing, and then the book starts over
+    let OpenBook = (state, { bookId, offset, chapterId, migrate = true }) => [
       state,
       async (dispatch) => {
         if (!bookId) {
-          console.info('Failed to load file:', { bookId, chapterId });
+          console.info('Failed to load file:', { bookId, offset, chapterId });
           return;
         }
+        let retry = { bookId, offset, chapterId, migrate: false };
 
-        let [book, chapter] = await Promise.all([
-          state.db.get('books', bookId),
-          state.db.get('chapters', bookId + '/' + chapterId),
-        ]);
+        let book = await state.db.get('books', bookId);
         if (!book) {
-          console.info('Book not found:', { book, chapter });
-          if (migrate) dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, { bookId, chapterId, migrate: false, retry }] });
+          console.info('Book not found:', { bookId });
+          if (migrate) dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, retry] });
           return
         }
-        if (!chapter) {
-          console.info('Chapter not found:', { bookId, chapterId });
-          if (retry) {
-            chapterId = book.chapters[0].id;
-            dispatch(OpenBook, { bookId, chapterId, retry: false });
-          }
+
+        // a book stored before chapters carried their offset: parsing the file again is
+        // what brings them back, and the file content it needs is still here
+        if (!book.chapters.some(c => c.offset != null) && migrate) {
+          console.info('Chapter offsets missing:', { bookId, offset, chapterId });
+          dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, retry] });
           return;
         }
+        // nothing to go on means the book starts over
+        let listed = chapterAt(book.chapters, offset)
+          || book.chapters.find(c => c.id == chapterId)
+          || book.chapters[0];
 
-        let chapters = [...book.chapters];
-        let chapterIndex = chapters.findIndex(c => c.id == chapter.id);
-        if (chapterIndex < 0) chapterIndex = 0;
-        chapters[chapterIndex] = chapter;
+        let chapter = await state.db.get('chapters', bookId + '/' + listed.id);
+        if (!chapter) {
+          console.info('Chapter not found:', { bookId, offset, chapterId, id: listed.id });
+          if (migrate) dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, retry] });
+          return;
+        }
+        // the book record is the one that places the chapter, so it holds the offset
+        chapter = { ...chapter, offset: listed.offset };
 
         dispatch(LoadNames, { bookId: book.id });
         dispatch(OpenBookDone, { book, chapter });
@@ -1793,7 +1816,7 @@
         let chapterIndex = state.book.chapters.findIndex(c => c.id == state.chapter.id);
         let nextChapter = state.book.chapters[chapterIndex + indexDelta];
         if (nextChapter) {
-          dispatch(OpenBook, { bookId: state.book.id, chapterId: nextChapter.id });
+          dispatch(OpenBook, { bookId: state.book.id, offset: nextChapter.offset });
         }
       }
     ];
@@ -1804,6 +1827,7 @@
         state,
         async (dispatch) => {
           let progress = (await state.db.get('progress', book.id) || {});
+          progress.offset = chapter.offset;
           progress.chapterId = chapter.id;
           progress.chapterIndex = book.chapters.findIndex(c => c.id == chapter.id) + (book.chapters[0].id ? 1 : 0);
           progress.chapterCount = (book.chapters[0].id ? book.chapters.length : book.chapters.length - 1);
@@ -1848,12 +1872,13 @@
 
         //resolve every chapter up front: an await between two window.open calls loses the
         //drop's user activation, so every tab after the first gets blocked by the popup blocker
-        let chapterIds = new Map(await Promise.all(books.map(async (book) => (
-          [book.id, (await state.db.get('progress', book.id))?.chapterId]
-        ))));
+        let positions = new Map(await Promise.all(books.map(async (book) => {
+          let { offset, chapterId } = (await state.db.get('progress', book.id)) || {};
+          return [book.id, { bookId: book.id, offset, chapterId }];
+        })));
 
         let blocked = booksOpenInNewTab.filter(book => (
-          !window.open(state.router.route({ book: book.id, chapter: chapterIds.get(book.id) }), '_blank')
+          !window.open(state.router.route(bookRoute(positions.get(book.id))), '_blank')
         ));
         if (blocked.length) {
           console.info('Blocked by the popup blocker, opened in the library only:', blocked.map(book => book.name));
@@ -1861,9 +1886,9 @@
 
         if(bookOpenInCurrentTab) {
           let book = bookOpenInCurrentTab;
-          let chapterId = chapterIds.get(book.id);
-          state.router.push({ book: book.id, chapter: chapterId });
-          dispatch(OpenBook, { bookId: book.id, chapterId });
+          let position = positions.get(book.id);
+          state.router.push(bookRoute(position));
+          dispatch(OpenBook, position);
         }
       }
     ];
@@ -1956,7 +1981,7 @@
       state,
       async (dispatch) => {
         if (!bookId) {
-          console.info('Failed to load file:', { bookId, chapterId });
+          console.info('Failed to load file:', { bookId });
           return;
         }
 
@@ -1969,7 +1994,7 @@
           return;
         }
 
-        if (!onSuccess) onSuccess = [OpenBook, { bookId, chapterId: state.chapter.id }];
+        if (!onSuccess) onSuccess = [OpenBook, { bookId, offset: state.chapter.offset, chapterId: state.chapter.id }];
 
         dispatch(StoreBooks, {
           files: [{ file, fileContent }],
@@ -2098,11 +2123,11 @@
             getValue() {
               return files.map((file, index) => {
                 let book = Book(file);
-                let { chapterId } = (progress[book.id] || {});
+                let { offset, chapterId } = (progress[book.id] || {});
                 return {
                   label: book.name,
                   action: OpenBook,
-                  payload: { bookId: book.id, chapterId },
+                  payload: { bookId: book.id, offset, chapterId },
                   term: latinize(book.name).toLowerCase(),
                 };
               });
@@ -2123,7 +2148,7 @@
                 return {
                   label,
                   action: OpenBook,
-                  payload: { bookId: book.id, chapterId: chapter.id },
+                  payload: { bookId: book.id, offset: chapter.offset },
                   // searchable under both spellings, corrected and original
                   term: latinize([label, chapter.title].join(' | ')).toLowerCase(),
                 };
@@ -2141,10 +2166,10 @@
                   ...book.chapters.map(c => (
                     h('li', { class: { active: c.id == chapter.id } }, [
                       h('a', {
-                        href: router.route({ book: book.id, chapter: c.id }),
+                        href: router.route(bookRoute({ bookId: book.id, offset: c.offset })),
                         onclick: (_, event) => {
                           event.preventDefault();
-                          return [OpenBook, { bookId: book.id, chapterId: c.id }];
+                          return [OpenBook, { bookId: book.id, offset: c.offset }];
                         },
                         title: fixNames(c.title),
                       }, [
@@ -2221,15 +2246,15 @@
                   return result;
                 }).flatMap(file => {
                   let book = Book(file);
-                  let { chapterId, chapterIndex, chapterCount, updatedAt } = (progress[book.id] || {});
+                  let { offset, chapterId, chapterIndex, chapterCount, updatedAt } = (progress[book.id] || {});
                   return [
                     h('div', { class: 'td' }, [
                       h('a', {
                         class: 'name',
-                        href: router.route({ book: book.id, chapter: chapterId }),
+                        href: router.route(bookRoute({ bookId: book.id, offset, chapterId })),
                         onclick: (_, event) => {
                           event.preventDefault();
-                          return [OpenBook, { bookId: book.id, chapterId }];
+                          return [OpenBook, { bookId: book.id, offset, chapterId }];
                         }
                       }, [
                         text(book.name)
@@ -2307,7 +2332,7 @@
                 h('div', {}, [
                   h('button', {
                     class: 'refresh',
-                    onclick: [RefreshBook, { bookId: book.id, chapterId: chapter.id }],
+                    onclick: [RefreshBook, { bookId: book.id }],
                     title: 'Refresh book',
                   }),
                   h('button', {
@@ -2351,7 +2376,7 @@
                     class: { selected: command == selectedCommand }
                   },
                     h('a', {
-                      href: router.route({ book: command.payload.bookId, chapter: command.payload.chapterId }),
+                      href: router.route(bookRoute(command.payload)),
                       onclick: (_, event) => {
                         event.preventDefault();
                         return [MultipleActions, [
@@ -2516,6 +2541,10 @@
           // return text.lastIndexOf('\n', _.index);
           return _.index;
         },
+        // what the url tracks a book by, so a live chapter reads like a stored one
+        get offset() {
+          return this.startIndex;
+        },
         get endIndex() {
           if (this.i == chapters.length-1) return text.length;
           return chapters[this.i + 1].startIndex;
@@ -2563,6 +2592,7 @@
           return {
             id: this.id,
             title: this.title,
+            offset: this.offset,
             content: this.content,
           }
         }

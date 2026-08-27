@@ -2634,6 +2634,11 @@
         get content() {
           return text.slice(this.startIndex, this.endIndex).trim();
         },
+        // untrimmed: whether a line break follows the heading is the whole question
+        // when deciding if the next match is the same heading again
+        get rawContent() {
+          return text.slice(this.startIndex, this.endIndex);
+        },
         get chapter() {
           return _.chapNum || _.chapText;
         },
@@ -2788,7 +2793,10 @@
         //..."Ân, ta đều nghe ngươi!" (13)
         '(?<=\\W) \\(CHAP_NUM\\)$',
         //(14) nghiêm hạo tại sofa phía trên thích không thể tự thoát ra được, nhất tinh mặc xong đồ ngủ, sau đó tiếp lấy đem nghiêm hạo ôm đến chân của mình phía trên, nhẹ nhàng âu yếm.
-        '\\(CHAP_NUM\\)',
+        //not one hanging off a word, though: `Thượng (2)` is the second half of a
+        //chapter and `nói (2) lần` is an aside, and unanchored this pattern read both
+        //as a chapter of that number - which then stole the real one's heading
+        '(?<![\\p{L}\\p{N}] ?)\\(CHAP_NUM\\)',
         //"2" hào môn bí mật
         '^"\\s*CHAP_NUM\\s*"( TITLE)?',
         //"13 chương kết"
@@ -3123,10 +3131,11 @@
           mergeBehind(chapters, i, ci.mergeReason);
         }
       }
-      for(let i = 0; i < chapters.length - 1; i++) {
+      //merge down
+      for(let i = chapters.length - 2; i >= 0; i--) {
         let ci = chapters[i];
         if(ci.mergeDirection == 'down') {
-          // mergeBehind()
+          mergeAhead(chapters, i, ci.mergeReason);
         }
       }
     }
@@ -3232,6 +3241,9 @@
         if(!ci._.chapNum) continue;
         for(let h = i - 1; h >= 0 && h >= i - lookupRange; h--) {
           let ch = chapters[h];
+          // the range is there to look past headings that name no number at all; the
+          // nearest one that does is the only one that can vouch for this number
+          if(!ch._.chapNum) continue;
           let shouldLock = false;
           if(Number(ch._.chapNum) + 1 == Number(ci._.chapNum)) shouldLock = true;
           else if((ch._.chapNum == ci._.chapNum) && ch._.halfNum && (Number(ch._.halfNum) + 1 == Number(ci._.halfNum))) shouldLock = true;
@@ -3239,8 +3251,8 @@
             console.log('Lock', [ch._.text, ci._.text]);
             ch.locked = 'continuous';
             ci.locked = 'continuous';
-            break;
           }
+          break;
         }
       }
       console.groupEnd('Look behind');
@@ -3252,6 +3264,9 @@
         if(ci.locked) continue;
         for(let j = i + 1; j < chapters.length && j < i + lookupRange; j++) {
           let cj = chapters[j];
+          // likewise: a `(2)` in the front matter is not the second chapter just
+          // because a third one turns up somewhere after the first and the second
+          if(!cj._.chapNum) continue;
           let shouldLock = false;
           if(Number(ci._.chapNum) + 1 == Number(cj._.chapNum)) shouldLock = true;
           else if((ci._.chapNum == cj._.chapNum) && ci._.halfNum && (Number(ci._.halfNum) + 1 == Number(cj._.halfNum))) shouldLock = true;
@@ -3259,8 +3274,8 @@
             console.log('Lock', [ci._.text, cj._.text]);
             ci.locked = 'continuous';
             cj.locked = 'continuous';
-            break;
           }
+          break;
         }
       }
       console.groupEnd('Look ahead');
@@ -3335,6 +3350,18 @@
       ch.merged++;
     }
 
+    // nothing in front of this heading is a chapter of its own, so the chapter after
+    // it takes the text over, its own title and all. Left unimplemented, a book that
+    // opened with a line the patterns half-recognized - a name with a number in it,
+    // a date - kept it as a chapter of its own, ahead of the real first one
+    function mergeAhead(chapters, i, reason) {
+      let [ci, cj] = [chapters[i], chapters[i+1]];
+      //console.log('merge down', [ci._.text, cj._.text], 'because', reason);
+      cj._.index = ci._.index;
+      chapters.splice(i, 1);
+      cj.merged++;
+    }
+
     function dedupeChapters(chapters) {
       let shouldMerge = (i, j) => {
         let [ci, cj] = [chapters[i], chapters[j]];
@@ -3373,9 +3400,16 @@
     }
 
     function dedupeByIndex(chapters) {
+      // two patterns hitting the same heading: their matches overlap, or nothing but
+      // the rest of that one line lies between them. A window measured in characters
+      // instead swallowed every chapter short enough to fit inside it, title and all
+      let sameHeading = (ci, cj) => (
+        ci.startIndex + ci._.text.length > cj.startIndex ||
+        !ci.rawContent.includes('\n')
+      );
       for(let i = 0; i < chapters.length-1; i++) {
         let [ci, cj] = [chapters[i], chapters[i+1]];
-        if(ci.startIndex + 100 >= cj.startIndex) {
+        if(sameHeading(ci, cj)) {
           console.log('Dedupe', [ci._.text, cj._.text]);
           cj.mergeDirection = 'up';
           cj.mergeReason = 'dedupe';

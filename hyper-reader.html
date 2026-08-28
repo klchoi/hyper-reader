@@ -1361,24 +1361,38 @@
       // mousemove and selectionchange fire a lot, don't re-render for nothing
       if(sameAddName(state.namesEditor.addName, addName)) return state;
       // who this name could be, worked out here because only the state knows the list
-      if(addName) addName = { ...addName, aliases: aliasCandidates(state.namesEditor.names, addName.name) };
+      if(addName) {
+        let relationship = isRelationship(addName.name);
+        addName = {
+          ...addName,
+          relationship,
+          // a relationship shares no word with a name, so who it belongs to can only
+          // come from the text: whoever was last named before it was said
+          aliases: relationship
+            ? kinCandidates(state.namesEditor.names, addName.before)
+            : aliasCandidates(state.namesEditor.names, addName.name),
+        };
+      }
       return { ...state, namesEditor: { ...state.namesEditor, addName } };
     };
     // `alias` is the person this name belongs to: it joins their line instead of
-    // starting one of its own, which is what puts them in the same color group
-    let AddName = (state, { name, alias }) => {
+    // starting one of its own, which is what puts them in the same color group.
+    // `(a relationship)` is written in lower case whatever the text called it: the
+    // parens are what the reader edits, the case in there would only be noise
+    let AddName = (state, { name, alias, relationship }) => {
       if(!state.book) return ShowAddName(state, null);
       let names = (state.namesEditor.names || '').trim();
       if(nameIdsOf(names).includes(name.toLowerCase())) return ShowAddName(state, null);
+      let entry = relationship ? `(${name.toLowerCase()})` : name;
       if(alias) {
         let lines = names.split('\n');
-        let line = listedNames(names).findIndex(lineNames => lineNames[0] == alias);
+        let line = listedNames(names).findIndex(({ names: lineNames }) => lineNames[0] == alias);
         // the list was edited out from under the button, don't guess where to put it
         if(line < 0) return ShowAddName(state, null);
-        lines[line] = lines[line].trimEnd() + ', ' + name;
+        lines[line] = lines[line].trimEnd() + ', ' + entry;
         names = lines.join('\n') + '\n';
       } else {
-        names = (names ? names + '\n' : '') + name + '\n';
+        names = (names ? names + '\n' : '') + entry + '\n';
       }
       return [
         { ...state, namesEditor: { ...state.namesEditor, names, addName: null } },
@@ -1415,6 +1429,27 @@
         return group ? `(?:${group.join('|')})` : word;
       });
     };
+    // `(đại ca)` is what somebody is called, not what they are named: it takes the
+    // person's color wherever it shows up, but the text keeps the case it is written
+    // in - `đại ca` is a word of the sentence, and titling it would read as a name.
+    // It can stand on its own or trail the name it belongs to, `Giản Ninh (lão bà)`
+    let splitRelationship = (entry) => {
+      let [, name, relationship] = entry.trim().match(/^(.*?)\s*\((.*)\)$/) || [];
+      if(relationship == undefined) return { name: entry.trim() };
+      return { name, relationship: relationship.trim() };
+    };
+    // how a reader is likely to have somebody addressed. The doubled and compound
+    // ones stand on their own in the text, so they are worth detecting; a bare
+    // `nương` is the everyday word far more often, and is only ever added by hand
+    let standaloneRelationships = [
+      'cô cô', 'thúc thúc', 'bá bá', 'thẩm thẩm', 'nhạc phụ', 'nhạc mẫu', 'bá phụ',
+      'bá mẫu', 'tiểu di', 'ca ca', 'tỷ tỷ', 'muội muội', 'lão bà', 'lão công',
+      'phụ thân', 'mẫu thân',
+    ];
+    let relationshipWords = new Set([...standaloneRelationships, 'nương']);
+    let isRelationship = (name) => relationshipWords.has(name.trim().toLowerCase());
+    // whichever side of a `from -> to` entry the text ends up reading
+    let entryTarget = (entry) => entry.split(/->|→/).at(-1).trim();
     // the name a `from -> to` entry ends up written as in the text, which is what
     // the highlighter has to look for: anything else and the edit reads as detected
     let editedName = (entry) => {
@@ -1432,22 +1467,34 @@
       if(!names) return content;
       // every name on the same line is the same person, so each one still gets
       // corrected on its own; `aliasOf` in HighlightNames is what ties them together
-      names = names.split(/[\n,]/);
+      // an entry holds a name, a relationship, or a name with its relationship
+      // trailing it - each is looked for on its own, `keepCase` telling apart the
+      // relationship that must not be recased from the name that has to be
+      let entries = names.split(/[\n,]/).flatMap(entry => {
+        let { name, relationship } = splitRelationship(entry);
+        return [
+          name && { text: name },
+          relationship && { text: relationship, keepCase: true },
+        ].filter(Boolean);
+      });
       // add short name automatically
-      for(let name of names) {
-        if(name.match(/->|→/)) continue;
-        name = name.split(/\s/);
-        if(name.length == 3 || name.length == 4) names.push(name.at(-2) + ' ' + name.at(-1));
+      for(let { text, keepCase } of entries) {
+        if(keepCase || text.match(/->|→/)) continue;
+        let words = text.split(/\s/);
+        if(words.length == 3 || words.length == 4) entries.push({ text: words.at(-2) + ' ' + words.at(-1) });
       }
-      for(let name of names) {
-        name = name.trim();
-        if (!name) continue;
-        let [from, to] = name.split(/->|→/).map(n => n?.trim());
+      for(let { text, keepCase } of entries) {
+        text = text.trim();
+        if (!text) continue;
+        let [from, to] = text.split(/->|→/).map(n => n?.trim());
         if(to != undefined) {
-          to = useCase(from, to);
+          // a relationship is written the way it is read, only its wording is fixed
+          if(!keepCase) to = useCase(from, to);
+        } else if(keepCase) {
+          continue;
         } else {
-          from = name;
-          to = titleCase(name);
+          from = text;
+          to = titleCase(text);
         }
         if(from) {
           let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${nameWordPattern(from)}(?=[^\\p{L}]|$)`, 'gui');
@@ -1468,15 +1515,21 @@
     };
     // every name the editor already knows about, one id per entry
     let nameIdsOf = (names) => (names || '').split(/[\n,]/)
-      .map(name => name.split(/->|→/).at(-1).trim().toLowerCase())
+      .flatMap(entry => Object.values(splitRelationship(entry)))
+      .map(entry => entryTarget(entry).toLowerCase())
       .filter(Boolean);
     // one entry per line of the editor, in the same order, so a line can be found
     // again by what it holds. Every name on a line is the same person and the first
-    // one names them; the auto short name rides along with the name it comes from
+    // one names them; the auto short name rides along with the name it comes from.
+    // A `(relationship)` on the line is theirs too, kept apart from their names
+    // because it is not one: nothing is derived from it and nothing binds to it
     let listedNames = (names) => (names || '').split('\n').map(line => {
       let lineNames = [];
+      let relationships = [];
       for(let entry of line.split(',')) {
-        entry = entry.trim();
+        let { name, relationship } = splitRelationship(entry);
+        if(relationship) relationships.push(entryTarget(relationship));
+        entry = name;
         if(!entry) continue;
         let hasArrow = /->|→/.test(entry);
         let to = editedName(entry);
@@ -1487,7 +1540,7 @@
         let shortName = hasArrow ? undefined : shortNameId(to);
         if(shortName) lineNames.push(shortName);
       }
-      return lineNames;
+      return { names: lineNames, relationships };
     });
     let nameWordsOf = (name) => name.toLowerCase().split(/\s+/).filter(Boolean);
     // `tiểu`, `lão` and `a` name nobody, they are how somebody is addressed - the
@@ -1511,7 +1564,7 @@
       let words = plainNameWords(nameWordsOf(name));
       let nameId = name.toLowerCase();
       let candidates = [];
-      for(let lineNames of listedNames(names)) {
+      for(let { names: lineNames } of listedNames(names)) {
         if(!lineNames.length) continue;
         // already this person's name, there is nothing left to bind
         if(lineNames.some(listed => listed.toLowerCase() == nameId)) return [];
@@ -1528,6 +1581,23 @@
         });
       }
       return _.sortBy(candidates, [candidate => !candidate.onLastWord, 'length'])
+        .slice(0, 3)
+        .map(candidate => candidate.canonical);
+    };
+    // `ca ca` belongs to whoever the paragraph was talking about, and the nearest
+    // name before it is the best guess there is: `Lôi Nhi nhìn ca ca` is his, not
+    // that of the person named three sentences ago. Offered as rows, never assumed
+    let kinCandidates = (names, before) => {
+      if(!before) return [];
+      let candidates = [];
+      for(let { names: lineNames } of listedNames(names)) {
+        if(!lineNames.length) continue;
+        let at = Math.max(...lineNames.map(name => (
+          before.toLowerCase().lastIndexOf(name.toLowerCase())
+        )));
+        if(at >= 0) candidates.push({ canonical: lineNames[0], at });
+      }
+      return _.sortBy(candidates, candidate => -candidate.at)
         .slice(0, 3)
         .map(candidate => candidate.canonical);
     };
@@ -1575,6 +1645,10 @@
       ));
       return {
         name,
+        // the paragraph up to here, as far as the text node it starts in reaches
+        before: range.startContainer.nodeType == Node.TEXT_NODE
+          ? range.startContainer.textContent.slice(0, range.startOffset)
+          : '',
         top: Math.round(Math.max(rect.top, 30)),
         left: Math.round(_.clamp(rect.left + rect.width / 2, 60, innerWidth - 60)),
       };
@@ -1622,10 +1696,12 @@
       // names from editor
       let knowNames = [];
       let aliasOf = new Map();
-      for(let lineNames of listedNames(state.namesEditor.names)) {
-        knowNames.push(...lineNames);
-        // the first name on the line names the person, the rest point back to it
-        let [canonicalId, ...aliasIds] = lineNames.map(name => name.toLowerCase());
+      for(let { names: lineNames, relationships } of listedNames(state.namesEditor.names)) {
+        knowNames.push(...lineNames, ...relationships);
+        // the first name on the line names the person, the rest point back to it -
+        // a relationship never names them, it only ever points back
+        let [canonicalId, ...aliasIds] = [...lineNames, ...relationships]
+          .map(name => name.toLowerCase());
         for(let aliasId of aliasIds) {
           if(aliasId != canonicalId && !aliasOf.has(aliasId)) aliasOf.set(aliasId, canonicalId);
         }
@@ -1648,7 +1724,7 @@
         [
           /{NameBegin}{Word}(\s{Word}){1,3}/,
           /{NameBegin}({Word} )?{Word} (ba( ba)?|mụ mụ|mẹ|thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá( bá)?|bá phụ|bá mẫu|đại tỷ|đại ca|lão bà){wb}/,
-          /cô cô|thúc thúc|bá bá|thẩm thẩm|nhạc phụ|nhạc mẫu|bá phụ|bá mẫu/,
+          new RegExp(standaloneRelationships.join('|')),
         ],
         [
           /{wb}a {Word}(?!{Word})/,
@@ -2513,15 +2589,28 @@
                 onmousedown: (state, event) => (event.preventDefault(), state),
               }, [
                 // a name made of words of a name already listed is most likely that
-                // person under another name, so offer them before a new entry
+                // person under another name, so offer them before a new entry. A
+                // relationship is nobody's name, so the rows are who it is said of
                 ...namesEditor.addName.aliases.map(canonical => h('button', {
-                  onclick: [AddName, { name: namesEditor.addName.name, alias: canonical }],
-                  title: `Add ${namesEditor.addName.name} as another name of ${canonical}`,
+                  onclick: [AddName, {
+                    name: namesEditor.addName.name,
+                    alias: canonical,
+                    relationship: namesEditor.addName.relationship,
+                  }],
+                  title: namesEditor.addName.relationship
+                    ? `Add ${namesEditor.addName.name} as what ${canonical} is called`
+                    : `Add ${namesEditor.addName.name} as another name of ${canonical}`,
                 }, text(`+ ${canonical}`))),
                 h('button', {
-                  onclick: [AddName, { name: namesEditor.addName.name }],
+                  onclick: [AddName, {
+                    name: namesEditor.addName.name,
+                    relationship: namesEditor.addName.relationship,
+                  }],
                   title: 'Add to names list',
-                }, text(`+ ${namesEditor.addName.name}`)),
+                  // shown the way it is stored, so the parens are no surprise later
+                }, text(namesEditor.addName.relationship
+                  ? `+ (${namesEditor.addName.name.toLowerCase()})`
+                  : `+ ${namesEditor.addName.name}`)),
               ])
             )
           ])

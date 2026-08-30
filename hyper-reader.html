@@ -1423,6 +1423,9 @@
     // match a listed name however its words were translated. only for names of two
     // words or more: on its own `ngày` is the everyday word far more often than a name
     let nameWordPattern = (name) => {
+      // a name is text to look for, never a pattern: the half-typed `Giản Ninh (lão`
+      // of a relationship being written would otherwise leave a group unterminated
+      name = _.escapeRegExp(name);
       if(!name.trim().includes(' ')) return name;
       return name.replace(/\p{L}+/gu, word => {
         let group = nameWordGroups.find(group => group.includes(word.toLowerCase()));
@@ -1762,7 +1765,7 @@
 
       // create ranges;
       let nameRegexes = names.map(tier => tier.length && buildRegex([
-        '{wb}(' + tier.join('|') + '){wb}',
+        '{wb}(' + tier.map(name => _.escapeRegExp(name)).join('|') + '){wb}',
       ], {
         'wb': /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/,
       }, 'gui'));

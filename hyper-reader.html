@@ -1276,7 +1276,7 @@
         if (state.book?.id == book.id) state.router.replace(route);
         else state.router.push(route);
 
-        document.title = [...new Set([book.name, chapter.title])].join(' | ');
+        document.title = book.name;
 
         requestAnimationFrame(() => {
           // a link into the middle of a chapter opens where it points

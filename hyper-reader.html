@@ -1470,31 +1470,25 @@
       if(!names) return content;
       // every name on the same line is the same person, so each one still gets
       // corrected on its own; `aliasOf` in HighlightNames is what ties them together
-      // an entry holds a name, a relationship, or a name with its relationship
-      // trailing it - each is looked for on its own, `keepCase` telling apart the
-      // relationship that must not be recased from the name that has to be
-      let entries = names.split(/[\n,]/).flatMap(entry => {
-        let { name, relationship } = splitRelationship(entry);
-        return [
-          name && { text: name },
-          relationship && { text: relationship, keepCase: true },
-        ].filter(Boolean);
-      });
+      // only the names of an entry are corrected. A `(relationship)` is a word of
+      // the sentence, not somebody's name: the text keeps it exactly as written,
+      // case and wording and all, and listing it only says who it is said of - the
+      // highlighter reads the list for that and colors it where it stands
+      let entries = names.split(/[\n,]/)
+        .map(entry => splitRelationship(entry).name)
+        .filter(Boolean);
       // add short name automatically
-      for(let { text, keepCase } of entries) {
-        if(keepCase || text.match(/->|→/)) continue;
+      for(let text of entries) {
+        if(text.match(/->|→/)) continue;
         let words = text.split(/\s/);
-        if(words.length == 3 || words.length == 4) entries.push({ text: words.at(-2) + ' ' + words.at(-1) });
+        if(words.length == 3 || words.length == 4) entries.push(words.at(-2) + ' ' + words.at(-1));
       }
-      for(let { text, keepCase } of entries) {
+      for(let text of entries) {
         text = text.trim();
         if (!text) continue;
         let [from, to] = text.split(/->|→/).map(n => n?.trim());
         if(to != undefined) {
-          // a relationship is written the way it is read, only its wording is fixed
-          if(!keepCase) to = useCase(from, to);
-        } else if(keepCase) {
-          continue;
+          to = useCase(from, to);
         } else {
           from = text;
           to = titleCase(text);

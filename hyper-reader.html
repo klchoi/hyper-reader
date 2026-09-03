@@ -1453,6 +1453,15 @@
     let isRelationship = (name) => relationshipWords.has(name.trim().toLowerCase());
     // whichever side of a `from -> to` entry the text ends up reading
     let entryTarget = (entry) => entry.split(/->|→/).at(-1).trim();
+    // a relationship renamed in the text is still a word of the sentence, so the
+    // new wording is written the way the old one was: `Lão bà` opening a sentence
+    // comes back as `Bà xã`, mid-sentence as `bà xã`, and a shout stays a shout
+    let followCase = (src, dst) => {
+      let _case = getCase(src.trim().split(/\s+/)[0]);
+      if(_case == 'upper') return dst.toUpperCase();
+      if(_case == 'title') return dst[0].toUpperCase() + dst.slice(1).toLowerCase();
+      return dst.toLowerCase();
+    };
     // the name a `from -> to` entry ends up written as in the text, which is what
     // the highlighter has to look for: anything else and the edit reads as detected
     let editedName = (entry) => {
@@ -1470,28 +1479,37 @@
       if(!names) return content;
       // every name on the same line is the same person, so each one still gets
       // corrected on its own; `aliasOf` in HighlightNames is what ties them together
-      // only the names of an entry are corrected. A `(relationship)` is a word of
-      // the sentence, not somebody's name: the text keeps it exactly as written,
-      // case and wording and all, and listing it only says who it is said of - the
-      // highlighter reads the list for that and colors it where it stands
-      let entries = names.split(/[\n,]/)
-        .map(entry => splitRelationship(entry).name)
-        .filter(Boolean);
+      // the names of an entry are corrected, and a `(relationship)` only where it
+      // is renamed outright. A relationship is a word of the sentence, not somebody's
+      // name: listing it plain only says who it is said of - the text keeps it exactly
+      // as written and the highlighter colors it where it stands. `lão bà -> bà xã`
+      // asks for the wording itself to change, and that is worth doing, in the case
+      // the text wrote it in rather than the one the list is typed in
+      let entries = names.split(/[\n,]/).flatMap(entry => {
+        let { name, relationship } = splitRelationship(entry);
+        return [
+          name && { text: name },
+          relationship && /->|→/.test(relationship) && { text: relationship, relationship: true },
+        ].filter(Boolean);
+      });
       // add short name automatically
-      for(let text of entries) {
-        if(text.match(/->|→/)) continue;
+      for(let { text, relationship } of entries) {
+        if(relationship || text.match(/->|→/)) continue;
         let words = text.split(/\s/);
-        if(words.length == 3 || words.length == 4) entries.push(words.at(-2) + ' ' + words.at(-1));
+        if(words.length == 3 || words.length == 4) entries.push({ text: words.at(-2) + ' ' + words.at(-1) });
       }
-      for(let text of entries) {
+      for(let { text, relationship } of entries) {
         text = text.trim();
         if (!text) continue;
         let [from, to] = text.split(/->|→/).map(n => n?.trim());
-        if(to != undefined) {
-          to = useCase(from, to);
-        } else {
+        if(to == undefined) {
           from = text;
           to = titleCase(text);
+        } else if(relationship) {
+          let wording = to;
+          to = (name) => followCase(name, wording);
+        } else {
+          to = useCase(from, to);
         }
         if(from) {
           let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${nameWordPattern(from)}(?=[^\\p{L}]|$)`, 'gui');

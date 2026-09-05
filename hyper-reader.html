@@ -1746,25 +1746,51 @@
       // the cast is bigger than the wheel has room for; take the least alike there is
       return best.hue;
     };
-    // the colour has to be read off the paper the theme is using, so it is found
-    // against that paper rather than assumed: the lightness walks away from the page
-    // until the contrast is comfortable, and the chroma is only ever as much as sRGB
-    // will really hold there - asking for more clips, and clipping is what made half
-    // the wheel come out the same colour
+    // the colour is read off the page it will sit on, so both the paper and the prose
+    // are asked for rather than assumed. The prose is taken as it is painted and not as
+    // it is written: the gray theme sets its text in white at 78%, and a name has to
+    // differ from what is on the paper, not from what was asked for
     let paperColor = () => {
       let paper = getComputedStyle(document.body).getPropertyValue('--paper-background-color').trim();
       try { return chromaJs(paper || '#fff'); } catch { return chromaJs('#fff'); }
     };
-    let nameColor = (hue, paper) => {
-      let dark = paper.luminance() < 0.4;
-      for(let l = 70; dark ? l <= 95 : l >= 25; l += (dark ? 3 : -3)) {
-        for(let c = 110; c >= 25; c -= 5) {
-          let color = chromaJs.hcl(hue, c, l);
-          if(color.clipped()) continue;
-          if(chromaJs.contrast(color, paper) >= 4.5) return color;
-        }
+    let proseColor = (paper) => {
+      try {
+        let prose = chromaJs(getComputedStyle(document.body).color);
+        return prose.alpha() < 1 ? chromaJs.mix(paper, prose, prose.alpha(), 'rgb') : prose;
+      } catch {
+        return paper.luminance() < 0.4 ? chromaJs('#fff') : chromaJs('#000');
       }
-      return chromaJs.hcl(hue, 40, dark ? 90 : 25);
+    };
+    // the most colour a hue will carry at a lightness, which is wherever sRGB runs out.
+    // Asking past that clips, and clipped colours come out both muddy and alike
+    let mostChroma = (hue, l) => {
+      for(let c = 132; c > 0; c -= 2) {
+        let color = chromaJs.hcl(hue, c, l);
+        if(!color.clipped()) return { color, chroma: c };
+      }
+      return { color: chromaJs.hcl(hue, 0, l), chroma: 0 };
+    };
+    // being readable on the paper was only half of it. A name also has to be told from
+    // the sentence it is standing in, and on a page of near-black prose every colour is
+    // the lighter mark and so the weaker one - what is left to say `name` with is how
+    // much colour it carries. So the lightness is not settled first: every lightness the
+    // paper will take is tried and the most colourful one wins, which is what stopping at
+    // the lightest readable one was quietly giving up. A floor against the prose itself
+    // keeps a hue from landing on the very colour the words are written in
+    let nameContrast = 4.5;
+    let proseDeltaE = 15;
+    let nameColor = (hue, paper, prose) => {
+      let best, readable;
+      for(let l = 20; l <= 96; l += 2) {
+        let found = mostChroma(hue, l);
+        if(chromaJs.contrast(found.color, paper) < nameContrast) continue;
+        if(!readable || found.chroma > readable.chroma) readable = found;
+        if(chromaJs.deltaE(found.color, prose) < proseDeltaE) continue;
+        if(!best || found.chroma > best.chroma) best = found;
+      }
+      // a hue with nowhere to stand on this paper: being read beats being colourful
+      return (best || readable || { color: prose }).color;
     };
     let shortNameId = (nameId) => {
       let words = nameId.trim().split(/\s+/);
@@ -1950,6 +1976,7 @@
       }
       detectedNames[prefix] = new Map();
       let paper = paperColor();
+      let prose = proseColor(paper);
 
       // names from editor
       let knowNames = [];
@@ -2110,7 +2137,7 @@
         for(let id of [groupId, ...ids]) nameHues.set(id, hue);
         for(let id of shortIds) if(!nameHues.has(id)) nameHues.set(id, hue);
 
-        let color = nameColor(hue, paper);
+        let color = nameColor(hue, paper, prose);
         // keyed by name, not by hue: distinct names do collide on a hue, and
         // CSS.highlights.set would then drop one of their highlights entirely
         let styleId = prefix + '-' + (hashCode(groupId) >>> 0).toString(36);

@@ -109,8 +109,11 @@
     /** variables **/
     :root {
       --nav-width: 300px;
-      --gap: 1rem;
-      --paper-padding: calc(var(--gap) * 3);
+      /* every gap is a gap in the chrome, so it is measured off the chrome. The paper's
+         own allowance belongs to the book instead, next to the width in `ex` the sm/md/lg
+         buttons set. Both come to the same 24px the root used to give them */
+      --gap: var(--ui-font-size, 18pt);
+      --paper-padding: calc(var(--reading-font-size, 18pt) * 3);
       cursor: default;
     }
     .settings .colors button.white {
@@ -430,7 +433,7 @@
     /** global **/
     html,
     body {
-      font: 18pt/1.4 Reader;
+      font: var(--reading-font-weight, 400) var(--reading-font-size, 18pt)/1.4 var(--reading-font, Reader);
       color: var(--body-font-color);
       background: var(--body-background-color);
       font-variant-numeric: oldstyle-nums tabular-nums slashed-zero;
@@ -440,8 +443,19 @@
       color: var(--link-color);
     }
 
+    nav,
+    aside,
+    .table,
+    dialog,
+    #add-name {
+      font-family: var(--ui-font, Reader);
+      font-size: var(--ui-font-size, 18pt);
+      font-weight: var(--ui-font-weight, 400);
+    }
+
     dialog {
-      background-color: var(--dialog-background-color, --body-background-color);
+      background-color: var(--dialog-background-color, var(--body-background-color));
+      color: var(--body-font-color);
       box-shadow: 0 10px 20px rgba(0,0,0,.2);
       border: 1px solid var(--horizontal-line-color);
     }
@@ -468,7 +482,9 @@
       position: sticky;
       top: 0;
       padding: calc(var(--gap) * 0.75);
-      font-size: 0.875rem;
+      /* the chapter list reads a size down from the rest of the chrome, and `rem` would
+         read it down from the book instead */
+      font-size: calc(var(--ui-font-size, 18pt) * 0.875);
       line-height: 1.2;
       ol {
         list-style: none;
@@ -521,6 +537,11 @@
       appearance: none;
       background: var(--paper-background-color);
       color: var(--body-font-color);
+      /* the ua stylesheet pins a button to 13.3px Arial, and `* { font-family: inherit }`
+         only ever took back the family half of that. The labels on the rail read well
+         under the rest of the chrome, and at 0.6 they land where that 13.3px had them */
+      font-size: 0.6em;
+      font-weight: inherit;
       outline: 1px solid var(--horizontal-line-color);
       width: 100%;
       min-width: 24px;
@@ -614,6 +635,9 @@
       }
       &.names-editor::after {
         content: 'ℕ';
+      }
+      &.font::after {
+        content: '𝔽';
       }
     }
 
@@ -838,6 +862,107 @@
       }
     }
 
+    /** font picker **/
+    #font-picker[open] {
+      --width: min(46ch, calc(var(--paper-width) - 80px));
+      width: var(--width);
+      max-height: 80%;
+      position: fixed;
+      top: 10%;
+      left: calc((100% - var(--width)) / 2);
+      border-radius: 1.5ex;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 0.7ex;
+      padding: 0.7ex;
+
+      /* the filter, which is the only input sitting directly in the dialog */
+      > input {
+        background: var(--paper-background-color);
+        font: inherit;
+        padding: 1ex 1.3ex;
+        border: 1px solid var(--paper-outline-color);
+        border-radius: 0.8ex;
+        color: var(--body-font-color);
+      }
+
+      /* which of the two fonts the list is picking */
+      .target {
+        display: flex;
+        gap: 0.5ex;
+
+        button {
+          flex: 1;
+          text-align: center;
+          outline: 1px solid var(--horizontal-line-color);
+
+          &.selected {
+            font-weight: bold;
+          }
+        }
+      }
+
+      label {
+        display: grid;
+        grid-template-columns: 7ch 1fr 8ch;
+        align-items: center;
+        gap: 1ex;
+        padding: 0 1.3ex;
+        font-size: 0.75em;
+
+        input[type=range] {
+          accent-color: var(--link-color);
+          width: 100%;
+          cursor: pointer;
+        }
+        span {
+          text-align: right;
+          opacity: 0.7;
+        }
+      }
+
+      ul {
+        flex: 1;
+        overflow-y: auto;
+        list-style: none;
+      }
+
+      small {
+        padding: 0 1.3ex;
+        opacity: 0.7;
+        a {
+          color: var(--link-color);
+          cursor: pointer;
+        }
+      }
+
+      button {
+        appearance: none;
+        background: transparent;
+        color: var(--body-font-color);
+        width: 100%;
+        text-align: left;
+        padding: 0.3ex 1.3ex;
+        border-radius: 0.8ex;
+        cursor: pointer;
+        font-size: inherit;
+        line-height: 1.7;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+
+        &:hover,
+        &:focus {
+          background: var(--selection-bg);
+        }
+        /* the font in use, so the list says where you already are */
+        &.selected {
+          color: var(--link-color);
+        }
+      }
+    }
+
     /** add name button **/
     #add-name {
       position: fixed;
@@ -860,7 +985,7 @@
         color: var(--link-color);
         padding: 0.2ex 0.8ex;
         font: inherit;
-        font-size: 0.7rem;
+        font-size: 0.7em;
         line-height: 1.7;
         white-space: nowrap;
         text-align: left;
@@ -1026,6 +1151,9 @@
       onKey('ArrowDown', SelectNextCommand, { target: dialog })(dispatch);
     };
 
+    // a non-modal dialog is not dismissed for us
+    let InitFontPicker = (dispatch) => onKey('Escape', [ToggleFontPicker, { open: false }])(dispatch);
+
     let ToggleCommandPalette = (state, options) => {
       let open = options?.open != null ? !!options.open : !state.commandPalette.open;
       return [
@@ -1162,11 +1290,17 @@
         dispatch(ApplySettings, settings);
       }
     ];
+    // a setting css can select on goes on the element. A list or a shape is for the
+    // app to read and only reads as junk in an attribute, so it stays out of one
+    let applyDataset = (key, value) => {
+      if (value != null && typeof value == 'object') return;
+      document.documentElement.dataset[key] = (value ?? '');
+    };
     let ApplySettings = (state, settings) => [
       { ...state, settings: { ...state.settings, ...settings } },
       () => {
         for (let [key, value] of Object.entries(settings)) {
-          document.documentElement.dataset[key] = (value ?? '');
+          applyDataset(key, value);
         }
       }
     ];
@@ -1178,12 +1312,68 @@
         let tx = state.db.transaction('settings', 'readwrite');
         await Promise.all([
           ...Object.entries(settings).map(([key, value]) => {
-            document.documentElement.dataset[key] = (value || '');
+            applyDataset(key, value);
             return tx.store.put(value, key);
           }),
           tx.done,
         ]);
       }
+    ];
+
+    // a font name reaches css as a quoted family, so a name is only ever read as
+    // a name - and Reader stays behind it for whatever the chosen face is missing
+    let cssFontFamily = (family) => `"${family.replace(/["\\]/g, '')}"`;
+    // the book and the chrome are set independently, and the panel switches between
+    // the two sets of the same three settings rather than growing a second row of them
+    let fontSettings = {
+      reading: { family: 'font', size: 'fontSize', weight: 'fontWeight' },
+      ui: { family: 'uiFont', size: 'uiFontSize', weight: 'uiFontWeight' },
+    };
+    // only chromium will say which fonts are installed, and only when the reader
+    // asks. Everywhere else a page can name a face but never learn what is there,
+    // so the list falls back to the ones worth reading a book in
+    let readingFonts = [
+      'Source Serif 4', 'Iowan Old Style', 'Charter', 'Palatino', 'Baskerville',
+      'Hoefler Text', 'Georgia', 'Literata', 'Cambria', 'Constantia',
+      'Times New Roman', 'system-ui',
+    ];
+
+    // chrome only remembers the fonts permission per origin, and a file:// page has
+    // none to remember it against: allowing it there is allowing it for that one call.
+    // So the list is kept once it is given, and asked for again only when asked to be
+    let LoadFonts = (state, { force } = {}) => [
+      state,
+      async (dispatch) => {
+        if(!force && state.settings.fonts?.length > 0) return;
+        if(!window.queryLocalFonts) return;
+        try {
+          let installed = await window.queryLocalFonts();
+          // one entry per face, and a book is read in a family
+          let fonts = [...new Set(installed.map(font => font.family))].sort((a, z) => a.localeCompare(z));
+          if(fonts.length > 0) dispatch(SaveSettings, { fonts });
+        } catch (error) {
+          // refused, or asked for outside the click that opened the picker
+          console.warn(error);
+        }
+      }
+    ];
+
+    let SetFontQuery = (state, q) => ({ ...state, fontPicker: { ...state.fontPicker, q } });
+    let SetFontTarget = (state, target) => ({ ...state, fontPicker: { ...state.fontPicker, target } });
+    let ToggleFontPicker = (state, { open }) => [
+      { ...state, fontPicker: { ...state.fontPicker, open, q: '' } },
+      async (dispatch) => {
+        if(!open) return;
+        // queryLocalFonts only answers while the click that opened this still counts
+        // as the reader asking, so the list is asked for before waiting on anything
+        dispatch(LoadFonts);
+        await nextTick();
+        document.querySelector('#font-picker input').select();
+      }
+    ];
+    let ChooseFont = (state, font) => [
+      state,
+      (dispatch) => dispatch(SaveSettings, { [fontSettings[state.fontPicker.target].family]: font })
     ];
 
     let LoadRecentBooksDone = (state, { files }) => ({ ...state, files });
@@ -1916,7 +2106,7 @@
         let name = asName(range);
         if(name) return addNameAt(range, name, pointer.x, pointer.y);
       };
-      let busy = () => document.querySelector('#names-editor[open]');
+      let busy = () => document.querySelector('#names-editor[open], #font-picker[open]');
       let hoveredName = (x, y) => {
         // a selection is the more explicit ask, let it win
         if(!getSelection().isCollapsed) return;
@@ -2245,6 +2435,11 @@
             q: '',
             selectedIndex: 0,
           },
+          fontPicker: {
+            open: false,
+            q: '',
+            target: 'reading',
+          },
           namesEditor: {
             open: false,
             names: '',
@@ -2277,11 +2472,12 @@
       subscriptions: (state) => [
         [InitKeyboardNavigator],
         [InitCommandPalette],
+        [InitFontPicker],
         [InitAddNameButton],
         [InitReadingOffset],
       ],
       node: document.body,
-      view: ({ router, files, book, chapter, progress, settings, commandPalette, namesEditor }) => {
+      view: ({ router, files, book, chapter, progress, settings, commandPalette, namesEditor, fontPicker }) => {
         let fixNames = text => correctNames(text, namesEditor.names);
         let cachedCommands = window.cachedCommands = (window.cachedCommands || new Map());
         let commands = [], selectedCommand, commandKey;
@@ -2328,8 +2524,24 @@
         }
         commands = commands.filter(cmd => cmd.term.includes(commandPalette.q)) ?? [];
         selectedCommand = commands[(commandPalette.selectedIndex + commands.length) % commands.length];
+        // sizes and weights are read back as numbers, so a setting can only ever land
+        // in the stylesheet as one
+        let typography = [
+          settings.font && `--reading-font: ${cssFontFamily(settings.font)}, Reader;`,
+          settings.fontSize && `--reading-font-size: ${Number(settings.fontSize)}pt;`,
+          settings.fontWeight && `--reading-font-weight: ${Number(settings.fontWeight)};`,
+          settings.uiFont && `--ui-font: ${cssFontFamily(settings.uiFont)}, Reader;`,
+          settings.uiFontSize && `--ui-font-size: ${Number(settings.uiFontSize)}pt;`,
+          settings.uiFontWeight && `--ui-font-weight: ${Number(settings.uiFontWeight)};`,
+        ].filter(Boolean).join(' ');
+        // the sliders follow the same toggle the list does
+        let picked = fontSettings[fontPicker.target];
+        let pickedFont = settings[picked.family];
+        let pickedSize = settings[picked.size] || 18;
+        let pickedWeight = settings[picked.weight] || 400;
         return (
           h('body', {}, [
+            typography && h('style', {}, text(`:root { ${typography} }`)),
             h('nav', {}, [
               (book?.chapters?.length > 0) && (
                 h('ol', { start: 0 }, [
@@ -2498,6 +2710,13 @@
                   title: `Page size: ${size}`,
                 }, text(size))
               ))),
+              h('div', {}, [
+                h('button', {
+                  class: 'font',
+                  onclick: [ToggleFontPicker, { open: true }],
+                  title: 'Fonts and sizes',
+                }),
+              ]),
               chapter && (
                 h('div', {}, [
                   h('button', {
@@ -2562,6 +2781,73 @@
                   )
                 ))
               ])
+            ]),
+            h('dialog', { id: 'font-picker', open: fontPicker.open }, [
+              h('div', { class: 'target' }, [
+                ...['reading', 'ui'].map(target => (
+                  h('button', {
+                    class: { selected: fontPicker.target == target },
+                    onclick: [SetFontTarget, target],
+                    title: target == 'reading'
+                      ? 'The font the paragraphs are set in'
+                      : 'The font everything else is set in',
+                  }, text(target == 'reading' ? 'Reading' : 'Interface'))
+                ))
+              ]),
+              h('input', {
+                placeholder: 'Font',
+                value: fontPicker.q,
+                oninput: (_, event) => [SetFontQuery, event.target.value],
+              }),
+              settings.fonts?.length > 0
+                ? h('small', {}, [
+                    text(`${settings.fonts.length} fonts. `),
+                    h('a', { onclick: [LoadFonts, { force: true }] }, text('Look again'))
+                  ])
+                : h('small', {}, text('These are the fonts this page can name without asking. To pick from everything installed, open it over http://localhost - chrome will not remember the permission for a file:// page.')),
+              h('ul', {}, [
+                h('li', {}, [
+                  h('button', {
+                    class: { selected: !pickedFont },
+                    onclick: [ChooseFont, ''],
+                  }, text('Default'))
+                ]),
+                ...(settings.fonts?.length > 0 ? settings.fonts : readingFonts)
+                  .filter(family => family.toLowerCase().includes(fontPicker.q.trim().toLowerCase()))
+                  .map(family => (
+                    h('li', {}, [
+                      h('button', {
+                        class: { selected: pickedFont == family },
+                        // the name written in the face itself, which is the only way
+                        // to tell whether it is one to read a book in
+                        style: { fontFamily: cssFontFamily(family) },
+                        onclick: [ChooseFont, family],
+                      }, text(family))
+                    ])
+                  ))
+              ]),
+              h('label', {}, [
+                text('Size'),
+                h('input', {
+                  type: 'range',
+                  min: 10, max: 32, step: 0.5,
+                  value: pickedSize,
+                  oninput: (_, event) => [ApplySettings, { [picked.size]: Number(event.target.value) }],
+                  onchange: (_, event) => [SaveSettings, { [picked.size]: Number(event.target.value) }],
+                }),
+                h('span', {}, text(`${pickedSize}pt`)),
+              ]),
+              h('label', {}, [
+                text('Weight'),
+                h('input', {
+                  type: 'range',
+                  min: 100, max: 900, step: 100,
+                  value: pickedWeight,
+                  oninput: (_, event) => [ApplySettings, { [picked.weight]: Number(event.target.value) }],
+                  onchange: (_, event) => [SaveSettings, { [picked.weight]: Number(event.target.value) }],
+                }),
+                h('span', {}, text(pickedWeight)),
+              ]),
             ]),
             h('dialog', { id: 'names-editor', open: namesEditor.open }, [
               h('form', {

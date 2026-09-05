@@ -1714,6 +1714,58 @@
     // as `Lý Tiêu Dao` in one chapter and only as `Tiêu Dao` in the next, so
     // hashing whichever id survives the merge below would recolor them mid-book
     let nameHues = new Map();
+    // degrees around the wheel are not what the eye measures - 30 of them through the
+    // blues barely change the colour, where 30 through the reds are a different one - so
+    // a name is kept a distance from the others in what is actually seen. It starts on
+    // the hue its name hashes to, which is what makes the colour its own and the same
+    // one every time, and walks on only far enough to stop looking like somebody else
+    let nameDeltaE = 20;
+    // the hue is judged at one fixed lightness, not on the paper in front of us: a
+    // character keeps the hue they were given when the theme changes, so choosing it
+    // against the paper of the moment would only space the cast for the theme it
+    // happened to be assigned under, and crowd them on every other one
+    let spacingColor = (hue) => {
+      for(let c = 110; c >= 25; c -= 5) {
+        let color = chromaJs.hcl(hue, c, 60);
+        if(!color.clipped()) return color;
+      }
+      return chromaJs.hcl(hue, 25, 60);
+    };
+    let spacedHue = (seed) => {
+      let hue = ((seed % 360) + 360) % 360;
+      let taken = [...new Set(nameHues.values())].map(spacingColor);
+      if(!taken.length) return hue;
+      let best = { hue, distance: -1 };
+      for(let step = 0; step < 360; step += 5) {
+        let candidate = (hue + step) % 360;
+        let color = spacingColor(candidate);
+        let distance = Math.min(...taken.map(c => chromaJs.deltaE(color, c)));
+        if(distance >= nameDeltaE) return candidate;
+        if(distance > best.distance) best = { hue: candidate, distance };
+      }
+      // the cast is bigger than the wheel has room for; take the least alike there is
+      return best.hue;
+    };
+    // the colour has to be read off the paper the theme is using, so it is found
+    // against that paper rather than assumed: the lightness walks away from the page
+    // until the contrast is comfortable, and the chroma is only ever as much as sRGB
+    // will really hold there - asking for more clips, and clipping is what made half
+    // the wheel come out the same colour
+    let paperColor = () => {
+      let paper = getComputedStyle(document.body).getPropertyValue('--paper-background-color').trim();
+      try { return chromaJs(paper || '#fff'); } catch { return chromaJs('#fff'); }
+    };
+    let nameColor = (hue, paper) => {
+      let dark = paper.luminance() < 0.4;
+      for(let l = 70; dark ? l <= 95 : l >= 25; l += (dark ? 3 : -3)) {
+        for(let c = 110; c >= 25; c -= 5) {
+          let color = chromaJs.hcl(hue, c, l);
+          if(color.clipped()) continue;
+          if(chromaJs.contrast(color, paper) >= 4.5) return color;
+        }
+      }
+      return chromaJs.hcl(hue, 40, dark ? 90 : 25);
+    };
     let shortNameId = (nameId) => {
       let words = nameId.trim().split(/\s+/);
       if(words.length == 3 || words.length == 4) return words.slice(-2).join(' ');
@@ -1897,6 +1949,7 @@
         if(styleId.startsWith(prefix + '-')) CSS.highlights.delete(styleId);
       }
       detectedNames[prefix] = new Map();
+      let paper = paperColor();
 
       // names from editor
       let knowNames = [];
@@ -2053,11 +2106,11 @@
         let shortIds = ids.map(shortNameId)
           .filter(id => id && !ids.includes(id) && (aliasOf.get(id) || groupId) == groupId);
         let hue = [groupId, ...ids, ...shortIds].map(id => nameHues.get(id)).find(hue => hue != undefined);
-        if(hue == undefined) hue = ((hashCode(groupId) % 360) + 360) % 360;
+        if(hue == undefined) hue = spacedHue(hashCode(groupId));
         for(let id of [groupId, ...ids]) nameHues.set(id, hue);
         for(let id of shortIds) if(!nameHues.has(id)) nameHues.set(id, hue);
 
-        let color = chromaJs.hcl(hue, 100, 70);
+        let color = nameColor(hue, paper);
         // keyed by name, not by hue: distinct names do collide on a hue, and
         // CSS.highlights.set would then drop one of their highlights entirely
         let styleId = prefix + '-' + (hashCode(groupId) >>> 0).toString(36);
@@ -2699,7 +2752,10 @@
               h('div', { class: 'colors' }, ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn', 'solarized', 'kiselevka', 'gruvbox'].map(color => (
                 h('button', {
                   class: [color, { 'checked:light': settings['color:light'] == color, 'checked:dark': settings['color:dark'] == color }],
-                  onclick: () => [SaveSettings, { [`color:${getColorScheme()}`]: color }],
+                  onclick: () => [MultipleActions, [
+                    [SaveSettings, { [`color:${getColorScheme()}`]: color }],
+                    [HighlightNames],
+                  ]],
                   title: `Theme: ${color}`,
                 })
               ))),

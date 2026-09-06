@@ -3572,6 +3572,10 @@
         logResultSnapshot = logResult;
       }
 
+      // the only pass that needs the text the chapters were cut from. the others read
+      // a tuning argument in that position, so this one closes over it instead
+      let prologue = (chapters) => addPrologue(chapters, { filename, text });
+
       log('parse result');
       for(let f of [
         dedupeByIndex,
@@ -3584,6 +3588,7 @@
         analyzeUncertains,
         dedupeChapters,
         merge,
+        prologue,
         mergeShortChapters,
         merge,
         splitLongChapters,
@@ -3594,7 +3599,6 @@
         log(f.name + ' result');
       }
       // cleanupChapters(chapters);
-      // addPrologue(chapters, filename, text);
 
       return chapters;
     }
@@ -4019,15 +4023,19 @@
       }
     }
 
-    function addPrologue(chapters, filename, text) {
-      //extract prologue
-      let prologue = text.slice(0, chapters[0]?.startIndex ?? -1).trim();
-      if(prologue) {
-        chapters.unshift(Chapter({
-          title: filename,
-          index: 0,
-        }, { chapters, filename, text }));
-      }
+    // no heading stands in front of the first one, so the title page, the author and
+    // the blurb fell outside every chapter and were never read. they open the book as
+    // an entry of their own; a line or two of them is no chapter, and mergeShortChapters
+    // folds that into the first one after this
+    function addPrologue(chapters, { filename, text }) {
+      let prologue = text.slice(0, chapters[0]?.startIndex ?? text.length).trim();
+      if(!prologue) return;
+      console.log('Prologue of', prologue.length, 'characters');
+      chapters.unshift(Chapter({
+        title: filename,
+        text: filename,
+        index: 0,
+      }, { chapters, filename, text }));
     }
 
     function extractChapters1(filename, text, { name }) {

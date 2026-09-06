@@ -3205,6 +3205,12 @@
         //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
         //Hồi 2: · phẫn vũ nữ khinh thân dụ địch tù, nhu vú to thát tử loạn tâm trí
         '(^|(?<=\\W ))(Phiên Ngoại )?CHAP_TYPE CHAP_NUM([^\\p{L}\\p{N}\\n]+TITLE)?$',
+        //Thứ 1 chương thứ 1 cuốn thứ 2 tiết thứ 2 chương
+        '^Thứ \\d+ chương thứ BOOK_NUM cuốn thứ CHAP_NUM tiết thứ \\d+ chương',
+        //Thứ 3 chương quyển thứ ba thứ 38 tiết Chương 138
+        '^Thứ \\d+ chương quyển thứ BOOK_TEXT thứ CHAP_NUM tiết Chương \\d+',
+        //Chính văn thứ 3 chương đường muội yêu ta vui thích một hồi
+        '^Chính văn thứ CHAP_NUM chương TITLE$',
         //Ngũ
         //Hai mươi mốt
         '^CHAP_TEXT$',

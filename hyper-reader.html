@@ -3023,7 +3023,7 @@
 
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 1;
+    const PARSER_VERSION = 2;
 
     function Book(file, fileContent, chapters) {
       let id, name, description;
@@ -3721,6 +3721,8 @@
       // halves of one chapter, a heading seen twice). Nothing is missing in between
       let isGap = (a, b) => !(b == a || b == a + 1);
       let certains = matches.filter(m => m.certain && numberOf(m) != null);
+      // how far each certain chapter's own book has been carried on by uncertain ones
+      let tails = new Map();
       return matches.filter(m => {
         if(m.certain) return true;
         // the same heading a certain pattern already read
@@ -3731,13 +3733,26 @@
         let [a, b] = [numberOf(ch), numberOf(cj)];
         if(!isGap(a, b)) return false;
         // it fills the gap only by being a number that is missing from it, so a gap
-        // of 5 -> 8 takes a 6 or a 7 and nothing else. Where the numbers go back
-        // (a new book) there is no such range to hold it to
-        if(b > a) {
-          let n = numberOf(m);
-          return n != null && n > a && n < b;
+        // of 5 -> 8 takes a 6 or a 7 and nothing else
+        let n = numberOf(m);
+        if(n == null) return false;
+        if(b > a) return n > a && n < b;
+        // where the numbers go back, a new book may begin. When the book names itself
+        // in that gap, what it can still miss is the end of the book before, which
+        // carries on from the last certain chapter, and the start of the new one, which
+        // comes after its heading and ahead of its first certain chapter. A line that
+        // starts with a number but fits neither is just a line (`Một giờ a...` at the end
+        // of book 1 is not chapter 1 of book 2). Without a heading nothing says the
+        // numbers went back for a book, so there is no range to hold it to
+        let bookHeading = matches.findLast(c => c.certain && (c.bookNum || c.bookText) && c.index > ch.index && c.index < cj.index);
+        if(!bookHeading) return true;
+        let tail = tails.get(ch) ?? { last: a, next: a + 1 };
+        tails.set(ch, tail);
+        if(n == tail.next || n == tail.last) {
+          [tail.last, tail.next] = [n, n + 1];
+          return true;
         }
-        return true;
+        return n < b && bookHeading.index < m.index;
       });
     }
 
@@ -3780,7 +3795,10 @@
       // chapters[i].endIndex = chapters[i+1].endIndex;
       let [ch, ci] = [chapters[i-1], chapters[i]];
       let c;
-      if (!ch.chapNo && ci.chapNo) c = ci;
+      // a chapter that is named but not numbered (`Chương kết`) has an identity of its own:
+      // it takes no number from what is merged into it
+      let unnumbered = !ch.chapNo && !Number.isNaN(ch.chapNo);
+      if (unnumbered && ci.chapNo) c = ci;
       else if (ch.chapNo == ci.chapNo) {
         if (!ch._.title && ci._.title) c = ci;
       }
@@ -3827,14 +3845,23 @@
       }
     }
 
+    // `Chương 20: Chương kết` followed by `【chương kết】`: the last chapter says so twice,
+    // once under the number it was given and once without one
+    const END_WORD = /^(chương\s+)?(kết|cuối)$/i;
+    const namesTheEnd = (c) => END_WORD.test(String(c._.chapText ?? '').trim()) || END_WORD.test((c._.title ?? '').trim());
+
     function dedupeChapters(chapters) {
       let shouldMerge = (i, j) => {
         let [ci, cj] = [chapters[i], chapters[j]];
         if(!cj) return false;
         if(!ci.locked) return false;
         if(!cj.locked) return false;
+        if(namesTheEnd(ci) && namesTheEnd(cj)) return true;
         // a locked chapter may only name its number in words, which lands in chapText
-        if(ci.chapter && (String(ci.chapter) == String(cj.chapter)) && (ci.bookNo == cj.bookNo)) {
+        // the book is only named where it begins, so a heading that names none is in the
+        // book of the one beside it
+        let sameBook = ci.bookNo == null || cj.bookNo == null || ci.bookNo == cj.bookNo;
+        if(ci.chapter && (String(ci.chapter) == String(cj.chapter)) && sameBook) {
           //same chap num, same book
           if(ci._.halfNum == cj._.halfNum) {
             //same half num
@@ -3856,6 +3883,15 @@
             console.log('Dedupe', [ci._.text, cj._.text]);
             cj.mergeDirection = 'up';
             cj.mergeReason = 'dedupe';
+            if(namesTheEnd(ci) && namesTheEnd(cj)) {
+              // the end is the chapter, not the number the heading happened to give it
+              let word = [ci._.chapText, cj._.chapText].find(w => END_WORD.test(String(w ?? '').trim()));
+              if(word) {
+                ci._.chapText = word;
+                delete ci._.chapNum;
+              }
+              if(END_WORD.test((ci._.title ?? '').trim())) delete ci._.title;
+            }
             j++;
           } else {
             break;

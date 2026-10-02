@@ -495,9 +495,11 @@
         li {
           /**/
           max-width: 100%;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          &:not(.active) {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
           /**/
           padding-top: 0.1ex;
           padding-bottom: 0.1ex;
@@ -3166,6 +3168,12 @@
       let LEAD_NUMERIC_WORDS = '(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
       let TAIL_NUMERIC_WORDS = '(mười( (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( (mốt|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín)|[MDCLXVI]+|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
       let NUMERIC_WORDS = `${LEAD_NUMERIC_WORDS}|${TAIL_NUMERIC_WORDS}`;
+      // Don't let a TITLE backtrack into the number: `mười bốn` is 14, not 10 titled `bốn`.
+      let NUMERIC_WORDS_END = [
+        '(?!(?<=mười) (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín)(?![\\p{L}\\p{N}]))',
+        '(?!(?<=mươi) (mốt|hai|ba|bốn|lăm|sáu|bảy|tám|chín)(?![\\p{L}\\p{N}]))',
+        '(?!(?<=(^|[^\\p{L}])(hai|ba|bốn|năm|sáu|bảy|tám|chín)) mươi(?![\\p{L}\\p{N}]))',
+      ].join('');
       let patterns = [
         /*
         【xanh biếc lữ du tiên】 bộ 2 tự chương
@@ -3290,6 +3298,8 @@
         '^CHAP_NUM\\)$',
         //2,
         '^CHAP_NUM,$',
+        //【tứ】
+        '^【CHAP_TEXT】$',
         //Chương 157: (1)
         '^CHAP_TYPE CHAP_NUM: \\(HALF_NUM\\)',
         //Tự mẫu một ngày (hạ)
@@ -3401,6 +3411,8 @@
         'Tiếp theo viết thứ CHAP_NUM CHAP_TYPE TITLE',
         //Thứ hai nói
         '^Thứ CHAP_TEXT nói$',
+        //131 chương: Lần hai bước vào Khôn Ninh Cung
+        '^CHAP_NUM CHAP_TYPE: TITLE$',
         //001 ta và thê tử viên viện
         '^CHAP_NUM TITLE',
         //Đệ nhất bộ thứ 04 chương
@@ -3456,9 +3468,9 @@
           .replace('CHAP_TYPE', '(?<chapType>(chương|hồi|thiên|ngoại truyện))')
           .replace('CHAP_NUM_DECIMAL', `(?<chapNum>${NUMERIC_DECIMAL})`)
           .replace('CHAP_NUM', `(?<chapNum>${NUMERIC})`)
-          .replace('CHAP_TEXT:LEAD', `(?<chapText>cuối|kết|${LEAD_NUMERIC_WORDS})`)
-          .replace('CHAP_TEXT:TAIL', `(?<chapText>cuối|kết|${TAIL_NUMERIC_WORDS})`)
-          .replace('CHAP_TEXT', `(?<chapText>cuối|kết|${NUMERIC_WORDS})`);
+          .replace('CHAP_TEXT:LEAD', `(?<chapText>cuối|kết|${LEAD_NUMERIC_WORDS})${NUMERIC_WORDS_END}`)
+          .replace('CHAP_TEXT:TAIL', `(?<chapText>cuối|kết|${TAIL_NUMERIC_WORDS})${NUMERIC_WORDS_END}`)
+          .replace('CHAP_TEXT', `(?<chapText>cuối|kết|${NUMERIC_WORDS})${NUMERIC_WORDS_END}`);
         let regex = new RegExp(source, 'gimu');
         let result = [...text.matchAll(regex)];
         //console.debug({ pattern, regex, result });

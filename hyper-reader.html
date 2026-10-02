@@ -3071,6 +3071,8 @@
         merged: 1,
         get title() {
           let originalTitle = _.title || _.titleShort;
+          // a lone `/` or `|` after the chapter word is a separator with nothing behind it
+          originalTitle = originalTitle?.replace(/^[\s\/|\\]+/, '');
           let title, titleBook, titleChap, phienNgoai, halfPre, halfPost;
           titleBook = this.book;
           if (/phiên ngoại/iu.test(_.text) && !/phiên ngoại/iu.test(originalTitle)) phienNgoai = 'Phiên ngoại';
@@ -3165,16 +3167,210 @@
     function extractChapters(filename, text, { name }) {
       let NUMERIC = '(\\d{1,4}(\\.\\d{1,2})*)';
       let NUMERIC_DECIMAL = '(\\d{1,4}(\\.\\d{1,2})+)';
-      let LEAD_NUMERIC_WORDS = '(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
-      let TAIL_NUMERIC_WORDS = '(mười( (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( (mốt|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín)|[MDCLXVI]+|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
+      // 100-199 read out digit by digit: `nhất lẻ loi` is 100, `nhất lẻ một` 101,
+      // `nhất nhất linh` 110. `lẻ loi` stands for two zeros, `lẻ` and `linh` for one
+      let HUNDRED_NUMERIC_WORDS = 'nhất (lẻ loi|(lẻ|linh|nhất) (lẻ|linh|nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|một|hai|ba|bốn|năm|sáu|bảy|tám|chín))(?![\\p{L}\\p{N}])';
+      let LEAD_NUMERIC_WORDS = HUNDRED_NUMERIC_WORDS + '|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
+      let TAIL_NUMERIC_WORDS = HUNDRED_NUMERIC_WORDS + '|(mười( (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( (mốt|hai|ba|bốn|tư|lăm|sáu|bảy|tám|chín))?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín)|[MDCLXVI]+|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
       let NUMERIC_WORDS = `${LEAD_NUMERIC_WORDS}|${TAIL_NUMERIC_WORDS}`;
       // Don't let a TITLE backtrack into the number: `mười bốn` is 14, not 10 titled `bốn`.
       let NUMERIC_WORDS_END = [
         '(?!(?<=mười) (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín)(?![\\p{L}\\p{N}]))',
-        '(?!(?<=mươi) (mốt|hai|ba|bốn|lăm|sáu|bảy|tám|chín)(?![\\p{L}\\p{N}]))',
+        '(?!(?<=mươi) (mốt|hai|ba|bốn|tư|lăm|sáu|bảy|tám|chín)(?![\\p{L}\\p{N}]))',
         '(?!(?<=(^|[^\\p{L}])(hai|ba|bốn|năm|sáu|bảy|tám|chín)) mươi(?![\\p{L}\\p{N}]))',
       ].join('');
-      let patterns = [
+      let specify = (a, z) => {
+        let specificity = (s) => {
+          let specificity = 0;
+          let r = /[A-Z_]{2,}/g;
+          let m;
+          while((m = r.exec(s))) {
+            if(m.includes('_NUM')) specificity += 30;
+            else if(m.includes('_TEXT')) specificity += 20;
+            else specificity += 10;
+          }
+          return specificity;
+        };
+        if(specificity(a) > specificity(z)) return -1;
+        if(specificity(a) < specificity(z)) return 1;
+        return 0;
+      };
+      // certain: the heading names a chapter type and a number (`Chương 8: ...`), so it
+      // can be trusted to be a chapter. Everything else is a guess that only earns its
+      // place by filling a gap between certain chapters
+      let certainPatterns = [
+        //Thứ 1 chương thứ 1 cuốn thứ 2 tiết thứ 2 chương
+        '^Thứ \\d+ chương thứ BOOK_NUM cuốn thứ CHAP_NUM tiết thứ \\d+ chương',
+        //Thứ 3 chương quyển thứ ba thứ 38 tiết Chương 138
+        '^Thứ \\d+ chương quyển thứ BOOK_TEXT thứ CHAP_NUM tiết Chương \\d+',
+        //Chính văn thứ 3 chương đường muội yêu ta vui thích một hồi
+        '^Chính văn thứ CHAP_NUM chương TITLE$',
+        // (1)
+        '^\\(CHAP_NUM\\)$',
+        //22)
+        '^CHAP_NUM\\)$',
+        //2,
+        '^CHAP_NUM,$',
+        //22.
+        '^CHAP_NUM\\.$',
+        // (tứ)
+        // (mười một)
+        '^\\(CHAP_TEXT\\)$',
+        //【tứ】
+        '^【CHAP_TEXT】$',
+        //Thứ 7 chương mẫu thượng công lược (1.7) tiểu ma nữ phục vụ
+        // '^Thứ BOOK_NUM chương ' + name + ' \\(CHAP_NUM\\)([: ]TITLE)?',
+        //Thứ 31 chương
+        //Tập thứ nhất thứ 01 chương thất đọa vách núi đen
+        '^(BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) )?Thứ CHAP_NUM CHAP_TYPE([: ]TITLE)?',
+        //[thứ 1 chương]
+        '^\\[thứ CHAP_NUM CHAP_TYPE\\]',
+        //Bảy năm vợ chồng gần ba năm cùng hai cái đơn nam đệ tử chuyện xưa (5)
+        '^' + name + ' \\(CHAP_NUM\\)',
+        //Quyển thứ hai Chương 11: Mỹ mẫu cầu xin
+        //Tập 6 Chương 110: Nhân thay mới trang
+        '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) CHAP_TYPE CHAP_NUM: TITLE',
+        //(Chương 20: hèn chó diễn phượng (che giấu thiên 3)
+        '^\\(CHAP_TYPE CHAP_NUM: TITLE',
+        //Phiên Ngoại hai mươi lăm chương
+        '^(Phiên Ngoại )CHAP_TEXT CHAP_TYPE',
+        //【 đọa phụ 】 Chương 2:: Khuất nhục phu nhân
+        '^【NAME】 CHAP_TYPE CHAP_NUM: TITLE',
+        //【xanh biếc lữ du tiên】 bộ 2 thứ 08 chương
+        '^【NAME】 bộ BOOK_NUM thứ CHAP_NUM CHAP_TYPE',
+        //Xanh biếc lữ du tiên bộ 2 Chương 8: Sơ ngộ bích du
+        '^NAME bộ BOOK_NUM CHAP_TYPE CHAP_NUM: TITLE',
+        //【bạn gái đệ đệ】9
+        '^【NAME】CHAP_NUM([: ]TITLE)?',
+        //【các huynh đệ loạn luân thịnh yến】(tam)
+        //【không chỉ tình yêu】(1)
+        //【không chỉ tình yêu】(18) hoàn
+        '^【NAME】\\((CHAP_TEXT|CHAP_NUM)\\)( TITLE)?',
+        //【của ta giang hồ】(thứ 2 chương)
+        '^【NAME】\\(thứ CHAP_NUM CHAP_TYPE\\)',
+        //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
+        '^【NAME】(phiên ngoại) TITLE',
+        //【phiên ngoại thiên chi Diệp Minh Hi tự bạch】(1)
+        '【(?=.*?phiên ngoại)(?<title>.*?)】\\(CHAP_NUM\\)',
+        //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
+        '^【NAME】\\(phiên ngoại\\) TITLE',
+        //Người nhà quần áo Chương 1: Mẹ dị thường
+        '^NAME CHAP_TYPE CHAP_NUM: TITLE',
+        //Nón xanh mặc ta mang (nhất) kinh vi thiên nhân
+        '^NAME \\(CHAP_TEXT\\) TITLE',
+        //(bản cũ) dâm loạn gia đình thứ 01 chương: Sau khi tan lớp ba ba âu yếm
+        'NAME thứ CHAP_NUM CHAP_TYPE: TITLE',
+        //(16) A Kiện nói: Nàng... Nàng là ta... Muội muội
+        '^\\(CHAP_NUM\\) TITLE',
+        //..."Ân, ta đều nghe ngươi!" (13)
+        '(?<=\\W) \\(CHAP_NUM\\)$',
+        //"2" hào môn bí mật
+        '^"\\s*CHAP_NUM\\s*"( TITLE)?',
+        //Thứ 1002 chương lữ mộng đẹp cảnh nhã nhàn bá mẫu (nhị)
+        '^Thứ CHAP_NUM CHAP_TYPE TITLE',
+        //Đệ nhất bộ tứ đại mỹ nữ chi đẹp nhất thị trưởng dương ngưng băng (thượng)
+        '^Đệ (BOOK_NUM|BOOK_TEXT) BOOK_TYPE TITLE \\(HALF_TEXT\\)',
+        //Bộ 2 tứ đại mỹ nữ chi kim bài chủ trì dương ninh làm (hạ)
+        '^BOOK_TYPE BOOK_NUM TITLE \\(HALF_TEXT\\)',
+        //(Chương 20: hèn chó diễn phượng (che giấu thiên 2)
+        '^\\(CHAP_TYPE CHAP_NUM: TITLE HALF_TEXT\\)',
+        //Đệ 1 chương: (Mẹ Mamako)
+        //Đệ 8 chương, đẩy ngược phản bị địt.
+        '^(Đệ|thứ) CHAP_NUM CHAP_TYPE[,:]? TITLE',
+        //Quyển thứ hai thiết giáp phong vân
+        '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT)( BOOK_TITLE)?$',
+        //Thứ 4 cuốn đế đô bi ca
+        '^Thứ BOOK_NUM BOOK_TYPE BOOK_TITLE',
+        //Chương mười:
+        '^CHAP_TYPE CHAP_TEXT:$',
+        //Chương ba mươi lăm lại rình coi
+        '^CHAP_TYPE CHAP_TEXT TITLE$',
+        //Ba mươi tám chương Tuyết Nhi tân hôn
+        '^CHAP_TEXT CHAP_TYPE TITLE$',
+        //Bốn mươi chương
+        '^CHAP_TEXT CHAP_TYPE$',
+        //Chương 1:
+        '^CHAP_TYPE CHAP_NUM:',
+        //【Chương 1:
+        '^【CHAP_TYPE CHAP_NUM: TITLE',
+        //Chương 15: Hiên Viên Minh Châu
+        '^CHAP_TYPE CHAP_NUM: TITLE$',
+        //09. Thi chạy
+        '^CHAP_NUM\\. TITLE$',
+        //(hạ)
+        '^\\(HALF_TEXT\\)$',
+        //"Bạn gái đệ đệ" 11
+        '^"NAME" CHAP_NUM$',
+        //【hào hiệp xanh biếc truyện II】
+        '^【NAME BOOK_TEXT】$',
+        //【chương kết, (Lã phàm thị giác)】
+        '^【CHAP_TYPE CHAP_TEXT, \\(TITLE',
+        //【chương kết】
+        '^【CHAP_TYPE CHAP_TEXT】$',
+        //Kiều thê chuyện xưa (nhất)
+        '^NAME \\(CHAP_TEXT\\)$',
+        //《 kiều thê chuyện xưa 》2
+        '^《 NAME 》CHAP_NUM$',
+        //#3 Chương 3: Dưới ánh trăng chinh phục
+        '^#\\d+ Chương CHAP_NUM: TITLE',
+        //Nón xanh chiến thần người ở rể (Chương 5: phối đồ bản)
+        '^NAME \\(Chương CHAP_NUM: TITLE\\)',
+        //Phục 63 chương
+        '^Phục CHAP_NUM chương',
+        //Lão bà Tuyết Nhi đổi thê trải qua (thập tam)
+        '^NAME \\(CHAP_TEXT\\)TITLE',
+        //【30, khúc cuối】
+        '^【CHAP_NUM, TITLE】$',
+        //【hai mươi bảy, ba người hạnh phúc (thượng)】
+        '^【CHAP_TEXT, TITLE \\(HALF_TEXT\\)】$',
+        //【hai mươi chín, ba người hạnh phúc】
+        '^【CHAP_TEXT, TITLE】$',
+        //Thứ 1 cuốn 1, bị phiêu rồi hả?
+        '^thứ BOOK_NUM BOOK_TYPE CHAP_NUM, TITLE$',
+        //"Bí mật nhạc viên" (Chương 7: Hôn nửa năm sau)
+        '"NAME" \\(CHAP_TYPE CHAP_NUM: TITLE\\)',
+        //Thứ 01 thiên: Tuyệt sắc gia tộc chi cưỡng dâm (trung)
+        'Thứ CHAP_NUM CHAP_TYPE: TITLE \\(HALF_TEXT\\)',
+        //Tiếp theo viết thứ 8 chương sơ phong mùi thơm
+        'Tiếp theo viết thứ CHAP_NUM CHAP_TYPE TITLE',
+        //Thứ hai nói
+        '^Thứ CHAP_TEXT nói$',
+        //131 chương: Lần hai bước vào Khôn Ninh Cung
+        '^CHAP_NUM CHAP_TYPE: TITLE$',
+        //Đệ nhất bộ thứ 04 chương
+        '^Đệ BOOK_TEXT BOOK_TYPE thứ CHAP_NUM CHAP_TYPE',
+        //Tiếp theo thứ 05 chương
+        '^Tiếp theo thứ CHAP_NUM CHAP_TYPE',
+        //14(dẫn sói vào nhà tam)
+        '^CHAP_NUM\\(TITLE\\)$',
+        '^NAME CHAP_NUM\\(TITLE\\)$',
+        //Thứ 1 cuốn thứ 3 chương xuất phát
+        '^Thứ BOOK_NUM cuốn thứ CHAP_NUM chương TITLE$',
+        //(nhất lẻ loi) lão hán cùng yêu nữ
+        //(nhất lẻ một) tân giai đoạn
+        //(nhất lẻ hai) giai đoạn nhị
+        '^\\(CHAP_TEXT\\) TITLE$',
+          //Chương 1: Tân niên đặc biệt thiên (thượng)
+        //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
+        '(^|(?<=\\W ))(Phiên Ngoại )?CHAP_TYPE CHAP_NUM([^\\p{L}\\p{N}\\n]+TITLE)?$',
+      ].sort(specify);
+      let uncertainPatterns = [
+        // weak, so only guesses: a sentence that mentions `Chương 3` in passing, a
+        // bare `Thứ 15 phút.`, or a paragraph that opens with `Tiết thứ ba` - none of them
+        // may vouch for a chapter, or they open gaps for the real ones to be mis-filled
+        //kể ra một cái chẳng phải thuần khiết trưởng thành chuyện xưa Chương 3: Thiếu nữ bắt gian nhật ký
+        '(?<=\\s\\p{Ll}+\\s)CHAP_TYPE CHAP_NUM',
+        //Thứ 084 dâm mỹ hình ảnh
+        '^Thứ CHAP_NUM TITLE$',
+        //Thứ 1 tiết tay nghề tiểu tử & Uzumaki Naruto
+        '^(Đệ|thứ) HALF_NUM HALF_TYPE TITLE$',
+        //Tiết thứ hai Hyuga Hinata
+        //Tiết thứ năm: Naruto cực khổ ngày
+        '^HALF_TYPE thứ HALF_TEXT[:]? TITLE$',
+        //Thứ bảy tiết trăm hào Tiểu Anh! Một câu bạch cấp
+        //Thứ sáu tiết: Hinata cực khổ ngày
+        //Đệ thập nhất tiết Sasuke xanh biếc nô thuộc tính chuyện lớn hấp thụ ánh sáng!
+        '^(Đệ|thứ) HALF_TEXT HALF_TYPE[:]? TITLE$',
         /*
         【xanh biếc lữ du tiên】 bộ 2 tự chương
         【xanh biếc lữ du tiên】 bộ 2 thứ 01 chương
@@ -3212,125 +3408,36 @@
         //Phiên Ngoại Chương 8: Treo đầu dê bán thịt chó
         //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
         //Hồi 2: · phẫn vũ nữ khinh thân dụ địch tù, nhu vú to thát tử loạn tâm trí
-        '(^|(?<=\\W ))(Phiên Ngoại )?CHAP_TYPE CHAP_NUM([^\\p{L}\\p{N}\\n]+TITLE)?$',
-        //Thứ 1 chương thứ 1 cuốn thứ 2 tiết thứ 2 chương
-        '^Thứ \\d+ chương thứ BOOK_NUM cuốn thứ CHAP_NUM tiết thứ \\d+ chương',
-        //Thứ 3 chương quyển thứ ba thứ 38 tiết Chương 138
-        '^Thứ \\d+ chương quyển thứ BOOK_TEXT thứ CHAP_NUM tiết Chương \\d+',
-        //Chính văn thứ 3 chương đường muội yêu ta vui thích một hồi
-        '^Chính văn thứ CHAP_NUM chương TITLE$',
         //Ngũ
         //Hai mươi mốt
         '^CHAP_TEXT$',
-        // (1)
-        '^\\(CHAP_NUM\\)$',
         //8.1
         '^CHAP_NUM$',
-        // (tứ)
-        // (mười một)
-        '^\\(CHAP_TEXT\\)$',
-        //Thứ 7 chương mẫu thượng công lược (1.7) tiểu ma nữ phục vụ
-        // '^Thứ BOOK_NUM chương ' + name + ' \\(CHAP_NUM\\)([: ]TITLE)?',
-        //Thứ 31 chương
-        //Tập thứ nhất thứ 01 chương thất đọa vách núi đen
-        '^(BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) )?Thứ CHAP_NUM CHAP_TYPE([: ]TITLE)?',
-        //[thứ 1 chương]
-        '^\\[thứ CHAP_NUM CHAP_TYPE\\]',
-        //Bảy năm vợ chồng gần ba năm cùng hai cái đơn nam đệ tử chuyện xưa (5)
-        '^' + name + ' \\(CHAP_NUM\\)',
         //2019-7-19 mười lăm
         '^DATE CHAP_TEXT',
         //Ngoại truyện nhất
         '^CHAP_TYPE CHAP_TEXT',
         //Mười hai, nửa năm sau cuộc sống vẫn đang tiếp tục. Phố xá như trước thái bình.
         '^CHAP_TEXT[,] TITLE$',
-        //Quyển thứ hai Chương 11: Mỹ mẫu cầu xin
-        //Tập 6 Chương 110: Nhân thay mới trang
-        '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) CHAP_TYPE CHAP_NUM: TITLE',
         //Lời dẫn
         '^(?<title>CHAP_TYPE (cuối|kết)|tự chương|Lời dẫn)$',
-        //(Chương 20: hèn chó diễn phượng (che giấu thiên 3)
-        '^\\(CHAP_TYPE CHAP_NUM: TITLE',
-        //Phiên Ngoại hai mươi lăm chương
-        '^(Phiên Ngoại )CHAP_TEXT CHAP_TYPE',
-        //【 đọa phụ 】 Chương 2:: Khuất nhục phu nhân
-        '^【NAME】 CHAP_TYPE CHAP_NUM: TITLE',
-        //【xanh biếc lữ du tiên】 bộ 2 thứ 08 chương
-        '^【NAME】 bộ BOOK_NUM thứ CHAP_NUM CHAP_TYPE',
-        //Xanh biếc lữ du tiên bộ 2 Chương 8: Sơ ngộ bích du
-        '^NAME bộ BOOK_NUM CHAP_TYPE CHAP_NUM: TITLE',
-        //【bạn gái đệ đệ】9
-        '^【NAME】CHAP_NUM([: ]TITLE)?',
-        //【các huynh đệ loạn luân thịnh yến】(tam)
-        //【không chỉ tình yêu】(1)
-        //【không chỉ tình yêu】(18) hoàn
-        '^【NAME】\\((CHAP_TEXT|CHAP_NUM)\\)( TITLE)?',
-        //【của ta giang hồ】(thứ 2 chương)
-        '^【NAME】\\(thứ CHAP_NUM CHAP_TYPE\\)',
-        //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
-        '^【NAME】(phiên ngoại) TITLE',
-        //【phiên ngoại thiên chi Diệp Minh Hi tự bạch】(1)
-        '【(?=.*?phiên ngoại)(?<title>.*?)】\\(CHAP_NUM\\)',
-        //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
-        '^【NAME】\\(phiên ngoại\\) TITLE',
-        //Người nhà quần áo Chương 1: Mẹ dị thường
-        '^NAME CHAP_TYPE CHAP_NUM: TITLE',
-        //Nón xanh mặc ta mang (nhất) kinh vi thiên nhân
-        '^NAME \\(CHAP_TEXT\\) TITLE',
-        //(bản cũ) dâm loạn gia đình thứ 01 chương: Sau khi tan lớp ba ba âu yếm
-        'NAME thứ CHAP_NUM CHAP_TYPE: TITLE',
-        //(16) A Kiện nói: Nàng... Nàng là ta... Muội muội
-        '^\\(CHAP_NUM\\) TITLE',
-        //..."Ân, ta đều nghe ngươi!" (13)
-        '(?<=\\W) \\(CHAP_NUM\\)$',
         //(14) nghiêm hạo tại sofa phía trên thích không thể tự thoát ra được, nhất tinh mặc xong đồ ngủ, sau đó tiếp lấy đem nghiêm hạo ôm đến chân của mình phía trên, nhẹ nhàng âu yếm.
         //not one hanging off a word, though: `Thượng (2)` is the second half of a
         //chapter and `nói (2) lần` is an aside, and unanchored this pattern read both
         //as a chapter of that number - which then stole the real one's heading
         '(?<![\\p{L}\\p{N}] ?)\\(CHAP_NUM\\)',
-        //"2" hào môn bí mật
-        '^"\\s*CHAP_NUM\\s*"( TITLE)?',
         //"13 chương kết"
         '^"CHAP_NUM TITLE"$',
         //Tập thứ hai thứ 36 chương con tin uy hiếp
         '^Tập thứ BOOK_TEXT thứ CHAP_NUM CHAP_TYPE TITLE$',
-        //22)
-        '^CHAP_NUM\\)$',
-        //2,
-        '^CHAP_NUM,$',
-        //【tứ】
-        '^【CHAP_TEXT】$',
         //Chương 157: (1)
         '^CHAP_TYPE CHAP_NUM: \\(HALF_NUM\\)',
         //Tự mẫu một ngày (hạ)
         '^(?<!.*CHAP_TYPE.*TITLE) \\(HALF_TEXT\\)$',
-        //Thứ 1002 chương lữ mộng đẹp cảnh nhã nhàn bá mẫu (nhị)
-        '^Thứ CHAP_NUM CHAP_TYPE TITLE',
-        //Đệ nhất bộ tứ đại mỹ nữ chi đẹp nhất thị trưởng dương ngưng băng (thượng)
-        '^Đệ (BOOK_NUM|BOOK_TEXT) BOOK_TYPE TITLE \\(HALF_TEXT\\)',
-        //Bộ 2 tứ đại mỹ nữ chi kim bài chủ trì dương ninh làm (hạ)
-        '^BOOK_TYPE BOOK_NUM TITLE \\(HALF_TEXT\\)',
-        //(Chương 20: hèn chó diễn phượng (che giấu thiên 2)
-        '^\\(CHAP_TYPE CHAP_NUM: TITLE HALF_TEXT\\)',
-        //Đệ 1 chương: (Mẹ Mamako)
-        //Đệ 8 chương, đẩy ngược phản bị địt.
-        '^(Đệ|thứ) CHAP_NUM CHAP_TYPE[,:]? TITLE',
-        //Quyển thứ hai thiết giáp phong vân
-        '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT)( BOOK_TITLE)?$',
-        //Thứ 4 cuốn đế đô bi ca
-        '^Thứ BOOK_NUM BOOK_TYPE BOOK_TITLE',
         //1.1 nhân vật chính kêu mũ
         '^CHAP_NUM_DECIMAL TITLE$',
         //(4.25)G con mẹ nó du học sinh
         '^\\(CHAP_NUM\\) ?TITLE$',
-        //Chương mười:
-        '^CHAP_TYPE CHAP_TEXT:$',
-        //Chương ba mươi lăm lại rình coi
-        '^CHAP_TYPE CHAP_TEXT TITLE$',
-        //Ba mươi tám chương Tuyết Nhi tân hôn
-        '^CHAP_TEXT CHAP_TYPE TITLE$',
-        //Bốn mươi chương
-        '^CHAP_TEXT CHAP_TYPE$',
         //(tam) mấy ngày kế tiếp, mẹ ngược lại không hướng đến Lý Tư oa trong nhà chạy, mỗi ngày tại trong nhà nấu cơm mang đứa nhỏ, tâm tình thượng cũng không tệ.
         '^\\(CHAP_TEXT\\)',
         //(còn tiếp) mười ba (thượng) đã xảy ra chuyện — ba chữ này bình thường là chỉ phát sinh không tốt sự tình, chuyện tốt nhi cũng không có khả năng dùng này ba tự, hơn nữa có thể lớn có thể nhỏ, nhỏ đến tại ban thượng nghịch ngợm gây sự đùa giỡn bạn học gái bị lão sư đã biết, lớn đến hai quốc gia phát sinh chiến tranh, đều có thể kêu đã xảy ra chuyện.
@@ -3343,113 +3450,29 @@
         '^\\(còn tiếp\\)\\(CHAP_TEXT\\)',
         //Mười bốn "Tiểu Chí như thế nào còn không có rời giường, ngươi không gọi hắn ăn điểm tâm a."
         //'^CHAP_TEXT',
-        //Chương 1:
-        '^CHAP_TYPE CHAP_NUM:',
-        //【Chương 1:
-        '^【CHAP_TYPE CHAP_NUM: TITLE',
-        //22.
-        '^CHAP_NUM\\.$',
-        //09. Thi chạy
-        '^CHAP_NUM\\. TITLE$',
         //Đại phụng gõ mõ cầm canh nhân chi xanh miết #1 tác giả: Hố ni
         '^NAME #CHAP_NUM',
-        //(hạ)
-        '^\\(HALF_TEXT\\)$',
-        //"Bạn gái đệ đệ" 11
-        '^"NAME" CHAP_NUM$',
-        //Thứ 1 tiết tay nghề tiểu tử & Uzumaki Naruto
-        '^(Đệ|thứ) HALF_NUM HALF_TYPE TITLE$',
-        //Tiết thứ hai Hyuga Hinata
-        //Tiết thứ năm: Naruto cực khổ ngày
-        '^HALF_TYPE thứ HALF_TEXT[:]? TITLE$',
-        //Thứ bảy tiết trăm hào Tiểu Anh! Một câu bạch cấp
-        //Thứ sáu tiết: Hinata cực khổ ngày
-        //Đệ thập nhất tiết Sasuke xanh biếc nô thuộc tính chuyện lớn hấp thụ ánh sáng!
-        '^(Đệ|thứ) HALF_TEXT HALF_TYPE[:]? TITLE$',
-        //【hào hiệp xanh biếc truyện II】
-        '^【NAME BOOK_TEXT】$',
-        //【chương kết, (Lã phàm thị giác)】
-        '^【CHAP_TYPE CHAP_TEXT, \\(TITLE',
-        //【chương kết】
-        '^【CHAP_TYPE CHAP_TEXT】$',
-        //Kiều thê chuyện xưa (nhất)
-        '^NAME \\(CHAP_TEXT\\)$',
-        //《 kiều thê chuyện xưa 》2
-        '^《 NAME 》CHAP_NUM$',
-        //#3 Chương 3: Dưới ánh trăng chinh phục
-        '^#\\d+ Chương CHAP_NUM: TITLE',
-        //Nón xanh chiến thần người ở rể (Chương 5: phối đồ bản)
-        '^NAME \\(Chương CHAP_NUM: TITLE\\)',
-        //Phục 63 chương
-        '^Phục CHAP_NUM chương',
-        //Lão bà Tuyết Nhi đổi thê trải qua (thập tam)
-        '^NAME \\(CHAP_TEXT\\)TITLE',
         //— mẹ vú to người vợ khuê mật 84 cùng mẹ cùng nữ nhi
         '^[^\\p{L}]* NAME CHAP_NUM TITLE',
-        //【30, khúc cuối】
-        '^【CHAP_NUM, TITLE】$',
-        //【hai mươi bảy ba người hạnh phúc (thượng)】
-        '^【CHAP_TEXT,? TITLE \\(HALF_TEXT\\)】$',
-        //【hai mươi sáu tái kiến tinh không】
-        //【hai mươi chín, ba người hạnh phúc】
-        '^【CHAP_TEXT,? TITLE】$',
         //Hai mươi tư du hí triển
         '^CHAP_TEXT TITLE_SHORT$',
-        //Thứ 1 cuốn 1, bị phiêu rồi hả?
-        '^thứ BOOK_NUM BOOK_TYPE CHAP_NUM, TITLE$',
         //● thứ 1 chương ●
         //
         //Võ tràng lõa thể luyện kiếm, thôi miên tự an ủi ●
         '^● thứ CHAP_NUM CHAP_TYPE ●$\\n+TITLE●',
-        //kể ra một cái chẳng phải thuần khiết trưởng thành chuyện xưa Chương 3: Thiếu nữ bắt gian nhật ký
-        '(?<=\\s\\p{Ll}+\\s)CHAP_TYPE CHAP_NUM',
-        //"Bí mật nhạc viên" (Chương 7: Hôn nửa năm sau)
-        '"NAME" \\(CHAP_TYPE CHAP_NUM: TITLE\\)',
-        //Thứ 01 thiên: Tuyệt sắc gia tộc chi cưỡng dâm (trung)
-        'Thứ CHAP_NUM CHAP_TYPE: TITLE \\(HALF_TEXT\\)',
-        //Tiếp theo viết thứ 8 chương sơ phong mùi thơm
-        'Tiếp theo viết thứ CHAP_NUM CHAP_TYPE TITLE',
-        //Thứ hai nói
-        '^Thứ CHAP_TEXT nói$',
-        //131 chương: Lần hai bước vào Khôn Ninh Cung
-        '^CHAP_NUM CHAP_TYPE: TITLE$',
         //001 ta và thê tử viên viện
         '^CHAP_NUM TITLE',
-        //Đệ nhất bộ thứ 04 chương
-        '^Đệ BOOK_TEXT BOOK_TYPE thứ CHAP_NUM CHAP_TYPE',
-        //Tiếp theo thứ 05 chương
-        '^Tiếp theo thứ CHAP_NUM CHAP_TYPE',
-        //Thứ 084 dâm mỹ hình ảnh
-        '^Thứ CHAP_NUM TITLE$',
-        //14(dẫn sói vào nhà tam)
-        '^CHAP_NUM\\(TITLE\\)$',
-        '^NAME CHAP_NUM\\(TITLE\\)$',
         //16, ức chế không được dục vọng
         '^CHAP_NUM, TITLE$',
         //3.40 sinh mệnh cái khe
         '^BOOK_NUM.CHAP_NUM TITLE$',
         //【3.17 vận mệnh là duy nhất giải】
         '^【BOOK_NUM.CHAP_NUM TITLE】$',
-        //Thứ 1 cuốn thứ 3 chương xuất phát
-        '^Thứ BOOK_NUM cuốn thứ CHAP_NUM chương TITLE$',
         '^※※※$',
-      ].sort((a, z) => {
-        let specificity = (s) => {
-          let specificity = 0;
-          let r = /[A-Z_]{2,}/g;
-          let m;
-          while((m = r.exec(s))) {
-            if(m.includes('_NUM')) specificity += 11;
-            else specificity += 10;
-          }
-          return specificity;
-        };
-        if(specificity(a) > specificity(z)) return -1;
-        if(specificity(a) < specificity(z)) return 1;
-        return 0;
-      });
+      ].sort(specify);
       let matches = [];
-      for (let pattern of patterns) {
+      for (let pattern of [...certainPatterns, ...uncertainPatterns]) {
+        let certain = certainPatterns.includes(pattern);
         let source = pattern
           .replace('NAME', '(?<name>' + [...new Set([name, name.replace('hệ liệt', '').trim()])].join('|') + ')')
           .replace('DATE', '\\d+-\\d+-\\d+')
@@ -3474,7 +3497,7 @@
         let regex = new RegExp(source, 'gimu');
         let result = [...text.matchAll(regex)];
         //console.debug({ pattern, regex, result });
-        matches.push(...result.map(m => ({ pattern, regex, index: m.index, ...m.groups, text: m[0] })));
+        matches.push(...result.map(m => ({ pattern, regex, certain, index: m.index, ...m.groups, text: m[0] })));
       }
       let falsePositives = [];
       matches.forEach((m, index) => {
@@ -3512,12 +3535,14 @@
             } else {
               let c = m[f].toLowerCase();
               let vn = {
+                'lẻ loi': '00',
+                'lẻ|linh': 0,
                 'mươi$|(?<=.)(thập|bách|thiên|vạn)$': 0,
                 'mươi': '',
                 '(mười|thập)(?=.+)|m[ộố]t|nhất': 1,
                 'hai|nhị': 2,
                 'ba|tam': 3,
-                'bốn|tứ': 4,
+                'bốn|tứ|tư': 4,
                 '[nl]ăm|ngũ': 5,
                 'sáu|lục': 6,
                 'bảy|thất': 7,
@@ -3542,8 +3567,15 @@
         }
       });
       matches = matches.filter(m => !falsePositives.includes(m));
+      // `Cửu thiên chi thượng ...` is nine heavens, not chapter nine: a number in words
+      // beside `thiên` is too common a phrase to count as a certain chapter
+      matches.forEach(m => {
+        if(m.certain && m.chapText && !m.chapNum && m.chapType?.toLowerCase() == 'thiên') m.certain = false;
+      });
       matches.sort((a, z) => a.index - z.index);
       //debug({ matches });
+
+      matches = keepUncertainInGaps(matches);
 
       if (matches.length < 2) {
         let paragraphsPerChapter = 60;
@@ -3573,6 +3605,7 @@
           halfType: c._.halfType,
           halfNum: c._.halfNum,
           text: c._.text,
+          certain: c._.certain,
           // pattern: c._.pattern,
           // title: c._.title || c._.titleShort,
         }));
@@ -3619,6 +3652,46 @@
       // cleanupChapters(chapters);
 
       return chapters;
+    }
+
+    // uncertain matches only fill the gaps between certain chapters: a gap is where the
+    // numbers jump from one certain chapter to the next. Before the first certain chapter,
+    // after the last, or between two that follow on from each other, they are dropped and
+    // their text stays with the chapter before. With no certain chapter at all, the
+    // uncertain ones are all there is, so they count as certain
+    function keepUncertainInGaps(matches) {
+      if(!matches.some(m => m.certain)) {
+        matches.forEach(m => m.certain = true);
+        return matches;
+      }
+      // a chapter that names its number in words has it in chapText; one that names
+      // none (`Lời dẫn`) cannot vouch for what stands beside it, so it is looked past
+      let numberOf = (m) => {
+        let n = Number(m.chapNum ?? m.chapText);
+        return Number.isNaN(n) ? undefined : n;
+      };
+      // continuous: the next certain chapter follows on, or repeats the number (the
+      // halves of one chapter, a heading seen twice). Nothing is missing in between
+      let isGap = (a, b) => !(b == a || b == a + 1);
+      let certains = matches.filter(m => m.certain && numberOf(m) != null);
+      return matches.filter(m => {
+        if(m.certain) return true;
+        // the same heading a certain pattern already read
+        if(matches.some(c => c.certain && c.index == m.index)) return false;
+        let ch = certains.findLast(c => c.index < m.index);
+        let cj = certains.find(c => c.index > m.index);
+        if(!ch || !cj) return false;
+        let [a, b] = [numberOf(ch), numberOf(cj)];
+        if(!isGap(a, b)) return false;
+        // it fills the gap only by being a number that is missing from it, so a gap
+        // of 5 -> 8 takes a 6 or a 7 and nothing else. Where the numbers go back
+        // (a new book) there is no such range to hold it to
+        if(b > a) {
+          let n = numberOf(m);
+          return n != null && n > a && n < b;
+        }
+        return true;
+      });
     }
 
     function merge(chapters) {
@@ -3723,7 +3796,10 @@
 
     function lockCertain(chapters) {
       for(let ci of chapters) {
-        if(ci._.chapNum && ci._.chapType?.toLowerCase() == 'chương') {
+        // locked whether or not it names a number (`Bốn mươi chương` names it in words,
+        // `Lời dẫn` not at all): left unlocked, analyzeUncertains took it for a guess and
+        // merged it into its neighbours
+        if(ci._.certain) {
           console.log('Lock', [ci._.text]);
           ci.locked = 'certain';
         }
@@ -3866,8 +3942,9 @@
         if(!cj) return false;
         if(!ci.locked) return false;
         if(!cj.locked) return false;
-        if(ci._.chapNum && (ci._.chapNum == cj._.chapNum)) {
-          //same chap num
+        // a locked chapter may only name its number in words, which lands in chapText
+        if(ci.chapter && (String(ci.chapter) == String(cj.chapter)) && (ci.bookNo == cj.bookNo)) {
+          //same chap num, same book
           if(ci._.halfNum == cj._.halfNum) {
             //same half num
             return true;

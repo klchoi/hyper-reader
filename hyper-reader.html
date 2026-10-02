@@ -524,6 +524,12 @@
           &:first-child a {
             font-weight: bold;
           }
+          /* a heading for the chapters below it, not a link */
+          &.book {
+            font-size: 0.75em;
+            opacity: 0.6;
+            padding-top: calc(var(--gap) * 0.5);
+          }
         }
       }
     }
@@ -1504,6 +1510,13 @@
           return
         }
 
+        // a book stored by an older parser keeps the titles and groups that parser cut
+        // it into: parsing the file again is what updates them
+        if (book.parser != PARSER_VERSION && migrate) {
+          console.info('Book parsed by an older parser:', { bookId, parser: book.parser });
+          dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, retry] });
+          return;
+        }
         // a book stored before chapters carried their offset: parsing the file again is
         // what brings them back, and the file content it needs is still here
         if (!book.chapters.some(c => c.offset != null) && migrate) {
@@ -2617,6 +2630,7 @@
           settings.uiFontWeight && `--ui-font-weight: ${Number(settings.uiFontWeight)};`,
         ].filter(Boolean).join(' ');
         // the sliders follow the same toggle the list does
+        let currentBook;
         let picked = fontSettings[fontPicker.target];
         let pickedFont = settings[picked.family];
         let pickedSize = settings[picked.size] || 18;
@@ -2627,7 +2641,10 @@
             h('nav', {}, [
               (book?.chapters?.length > 0) && (
                 h('ol', { start: 0 }, [
-                  ...book.chapters.map(c => (
+                  ...book.chapters.flatMap(c => [
+                    // only the chapter that names its book opens a group: the ones after it
+                    // belong to it until another book is named
+                    c.book && c.book != currentBook && h('li', { class: 'book' }, text(currentBook = c.book)),
                     h('li', { class: { active: c.id == chapter.id } }, [
                       h('a', {
                         href: router.route(bookRoute({ bookId: book.id, offset: c.offset })),
@@ -2639,8 +2656,8 @@
                       }, [
                         text(fixNames(c.title))
                       ])
-                    ])
-                  ))
+                    ]),
+                  ].filter(Boolean))
                 ])
               )
             ]),
@@ -3004,6 +3021,10 @@
       }
     });
 
+    // bump when a change to the parser should reach the books already stored, which
+    // are parsed again the next time they are opened
+    const PARSER_VERSION = 1;
+
     function Book(file, fileContent, chapters) {
       let id, name, description;
       if (file?.name) {
@@ -3026,6 +3047,7 @@
             id,
             name,
             description,
+            parser: PARSER_VERSION,
             chapters: chapters.map(c => {
               c = c.toJSON();
               delete c.content;
@@ -3074,7 +3096,9 @@
           // a lone `/` or `|` after the chapter word is a separator with nothing behind it
           originalTitle = originalTitle?.replace(/^[\s\/|\\]+/, '');
           let title, titleBook, titleChap, phienNgoai, halfPre, halfPost;
-          titleBook = this.book;
+          // the book is named by the group the list puts the chapter under, so it only
+          // stays in a title with no chapter to name instead (the bare `Bộ 2` line)
+          if (this.chapter == null) titleBook = this.book;
           if (/phiên ngoại/iu.test(_.text) && !/phiên ngoại/iu.test(originalTitle)) phienNgoai = 'Phiên ngoại';
           if (this.chapter != null) titleChap = this.chapType + ' ' + this.chapter;
           if (this.half && !originalTitle?.includes('(' + this.half + ')')) {
@@ -3158,6 +3182,7 @@
             id: this.id,
             title: this.title,
             offset: this.offset,
+            book: this.group,
             content: this.content,
           }
         }
@@ -3625,6 +3650,7 @@
         prologue,
         mergeShortChapters,
         merge,
+        groupByBook,
       ]) {
         console.groupCollapsed(pass.name);
         pass(chapters);
@@ -3939,6 +3965,23 @@
           else mark(ci, 'down', 'merge all', 'merge all down', ci, cj);
         }
       }
+    }
+
+    // the book each chapter belongs to, for the list to group them by. A chapter names
+    // its book only where one begins, so the name carries on until another is named.
+    // A book that opens with no heading of its own is the one before the first named
+    // `Bộ 2`, and it is called `Bộ 1`; the title page ahead of the first chapter is in none
+    function groupByBook(chapters) {
+      let first = chapters.find(c => c.book);
+      if(!first) return;
+      let before = chapters.indexOf(first);
+      let opening = first.bookNo == 2 ? first.book.replace(/\d+$/, '1') : undefined;
+      let group;
+      chapters.forEach((c, i) => {
+        if(c.book) group = c.book;
+        else if(i < before) group = c.chapNo != null ? opening : undefined;
+        c.group = group;
+      });
     }
 
     // a chapter of a paragraph or two is hardly ever a chapter: it is the text caught

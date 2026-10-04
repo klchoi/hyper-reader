@@ -3345,7 +3345,7 @@
     const BOOK_PART = '(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?';
     const HEADING_RULES = [
       // Chương 5 | Chương kết | Thứ 5 chương | Ba mươi tám chương | Quyển 2 Chương 7 | 【NAME】 Chương 5
-      { kind: 'chap', base: 9, re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}x{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))` },
+      { kind: 'chap', base: 9, re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))` },
       // 【NAME】9 | NAME #3 | NAME (5) | 《NAME》2
       { kind: 'chap', base: 7, re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?` },
       // Quyển thứ ba 3: the chapter's number follows its book's
@@ -3471,8 +3471,13 @@
         let last = tokens[m[0].length - 1];
         let rest = line.slice(last.e);
         let whole = !/\S/.test(rest);
-        let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);
         let read = readRoles(rule, at);
+        // `Thứ 6 chương Chương 6: Cao trào...` and `Thứ 8 chương thật · Chương 8:: Đại tỷ...`
+        // say the chapter twice; the title is what follows the second
+        let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);
+        if(read.roles.n != null) {
+          title = title.replace(new RegExp(`^(?:\\S+\\s+){0,3}?(?:chương|hồi)\\s+${read.roles.n}\\s*[:：.]*\\s*`, 'iu'), '');
+        }
         let hasRoman = tokens.some(t => t.roman);
         let base = baseOf(rule, read, { title, rest, whole, hasRoman, hasPhrase: !!at('ph') });
         let kind = rule.kind == 'chap' && read.roles.n === 0 ? 'interlude' : rule.kind;
@@ -3518,7 +3523,9 @@
           if(node) nodes.push({ ...node, index: lineStart + node.start, ord });
           if(line.length < 4000) {
             for(let m of line.matchAll(INLINE_HEADING)) {
-              let skip = node && m.index < node.start + node.text.length;
+              // a line that opens with a heading has only a title after it: `(Chương 75: Xong,
+              // thỉnh mong chờ Chương 76: ...)` points at the next chapter, it does not begin it
+              let skip = node && node.base >= 6;
               if(skip || !/\S/.test(line.slice(0, m.index))) continue;
               let rest = line.slice(m.index + m[0].length);
               nodes.push({

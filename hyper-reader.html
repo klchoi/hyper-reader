@@ -3023,7 +3023,7 @@
 
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 2;
+    const PARSER_VERSION = 3;
 
     function Book(file, fileContent, chapters) {
       let id, name, description;
@@ -3099,7 +3099,7 @@
           // the book is named by the group the list puts the chapter under, so it only
           // stays in a title with no chapter to name instead (the bare `Bộ 2` line)
           if (this.chapter == null) titleBook = this.book;
-          if (/phiên ngoại/iu.test(_.text) && !/phiên ngoại/iu.test(originalTitle)) phienNgoai = 'Phiên ngoại';
+          if (/phiên ngoại/iu.test(_.text) && !/phiên ngoại/iu.test(originalTitle) && !/phiên ngoại/iu.test(_.chapType)) phienNgoai = 'Phiên ngoại';
           if (this.chapter != null) titleChap = this.chapType + ' ' + this.chapter;
           if (this.half && !originalTitle?.includes('(' + this.half + ')')) {
             if (_.halfType) halfPre = this.half + ':';
@@ -3190,863 +3190,709 @@
     }
 
     // ---- chapter extraction -------------------------------------------------------------
-    // A book is cut at its headings, in four steps:
-    //   1. findHeadings   - run every heading pattern over the text (chapterPatterns lists them)
-    //   2. readNumbers    - turn `hai mươi tư`, `XIV`, `nhất lẻ một` into the number they name
-    //   3. keepUncertainInGaps - drop the guessed headings that no gap between certain ones asks for
-    //   4. PASSES (below) - lock, dedupe and merge what is left into the chapters of the book
+    // The headings of a book are the lines whose numbers run in sequence: 1, 2, 3 ... A line
+    // that merely looks like a heading (`Một giờ sau...`, `Kết quả là...`) has a number that
+    // fits nowhere in that sequence, so the sequence is what is looked for, not the look.
+    //
+    //   1. findCandidates  every line that could be a heading, read into a node (number,
+    //                      marker words, book, title) with how much its shape speaks for it
+    //   2. chooseHeadings  the best path through the nodes: a number followed by the next one
+    //                      scores, a repeat close by is the same heading, a jump costs, a
+    //                      book or an extra (phiên ngoại) may start the numbers over
+    //   3. buildChapters   the chosen nodes become chapters, with their title and book
+    //
+    // A shape (`【N】`, `Chương N: T`, `(N) T`) that mostly lands on the path is trusted
+    // more on a second look, so a book's own style outweighs the one-off lines.
 
-    // -- numbers, as patterns
-    const NUMERIC = '(\\d{1,4}(\\.\\d{1,2})*)';
-    const NUMERIC_DECIMAL = '(\\d{1,4}(\\.\\d{1,2})+)';
-    // 100-199 read out digit by digit: `nhất lẻ loi` is 100, `nhất lẻ một` 101,
-    // `nhất nhất linh` 110. `lẻ loi` stands for two zeros, `lẻ` and `linh` for one
-    const HUNDRED_NUMERIC_WORDS = 'nhất (lẻ loi|(lẻ|linh|nhất) (lẻ|linh|nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|một|hai|ba|bốn|năm|sáu|bảy|tám|chín))(?![\\p{L}\\p{N}])';
-    const LEAD_NUMERIC_WORDS = HUNDRED_NUMERIC_WORDS + '|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
-    const TAIL_NUMERIC_WORDS = HUNDRED_NUMERIC_WORDS + '|(mười( (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín))?|(hai|ba|bốn|năm|sáu|bảy|tám|chín) mươi( (mốt|hai|ba|bốn|tư|lăm|sáu|bảy|tám|chín))?|một|hai|ba|bốn|năm|sáu|bảy|tám|chín)|[MDCLXVI]+|(((thập|bách|thiên|vạn) )?(nhất|nhị|tam|tứ|ngũ|lục|thất|bát|cửu|thập))+';
-    const NUMERIC_WORDS = `${LEAD_NUMERIC_WORDS}|${TAIL_NUMERIC_WORDS}`;
-    // Don't let a TITLE backtrack into the number: `mười bốn` is 14, not 10 titled `bốn`.
-    const NUMERIC_WORDS_END = [
-      '(?!(?<=mười) (một|hai|ba|bốn|lăm|sáu|bảy|tám|chín)(?![\\p{L}\\p{N}]))',
-      '(?!(?<=mươi) (mốt|hai|ba|bốn|tư|lăm|sáu|bảy|tám|chín)(?![\\p{L}\\p{N}]))',
-      '(?!(?<=(^|[^\\p{L}])(hai|ba|bốn|năm|sáu|bảy|tám|chín)) mươi(?![\\p{L}\\p{N}]))',
-    ].join('');
+    // -- numbers, in words
+    const WORD_DIGITS = { một: 1, mốt: 1, hai: 2, ba: 3, bốn: 4, tư: 4, năm: 5, lăm: 5, sáu: 6, bảy: 7, tám: 8, chín: 9 };
+    const SINO_DIGITS = { nhất: 1, nhị: 2, tam: 3, tứ: 4, ngũ: 5, lục: 6, thất: 7, bát: 8, cửu: 9 };
+    // after `mươi` only these read as a unit: `hai mươi tư` is 24, `tư` alone is not a number
+    const TENS_UNITS = ['mốt', 'hai', 'ba', 'bốn', 'tư', 'lăm', 'sáu', 'bảy', 'tám', 'chín'];
 
-    // -- the placeholders a heading pattern is written with, and what each stands for.
-    // Applied in this order, each to the first place it occurs in the pattern; the order
-    // matters (TITLE_SHORT before TITLE, CHAP_TEXT last, once it knows what stands near it)
-    const PATTERN_TOKENS = [
-      ['DATE', '\\d+-\\d+-\\d+'],
-      ['SEP', '[ :]'],
-      ['TITLE_SHORT', '(?<titleShort>[^\n】]{1,50}\\.*)'],
-      ['TITLE', '(?<title>[^\n】]+\\.*)'],
-      ['BOOK_TITLE', '(?<bookTitle>[^\n】]+\\.*)'],
-      ['BOOK_TYPE', '(?<bookType>(quyển|tập|bộ|cuốn|quý))'],
-      ['BOOK_NUM', `(?<bookNum>${NUMERIC})`],
-      ['BOOK_TEXT', `(?<bookText>${NUMERIC_WORDS})`],
-      ['HALF_TYPE', `(?<halfType>(tiết))`],
-      ['HALF_NUM', `(?<halfNum>${NUMERIC})`],
-      ['HALF_TEXT', `(?<halfText>(?<=\\()(thượng|trung|hạ|${NUMERIC_WORDS})(?=\\))|(?<=thứ )${NUMERIC_WORDS})`],
-      // a number in words that comes before the chapter type can only be a lead word, one after it a tail word
-      [/CHAP_TEXT(?=.*?CHAP_TYPE)/, 'CHAP_TEXT:LEAD'],
-      [/(?<=CHAP_TYPE.*?)CHAP_TEXT/, 'CHAP_TEXT:TAIL'],
-      ['CHAP_TYPE', '(?<chapType>(chương|hồi|thiên|ngoại truyện))'],
-      ['CHAP_NUM_DECIMAL', `(?<chapNum>${NUMERIC_DECIMAL})`],
-      ['CHAP_NUM', `(?<chapNum>${NUMERIC})`],
-      ['CHAP_TEXT:LEAD', `(?<chapText>cuối|kết|${LEAD_NUMERIC_WORDS})${NUMERIC_WORDS_END}`],
-      ['CHAP_TEXT:TAIL', `(?<chapText>cuối|kết|${TAIL_NUMERIC_WORDS})${NUMERIC_WORDS_END}`],
-      ['CHAP_TEXT', `(?<chapText>cuối|kết|${NUMERIC_WORDS})${NUMERIC_WORDS_END}`],
-    ];
-
-    function expandPattern(pattern, name) {
-      let names = [...new Set([name, name.replace('hệ liệt', '').trim()])].join('|');
-      let source = pattern.replace('NAME', () => `(?<name>${names})`);
-      for(let [token, value] of PATTERN_TOKENS) {
-        source = source.replace(token, () => value);
-      }
-      return source;
-    }
-
-    // -- the heading patterns. More placeholders (so more captured) go first: when two
-    // patterns read the same heading, dedupeByIndex keeps the first
-    function chapterPatterns(name) {
-      let specify = (a, z) => {
-        let placeholders = (s) => (s.match(/[A-Z_]{2,}/g) || []).length;
-        return placeholders(z) - placeholders(a);
+    // the longest number the words at `i` read as: { value, length } in words, or null
+    function readNumberWords(words, i) {
+      let w = (k) => words[i + k];
+      let best = null;
+      let take = (value, length) => {
+        if(!best || length > best.length) best = { value, length };
       };
-      // certain: the heading names a chapter type and a number (`Chương 8: ...`), so it
-      // can be trusted to be a chapter. Everything else is a guess that only earns its
-      // place by filling a gap between certain chapters
-      let certain = [
-      //Thứ 1 chương thứ 1 cuốn thứ 2 tiết thứ 2 chương
-      '^Thứ \\d+ chương thứ BOOK_NUM cuốn thứ CHAP_NUM tiết thứ \\d+ chương',
-      //Thứ 3 chương quyển thứ ba thứ 38 tiết Chương 138
-      '^Thứ \\d+ chương quyển thứ BOOK_TEXT thứ CHAP_NUM tiết Chương \\d+',
-      //Chính văn thứ 3 chương đường muội yêu ta vui thích một hồi
-      '^Chính văn thứ CHAP_NUM chương TITLE$',
-      // (1)
-      '^\\(CHAP_NUM\\)$',
-      //22)
-      '^CHAP_NUM\\)$',
-      //2,
-      '^CHAP_NUM,$',
-      //22.
-      '^CHAP_NUM\\.$',
-      // (tứ)
-      // (mười một)
-      '^\\(CHAP_TEXT\\)$',
-      //【tứ】
-      '^【CHAP_TEXT】$',
-      //Thứ 7 chương mẫu thượng công lược (1.7) tiểu ma nữ phục vụ
-      // '^Thứ BOOK_NUM chương ' + name + ' \\(CHAP_NUM\\)([: ]TITLE)?',
-      //Thứ 31 chương
-      //Tập thứ nhất thứ 01 chương thất đọa vách núi đen
-      '^(BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) )?Thứ CHAP_NUM CHAP_TYPE([: ]TITLE)?',
-      //[thứ 1 chương]
-      '^\\[thứ CHAP_NUM CHAP_TYPE\\]',
-      //Bảy năm vợ chồng gần ba năm cùng hai cái đơn nam đệ tử chuyện xưa (5)
-      '^' + name + ' \\(CHAP_NUM\\)',
-      //Quyển thứ hai Chương 11: Mỹ mẫu cầu xin
-      //Tập 6 Chương 110: Nhân thay mới trang
-      '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT) CHAP_TYPE CHAP_NUM: TITLE',
-      //(Chương 20: hèn chó diễn phượng (che giấu thiên 3)
-      '^\\(CHAP_TYPE CHAP_NUM: TITLE',
-      //Phiên Ngoại hai mươi lăm chương
-      '^(Phiên Ngoại )CHAP_TEXT CHAP_TYPE',
-      //【 đọa phụ 】 Chương 2:: Khuất nhục phu nhân
-      '^【NAME】 CHAP_TYPE CHAP_NUM: TITLE',
-      //【xanh biếc lữ du tiên】 bộ 2 thứ 08 chương
-      '^【NAME】 bộ BOOK_NUM thứ CHAP_NUM CHAP_TYPE',
-      //Xanh biếc lữ du tiên bộ 2 Chương 8: Sơ ngộ bích du
-      '^NAME bộ BOOK_NUM CHAP_TYPE CHAP_NUM: TITLE',
-      //【bạn gái đệ đệ】9
-      '^【NAME】CHAP_NUM([: ]TITLE)?',
-      //【các huynh đệ loạn luân thịnh yến】(tam)
-      //【không chỉ tình yêu】(1)
-      //【không chỉ tình yêu】(18) hoàn
-      '^【NAME】\\((CHAP_TEXT|CHAP_NUM)\\)( TITLE)?',
-      //【của ta giang hồ】(thứ 2 chương)
-      '^【NAME】\\(thứ CHAP_NUM CHAP_TYPE\\)',
-      //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
-      '^【NAME】(phiên ngoại) TITLE',
-      //【phiên ngoại thiên chi Diệp Minh Hi tự bạch】(1)
-      '【(?=.*?phiên ngoại)(?<title>.*?)】\\(CHAP_NUM\\)',
-      //【không chỉ tình yêu】(phiên ngoại) cảnh phỉ mẹ con kích tình thượng kính
-      '^【NAME】\\(phiên ngoại\\) TITLE',
-      //Người nhà quần áo Chương 1: Mẹ dị thường
-      '^NAME CHAP_TYPE CHAP_NUM: TITLE',
-      //Nón xanh mặc ta mang (nhất) kinh vi thiên nhân
-      '^NAME \\(CHAP_TEXT\\) TITLE',
-      //(bản cũ) dâm loạn gia đình thứ 01 chương: Sau khi tan lớp ba ba âu yếm
-      'NAME thứ CHAP_NUM CHAP_TYPE: TITLE',
-      //(16) A Kiện nói: Nàng... Nàng là ta... Muội muội
-      '^\\(CHAP_NUM\\) TITLE',
-      //..."Ân, ta đều nghe ngươi!" (13)
-      '(?<=\\W) \\(CHAP_NUM\\)$',
-      //"2" hào môn bí mật
-      '^"\\s*CHAP_NUM\\s*"( TITLE)?',
-      //Thứ 1002 chương lữ mộng đẹp cảnh nhã nhàn bá mẫu (nhị)
-      '^Thứ CHAP_NUM CHAP_TYPE TITLE',
-      //Đệ nhất bộ tứ đại mỹ nữ chi đẹp nhất thị trưởng dương ngưng băng (thượng)
-      '^Đệ (BOOK_NUM|BOOK_TEXT) BOOK_TYPE TITLE \\(HALF_TEXT\\)',
-      //Bộ 2 tứ đại mỹ nữ chi kim bài chủ trì dương ninh làm (hạ)
-      '^BOOK_TYPE BOOK_NUM TITLE \\(HALF_TEXT\\)',
-      //(Chương 20: hèn chó diễn phượng (che giấu thiên 2)
-      '^\\(CHAP_TYPE CHAP_NUM: TITLE HALF_TEXT\\)',
-      //Đệ 1 chương: (Mẹ Mamako)
-      //Đệ 8 chương, đẩy ngược phản bị địt.
-      '^(Đệ|thứ) CHAP_NUM CHAP_TYPE[,:]? TITLE',
-      //Quyển thứ hai thiết giáp phong vân
-      '^BOOK_TYPE( thứ)? (BOOK_NUM|BOOK_TEXT)( BOOK_TITLE)?$',
-      //Thứ 4 cuốn đế đô bi ca
-      '^Thứ BOOK_NUM BOOK_TYPE BOOK_TITLE',
-      //Chương mười:
-      '^CHAP_TYPE CHAP_TEXT:$',
-      //Chương ba mươi lăm lại rình coi
-      '^CHAP_TYPE CHAP_TEXT TITLE$',
-      //Ba mươi tám chương Tuyết Nhi tân hôn
-      '^CHAP_TEXT CHAP_TYPE TITLE$',
-      //Bốn mươi chương
-      '^CHAP_TEXT CHAP_TYPE$',
-      //Chương 1:
-      '^CHAP_TYPE CHAP_NUM:',
-      //【Chương 1:
-      '^【CHAP_TYPE CHAP_NUM: TITLE',
-      //Chương 15: Hiên Viên Minh Châu
-      '^CHAP_TYPE CHAP_NUM: TITLE$',
-      //09. Thi chạy
-      '^CHAP_NUM\\. TITLE$',
-      //(hạ)
-      '^\\(HALF_TEXT\\)$',
-      //"Bạn gái đệ đệ" 11
-      '^"NAME" CHAP_NUM$',
-      //【hào hiệp xanh biếc truyện II】
-      '^【NAME BOOK_TEXT】$',
-      //【chương kết, (Lã phàm thị giác)】
-      '^【CHAP_TYPE CHAP_TEXT, \\(TITLE',
-      //【chương kết】
-      '^【CHAP_TYPE CHAP_TEXT】$',
-      //Kiều thê chuyện xưa (nhất)
-      '^NAME \\(CHAP_TEXT\\)$',
-      //《 kiều thê chuyện xưa 》2
-      '^《 NAME 》CHAP_NUM$',
-      //#3 Chương 3: Dưới ánh trăng chinh phục
-      '^#\\d+ Chương CHAP_NUM: TITLE',
-      //Nón xanh chiến thần người ở rể (Chương 5: phối đồ bản)
-      '^NAME \\(Chương CHAP_NUM: TITLE\\)',
-      //Phục 63 chương
-      '^Phục CHAP_NUM chương',
-      //Lão bà Tuyết Nhi đổi thê trải qua (thập tam)
-      '^NAME \\(CHAP_TEXT\\)TITLE',
-      //【30, khúc cuối】
-      '^【CHAP_NUM, TITLE】$',
-      //【hai mươi bảy, ba người hạnh phúc (thượng)】
-      '^【CHAP_TEXT, TITLE \\(HALF_TEXT\\)】$',
-      //【hai mươi chín, ba người hạnh phúc】
-      '^【CHAP_TEXT, TITLE】$',
-      //Thứ 1 cuốn 1, bị phiêu rồi hả?
-      '^thứ BOOK_NUM BOOK_TYPE CHAP_NUM, TITLE$',
-      //"Bí mật nhạc viên" (Chương 7: Hôn nửa năm sau)
-      '"NAME" \\(CHAP_TYPE CHAP_NUM: TITLE\\)',
-      //Thứ 01 thiên: Tuyệt sắc gia tộc chi cưỡng dâm (trung)
-      'Thứ CHAP_NUM CHAP_TYPE: TITLE \\(HALF_TEXT\\)',
-      //Tiếp theo viết thứ 8 chương sơ phong mùi thơm
-      'Tiếp theo viết thứ CHAP_NUM CHAP_TYPE TITLE',
-      //Thứ hai nói
-      '^Thứ CHAP_TEXT nói$',
-      //131 chương: Lần hai bước vào Khôn Ninh Cung
-      '^CHAP_NUM CHAP_TYPE: TITLE$',
-      //Đệ nhất bộ thứ 04 chương
-      '^Đệ BOOK_TEXT BOOK_TYPE thứ CHAP_NUM CHAP_TYPE',
-      //Tiếp theo thứ 05 chương
-      '^Tiếp theo thứ CHAP_NUM CHAP_TYPE',
-      //14(dẫn sói vào nhà tam)
-      '^CHAP_NUM\\(TITLE\\)$',
-      '^NAME CHAP_NUM\\(TITLE\\)$',
-      //Thứ 1 cuốn thứ 3 chương xuất phát
-      '^Thứ BOOK_NUM cuốn thứ CHAP_NUM chương TITLE$',
-      //(nhất lẻ loi) lão hán cùng yêu nữ
-      //(nhất lẻ một) tân giai đoạn
-      //(nhất lẻ hai) giai đoạn nhị
-      '^\\(CHAP_TEXT\\) TITLE$',
-        //Chương 1: Tân niên đặc biệt thiên (thượng)
-      //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
-      '(^|(?<=\\W ))(Phiên Ngoại )?CHAP_TYPE CHAP_NUM([^\\p{L}\\p{N}\\n]+TITLE)?$',
-      ].sort(specify);
-      let uncertain = [
-      // weak, so only guesses: a sentence that mentions `Chương 3` in passing, a
-      // bare `Thứ 15 phút.`, or a paragraph that opens with `Tiết thứ ba` - none of them
-      // may vouch for a chapter, or they open gaps for the real ones to be mis-filled
-      //kể ra một cái chẳng phải thuần khiết trưởng thành chuyện xưa Chương 3: Thiếu nữ bắt gian nhật ký
-      '(?<=\\s\\p{Ll}+\\s)CHAP_TYPE CHAP_NUM',
-      //Thứ 084 dâm mỹ hình ảnh
-      '^Thứ CHAP_NUM TITLE$',
-      //Thứ 1 tiết tay nghề tiểu tử & Uzumaki Naruto
-      '^(Đệ|thứ) HALF_NUM HALF_TYPE TITLE$',
-      //Tiết thứ hai Hyuga Hinata
-      //Tiết thứ năm: Naruto cực khổ ngày
-      '^HALF_TYPE thứ HALF_TEXT[:]? TITLE$',
-      //Thứ bảy tiết trăm hào Tiểu Anh! Một câu bạch cấp
-      //Thứ sáu tiết: Hinata cực khổ ngày
-      //Đệ thập nhất tiết Sasuke xanh biếc nô thuộc tính chuyện lớn hấp thụ ánh sáng!
-      '^(Đệ|thứ) HALF_TEXT HALF_TYPE[:]? TITLE$',
-      /*
-      【xanh biếc lữ du tiên】 bộ 2 tự chương
-      【xanh biếc lữ du tiên】 bộ 2 thứ 01 chương
-      Xanh Biếc lữ du tiên bộ 2 thứ 09 chương
-      【xanh biếc lữ du tiên bộ 2】 thứ 10 chương Đông hải tiên các (1)
-      Xanh Biếc lữ du tiên bộ 2 thứ 13 chương Nữ Đế dâm tâm
-      【xanh biếc lữ du tiên】 Chương 8:
-      【Chương 8: Tông môn dâm loạn (nhất)】
-      【xanh biếc lữ du tiên】 Chương 6:
-      【Chương 6: Hoàng thành long ảnh】
-      Thứ 02 chương: Hong Kong
-      Thứ 1 chương đại nghịch bất đạo ái đồ, nhưng lại hy vọng đem sư tôn dạy dỗ vì song tu chuyên dụng ấu thê!
-      Thứ 10 chương, võ diễm hòa không rõ thân phận nam nhân thông đồng cùng với trần san cùng ca ca trần vừa loạn luân địt bi chuyện xưa
-      【mẹ thành gia bên trong bảo mẫu con dâu】(15) hoàn
-      Nhị, thay đổi
-      【bạn gái đệ đệ】3
-      "Bạn gái đệ đệ" 11
-      Thượng (2)
-      Chính Văn Chương 07: Chỉnh quân
-      Nhất, lời dẫn tưởng nói ngắn gọn, nhưng không biết từ đâu nói lên.
-      Thứ 34 chương mẫu thượng công lược (3.11) An Nặc tiến bệnh viện
-      — Chương 2: (dịch nóng thể)—
-      2020 năm tháng 1 6 ngày
-      Hạ bộ — chị em yêu nhau (lục hi hòa lục nếu)
-      【mẹ con】(nhị -- yêu nói hết)
-      (nhị -- yêu nói hết)
-      ch. 1
-      Hồi 1: Ngây thơ diện mạo Khuynh Thành vận giao mui xe thị lão Ông phủ ấu tử từ huệ thục hiền Hongkong
-      Thứ 41-48 chương
-      */
-      //Chương 23:
-      //Phiên ngoại Chương 18:
-      // '^(Phiên Ngoại )?CHAP_TYPE CHAP_NUM:$',
-      //Chương 1: Tân niên đặc biệt thiên (thượng)
-      //Phiên Ngoại Chương 8: Treo đầu dê bán thịt chó
-      //...đã ngủ say. Chương 59: mẹ phát hiện chân tướng
-      //Hồi 2: · phẫn vũ nữ khinh thân dụ địch tù, nhu vú to thát tử loạn tâm trí
-      //Ngũ
-      //Hai mươi mốt
-      '^CHAP_TEXT$',
-      //8.1
-      '^CHAP_NUM$',
-      //2019-7-19 mười lăm
-      '^DATE CHAP_TEXT',
-      //Ngoại truyện nhất
-      '^CHAP_TYPE CHAP_TEXT',
-      //Mười hai, nửa năm sau cuộc sống vẫn đang tiếp tục. Phố xá như trước thái bình.
-      '^CHAP_TEXT[,] TITLE$',
-      //Lời dẫn
-      '^(?<title>CHAP_TYPE (cuối|kết)|tự chương|Lời dẫn)$',
-      //(14) nghiêm hạo tại sofa phía trên thích không thể tự thoát ra được, nhất tinh mặc xong đồ ngủ, sau đó tiếp lấy đem nghiêm hạo ôm đến chân của mình phía trên, nhẹ nhàng âu yếm.
-      //not one hanging off a word, though: `Thượng (2)` is the second half of a
-      //chapter and `nói (2) lần` is an aside, and unanchored this pattern read both
-      //as a chapter of that number - which then stole the real one's heading
-      '(?<![\\p{L}\\p{N}] ?)\\(CHAP_NUM\\)',
-      //"13 chương kết"
-      '^"CHAP_NUM TITLE"$',
-      //Tập thứ hai thứ 36 chương con tin uy hiếp
-      '^Tập thứ BOOK_TEXT thứ CHAP_NUM CHAP_TYPE TITLE$',
-      //Chương 157: (1)
-      '^CHAP_TYPE CHAP_NUM: \\(HALF_NUM\\)',
-      //Tự mẫu một ngày (hạ)
-      '^(?<!.*CHAP_TYPE.*TITLE) \\(HALF_TEXT\\)$',
-      //1.1 nhân vật chính kêu mũ
-      '^CHAP_NUM_DECIMAL TITLE$',
-      //(4.25)G con mẹ nó du học sinh
-      '^\\(CHAP_NUM\\) ?TITLE$',
-      //(tam) mấy ngày kế tiếp, mẹ ngược lại không hướng đến Lý Tư oa trong nhà chạy, mỗi ngày tại trong nhà nấu cơm mang đứa nhỏ, tâm tình thượng cũng không tệ.
-      '^\\(CHAP_TEXT\\)',
-      //(còn tiếp) mười ba (thượng) đã xảy ra chuyện — ba chữ này bình thường là chỉ phát sinh không tốt sự tình, chuyện tốt nhi cũng không có khả năng dùng này ba tự, hơn nữa có thể lớn có thể nhỏ, nhỏ đến tại ban thượng nghịch ngợm gây sự đùa giỡn bạn học gái bị lão sư đã biết, lớn đến hai quốc gia phát sinh chiến tranh, đều có thể kêu đã xảy ra chuyện.
-      '^\\(còn tiếp\\) CHAP_TEXT \\(HALF_TEXT\\)',
-      //Mười ba (hạ) theo lớn mập gia trong nhà đi ra ta liền hướng đến gia đuổi, thậm chí sợ thời gian đuổi không kịp đi nhanh chạy, kỳ thật ta là không quá nguyện ý hướng đến chỗ đó nghĩ, nội tâm thậm chí có một chút kháng cự cái ý nghĩ này, nhưng nếu như hiện thực chính là như vậy đâu.
-      '^CHAP_TEXT \\(HALF_TEXT\\)',
-      //(còn tiếp) mười bảy đã trải qua nhiều như vậy ly kỳ sự tình, ta cho rằng chính mình đã là người lớn, tính là cùng đại nhân có chút chênh lệch, cũng không có khả năng khác biệt quá xa.
-      '^\\(còn tiếp\\) CHAP_TEXT',
-      //(còn tiếp)(mười một) "Tiểu Chí tiểu Lôi rời giường ăn cơm."
-      '^\\(còn tiếp\\)\\(CHAP_TEXT\\)',
-      //Mười bốn "Tiểu Chí như thế nào còn không có rời giường, ngươi không gọi hắn ăn điểm tâm a."
-      //'^CHAP_TEXT',
-      //Đại phụng gõ mõ cầm canh nhân chi xanh miết #1 tác giả: Hố ni
-      '^NAME #CHAP_NUM',
-      //— mẹ vú to người vợ khuê mật 84 cùng mẹ cùng nữ nhi
-      '^[^\\p{L}]* NAME CHAP_NUM TITLE',
-      //Hai mươi tư du hí triển
-      '^CHAP_TEXT TITLE_SHORT$',
-      //● thứ 1 chương ●
-      //
-      //Võ tràng lõa thể luyện kiếm, thôi miên tự an ủi ●
-      '^● thứ CHAP_NUM CHAP_TYPE ●$\\n+TITLE●',
-      //001 ta và thê tử viên viện
-      '^CHAP_NUM TITLE',
-      //16, ức chế không được dục vọng
-      '^CHAP_NUM, TITLE$',
-      //3.40 sinh mệnh cái khe
-      '^BOOK_NUM.CHAP_NUM TITLE$',
-      //【3.17 vận mệnh là duy nhất giải】
-      '^【BOOK_NUM.CHAP_NUM TITLE】$',
-      '^※※※$',
-      ].sort(specify);
-      return { certain, uncertain };
+      // 100-199 read out digit by digit: `nhất lẻ loi` is 100, `nhất lẻ một` 101,
+      // `nhất nhất linh` 110. `lẻ loi` stands for two zeros, `lẻ` and `linh` for one
+      if(w(0) == 'nhất') {
+        let digit = (x) => (x == 'lẻ' || x == 'linh') ? 0 : (SINO_DIGITS[x] ?? WORD_DIGITS[x]);
+        if(w(1) == 'lẻ' && w(2) == 'loi') take(100, 3);
+        if(['lẻ', 'linh', ...Object.keys(SINO_DIGITS)].includes(w(1)) && digit(w(2)) != null) {
+          take(100 + 10 * digit(w(1)) + digit(w(2)), 3);
+        }
+      }
+      if(w(0) == 'mười') {
+        take(10, 1);
+        if(w(1) in WORD_DIGITS && w(1) != 'tư') take(10 + WORD_DIGITS[w(1)], 2);
+      }
+      if(w(0) in WORD_DIGITS) {
+        take(WORD_DIGITS[w(0)], 1);
+        if(w(1) == 'mươi') {
+          let tens = 10 * WORD_DIGITS[w(0)];
+          take(tens, 2);
+          if(TENS_UNITS.includes(w(2))) take(tens + WORD_DIGITS[w(2)], 3);
+        }
+      }
+      let sino = (k) => SINO_DIGITS[w(k)];
+      if(w(0) == 'thập') {
+        take(10, 1);
+        if(sino(1)) take(10 + sino(1), 2);
+      }
+      if(sino(0)) {
+        take(sino(0), 1);
+        if(w(1) == 'thập') {
+          take(sino(0) * 10, 2);
+          if(sino(2)) take(sino(0) * 10 + sino(2), 3);
+        }
+      }
+      return best;
     }
 
-    // -- reading the numbers out of a matched heading
     const ROMAN_VALUES = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
-
-    function romanToNumber(roman) {
+    function readRoman(word) {
+      if(!/^[IVXLCDM]+$/.test(word)) return null;
       let total = 0;
-      let run = 0;
-      let prev = 0;
-      for(let c of roman) {
-        let current = ROMAN_VALUES[c];
-        // a smaller symbol before a bigger one subtracts: undo the additions made so far
-        if(current > prev) total -= 2 * run;
-        if(current != prev) run = 0;
-        run += current;
-        total += current;
-        prev = current;
+      for(let k = 0; k < word.length; k++) {
+        let [a, b] = [ROMAN_VALUES[word[k]], ROMAN_VALUES[word[k + 1]] ?? 0];
+        total += a < b ? -a : a;
       }
-      return total;
+      return total > 0 && total < 4000 ? total : null;
     }
 
-    // digit words, one rule after the other. `mười` is 10 alone and 1 in front of a unit;
-    // `mươi` is the 0 of a round tens and nothing in front of a unit (`hai mươi tư` -> 2 4)
-    const VIETNAMESE_DIGIT_RULES = [
-      ['lẻ loi', '00'],
-      ['lẻ|linh', '0'],
-      ['mươi$|(?<=.)(thập|bách|thiên|vạn)$', '0'],
-      ['mươi', ''],
-      ['(mười|thập)(?=.+)|m[ộố]t|nhất', '1'],
-      ['hai|nhị', '2'],
-      ['ba|tam', '3'],
-      ['bốn|tứ|tư', '4'],
-      ['[nl]ăm|ngũ', '5'],
-      ['sáu|lục', '6'],
-      ['bảy|thất', '7'],
-      ['tám|bát', '8'],
-      ['chín|cửu', '9'],
-      ['mười|thập', '10'],
-    ].map(([words, digits]) => [new RegExp(words, 'gimu'), digits]);
+    // -- one line into tokens. A token's class is one letter:
+    //   N number   E end word (kết, cuối)   c chapter word   p phiên ngoại / ngoại truyện
+    //   b book word   t thứ / đệ   f tiết   h thượng / trung / hạ
+    //   n the book's own name   L opening bracket   R closing bracket   S other mark   x any word
+    const CHAPTER_WORDS = { chương: 'Chương', hồi: 'Hồi', thiên: 'Thiên' };
+    const BOOK_WORDS = { quyển: 'Quyển', tập: 'Tập', bộ: 'Bộ', cuốn: 'Cuốn', quý: 'Quý' };
+    const HALF_WORDS = { thượng: 1, trung: 2, hạ: 3 };
+    const OPENERS = '【[(（《“"«';
+    const CLOSERS = '】])）》”"»';
 
-    function wordsToNumber(words) {
-      let digits = words.toLowerCase();
-      for(let [rule, replacement] of VIETNAMESE_DIGIT_RULES) digits = digits.replace(rule, replacement);
-      return Number.parseInt(digits.replace(/\s/g, ''));
+    function lexLine(line, lower, names) {
+      let tokens = [];
+      let pos = 0;
+      while(pos < line.length && tokens.length < 18) {
+        let ch = line[pos];
+        if(/\s/.test(ch)) { pos++; continue; }
+        let add = (cls, end, extra = {}) => {
+          tokens.push({ cls, s: pos, e: end, text: line.slice(pos, end), ...extra });
+          pos = end;
+        };
+        let name = names.find(n => lower.startsWith(n, pos) && !/\p{L}/u.test(lower[pos + n.length] ?? ''));
+        if(name) { add('n', pos + name.length); continue; }
+        if(OPENERS.includes(ch)) { add('L', pos + 1); continue; }
+        if(CLOSERS.includes(ch)) { add('R', pos + 1); continue; }
+        if(/\d/.test(ch)) {
+          let m = /^\d+(?:\.\d+)?/.exec(line.slice(pos));
+          let [major, minor] = m[0].split('.');
+          // `3.40` is chapter 40 of book 3
+          add('N', pos + m[0].length, { value: Number(minor ?? major), book: minor == null ? null : Number(major), digits: true });
+          continue;
+        }
+        let word = /^\p{L}+/u.exec(line.slice(pos));
+        if(!word) { add('S', pos + 1); continue; }
+        word = word[0];
+        // the words that follow, for the numbers that take several
+        let words = [lower.slice(pos, pos + word.length)];
+        let ahead = pos + word.length;
+        for(let k = 0; k < 4; k++) {
+          let next = /^ \p{L}+/u.exec(line.slice(ahead));
+          if(!next) break;
+          words.push(lower.slice(ahead + 1, ahead + next[0].length));
+          ahead += next[0].length;
+        }
+        let number = readNumberWords(words, 0);
+        if(number) {
+          // the end of the last word it read
+          let end = pos;
+          for(let k = 0; k < number.length; k++) end += (k ? 1 : 0) + words[k].length;
+          add('N', end, { value: number.value });
+          continue;
+        }
+        let roman = readRoman(word);
+        let lowered = words[0];
+        let end = pos + word.length;
+        if(roman != null && word.length <= 7) add('N', end, { value: roman, roman: true });
+        else if(lowered in CHAPTER_WORDS) add('c', end, { word: CHAPTER_WORDS[lowered] });
+        else if((lowered == 'phiên' || lowered == 'ngoại') && /^(phiên ngoại|ngoại truyện)/.test(lower.slice(pos))) {
+          let both = /^(phiên ngoại|ngoại truyện)/.exec(lower.slice(pos))[0];
+          add('p', pos + both.length, { word: both[0].toUpperCase() + both.slice(1) });
+        }
+        else if(lowered in BOOK_WORDS) add('b', end, { word: BOOK_WORDS[lowered] });
+        else if(lowered == 'thứ' || lowered == 'đệ') add('t', end);
+        else if(lowered == 'tiết') add('f', end);
+        else if(lowered in HALF_WORDS) add('h', end, { value: HALF_WORDS[lowered], word: lowered });
+        else if(lowered == 'kết' || lowered == 'cuối') {
+          // `Chương kết` ends the book; `Kết quả là` and `Cuối cùng` are only sentences
+          let after = /^\s*(\S)/.exec(line.slice(end));
+          let lone = !after || /[^\p{L}\p{N}]/u.test(after[1]);
+          add(lone ? 'E' : 'x', end, { word: lowered });
+        }
+        else add('x', end);
+      }
+      return tokens;
     }
 
-    // fills in, in place, the numbers a match names in words or roman numerals.
-    // false when what looked like roman numerals was a word
-    function readNumbers(m) {
-      let isNumber = true;
-      for(let field of ['chapText', 'bookText', 'halfText']) {
-        if(!m[field]) continue;
-        if(/^[MDCLXVI]+$/i.test(m[field])) {
-          m[field] = romanToNumber(m[field]);
-          if(Number.isNaN(m[field])) isNumber = false;
-        } else {
-          let number = wordsToNumber(m[field]);
-          if(!Number.isNaN(number)) m[field] = number;
+    // -- the shapes a heading can take, over the token classes. The first that fits wins
+    const DECOR = '[LS]*';
+    const NAME_PART = '(?:nR?S?)?';
+    const BOOK_PART = '(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?';
+    const HEADING_RULES = [
+      // Chương 5 | Chương kết | Thứ 5 chương | Ba mươi tám chương | Quyển 2 Chương 7 | 【NAME】 Chương 5
+      { kind: 'chap', base: 9, re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}x{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))` },
+      // 【NAME】9 | NAME #3 | NAME (5) | 《NAME》2
+      { kind: 'chap', base: 7, re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?` },
+      // Quyển thứ ba 3: the chapter's number follows its book's
+      { kind: 'chap', base: 7, re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}${DECOR}(?<cn>N)` },
+      // Quyển thứ hai | Bộ 2 | Thứ 4 cuốn
+      { kind: 'book', base: 6, re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}` },
+      // Kỳ Bạch Tuyết phiên ngoại
+      { kind: 'extrahead', base: 5, re: `^[LS]*x{1,8}(?<pm>p)$` },
+      // Tiết thứ hai | Thứ 1 tiết
+      { kind: 'half', base: 5, re: `^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)` },
+      // (5) | 【nhất】 | 5. | 22) | 2,
+      { kind: 'chap', base: 5, weakTitled: 3, re: `^L?(?<cn>N)R?` },
+      // Phòng tắm thiên Chương 1: a few words, then the chapter
+      { kind: 'chap', base: 6, re: `^[LS]*(?<pre>[xc]{1,6})(?<cm>c)(?<cn>N)(?![xNE])` },
+      // Kỳ Bạch Tuyết (nhất) | Kiều thê chuyện xưa (nhất) | Quy tắc quái đàm — mới vào học viện (1)
+      { kind: 'chap', base: 4, re: `^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R` },
+      // (hạ)
+      { kind: 'half', base: 5, re: `^L?(?<hm>h)R?$` },
+    ].map(rule => ({ ...rule, re: new RegExp(rule.re, 'd') }));
+
+    // the title a line carries after its heading: no separator left in front, no bracket behind
+    function cleanTitle(rest) {
+      return rest.replace(/^[\s:：.,\-—–/|)\]】”"»*#!]+/u, '').replace(/[\s】\]”"»]+$/u, '');
+    }
+
+    // how much a line reads like a sentence of the story and not like a title
+    function proseCost(rest) {
+      let cost = 0;
+      let commas = (rest.match(/[,;]/g) || []).length;
+      if(rest.length > 100) cost += 3;
+      if(commas >= 2) cost += 2;
+      else if(commas == 1 && rest.length > 40) cost += 1;
+      if(rest.length > 50 && /[.!?…"”]$/.test(rest)) cost += 2;
+      return cost;
+    }
+
+    // the words that open the title when the number comes after them: `Phòng tắm thiên
+    // Chương 1`, or `Quy tắc quái đàm — mới vào học viện (1)` (after the last dash)
+    function leadingTitle(m, tokens, line, rest) {
+      let span = m.indices.groups.pre ?? m.indices.groups.ph;
+      if(!span) return null;
+      let words = tokens.slice(span[0], span[1]);
+      let dash = m.indices.groups.ph ? words.findLastIndex(t => t.cls == 'S') : -1;
+      let from = words[dash + 1] ?? words[0];
+      return cleanTitle([line.slice(from.s, words.at(-1).e), cleanTitle(rest)].filter(Boolean).join(' '));
+    }
+
+    // what a matched rule says: the chapter's number, its markers, the book and half it names
+    function readRoles(rule, at) {
+      let roles = {};
+      let number = at('cn') ?? at('cn2');
+      let marker = at('cm') ?? at('cm2');
+      if(rule.kind == 'chap') {
+        if(number.cls == 'E') Object.assign(roles, { end: true, endWord: number.word });
+        else {
+          roles.n = number.value;
+          if(number.book != null) roles.bookNum = number.book;
+        }
+        if(marker) {
+          roles.chapType = marker.word ?? marker.text;
+          if(marker.cls == 'p' || at('pm0')) {
+            roles.extra = true;
+            roles.chapType = (at('pm0') ?? marker).word;
+          }
         }
       }
-      for(let field of ['chapNum', 'bookNum']) {
-        if(m[field]) m[field] = m[field].split('.').map(Number).join('.');
+      let bookNumber = at('bn') ?? at('bn2') ?? at('bn3');
+      if(bookNumber) {
+        roles.bookNum = bookNumber.value;
+        roles.bookType = (at('bm') ?? at('bm2') ?? at('bm3')).word;
       }
-      return isNumber;
+      if(rule.kind == 'extrahead') roles.extra = true;
+      if(rule.kind == 'half') {
+        let numbered = at('hn') ?? at('hn2');
+        if(numbered) Object.assign(roles, { halfNum: numbered.value, halfType: 'tiết', half: numbered.value });
+        else Object.assign(roles, { half: at('hm').value, halfText: at('hm').word });
+      }
+      return { roles, number, marker };
     }
 
-    function findHeadings(text, name) {
-      let { certain, uncertain } = chapterPatterns(name);
-      let matches = [];
-      for(let pattern of [...certain, ...uncertain]) {
-        let regex = new RegExp(expandPattern(pattern, name), 'gimu');
-        for(let m of text.matchAll(regex)) {
-          matches.push({ pattern, regex, certain: certain.includes(pattern), index: m.index, ...m.groups, text: m[0] });
+    // how much the heading speaks for itself, 0-10, before the book's own style weighs in
+    function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase }) {
+      let base = rule.base;
+      // a bare number with a title after it is the weakest shape of all; in digits less so
+      if(rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? 2 : 0) + (number?.digits ? 1.5 : 0);
+      // `3.07` is hardly ever anything but a chapter
+      else if(number?.book != null) base += 2;
+      if(marker?.cls == 'c' && marker.word == 'Thiên') base -= 4;
+      if(hasPhrase && whole) base += 1;
+      // a book heading must stand on its own line to be believed: `Hai bộ ngực...` is prose
+      if(rule.kind == 'book') base += whole ? 3 : (title.length > 40 ? -10 : 0);
+      // a heading with its marker (`Chương 10: ...`) is still one when the paragraph runs on
+      // behind it on the same line; only a bare number is made doubtful by that
+      base -= marker ? Math.min(proseCost(title), 2) : proseCost(title);
+      // the title page: `【NAME】1-74 tác giả: ...`
+      if(/tác giả/.test(rest) || /^\s*[-–~]\s*\d/.test(rest)) base -= 6;
+      if(hasRoman) base -= 2;
+      return base;
+    }
+
+    // the classes up to the heading's end, runs of words as one. A number written in
+    // digits is told from one in words: sentences begin with `Một` by the hundred and with
+    // `192` almost never, and `3.07` is a chapter
+    function shapeOf(tokens, length, whole) {
+      let spelled = tokens.slice(0, length).map(t => t.cls != 'N' ? t.cls : t.book != null ? 'D' : t.digits ? '#' : 'N').join('');
+      return spelled.replace(/x+/g, 'X') + (whole ? '' : 'T');
+    }
+
+    function readHeading(line, lower, names) {
+      if(line.length > 400) return null;
+      let tokens = lexLine(line, lower, names);
+      if(!tokens.some(t => 'NEhbp'.includes(t.cls))) return null;
+      let classes = tokens.map(t => t.cls).join('');
+      for(let rule of HEADING_RULES) {
+        let m = rule.re.exec(classes);
+        if(!m) continue;
+        let at = (group) => {
+          let span = m.indices.groups[group];
+          return span ? tokens[span[0]] : null;
+        };
+        // `một hồi` (a while) and `chín thiên` are not chapters: only `chương` follows a number alone
+        if(at('cm2') && at('cm2').word != 'Chương' && !at('tt')) continue;
+        let last = tokens[m[0].length - 1];
+        let rest = line.slice(last.e);
+        let whole = !/\S/.test(rest);
+        let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);
+        let read = readRoles(rule, at);
+        let hasRoman = tokens.some(t => t.roman);
+        let base = baseOf(rule, read, { title, rest, whole, hasRoman, hasPhrase: !!at('ph') });
+        let kind = rule.kind == 'chap' && read.roles.n === 0 ? 'interlude' : rule.kind;
+        // `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`: the heading of a section, then the one
+        // of the part that begins here. The part is the chapter, the section its group
+        let inner = rule.kind == 'chap' && read.roles.n != null
+          && (/^(.*?)\s*[|｜]\s*(\S.*)$/u.exec(rest) ?? /^(.*?)\s*[【\[]?\s*(thứ\s+\S+\s+hồi\b.*)$/iu.exec(rest));
+        if(inner) {
+          let part = readHeading(inner[2].replace(/^[【\[]\s*/, ''), inner[2].replace(/^[【\[]\s*/, '').toLowerCase(), names);
+          if(part && part.kind == 'chap' && part.n != null && !part.outer) {
+            let outer = `${read.marker?.word ?? 'Chương'} ${read.roles.n}`;
+            return { ...part, outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(': '), start: tokens[0].s, text: line.slice(tokens[0].s) };
+          }
         }
+        return {
+          ...read.roles, kind, base, rest, title, whole,
+          shape: shapeOf(tokens, m[0].length, whole),
+          text: line.slice(tokens[0].s, last.e),
+          start: tokens[0].s,
+        };
       }
-      matches = matches.filter(readNumbers);
-      // `Cửu thiên chi thượng ...` is nine heavens, not chapter nine: a number in words
-      // beside `thiên` is too common a phrase to count as a certain chapter
-      for(let m of matches) {
-        if(m.certain && m.chapText && !m.chapNum && m.chapType?.toLowerCase() == 'thiên') m.certain = false;
-      }
-      return matches.sort((a, z) => a.index - z.index);
+      return null;
     }
 
-    // a book with no headings to find is read in pages of this many paragraphs
-    function pagesOf(text, paragraphsPerPage = 60) {
-      let pattern = '(.*\n){1,' + paragraphsPerPage + '}';
-      let regex = new RegExp(pattern, 'gimu');
-      return [...text.matchAll(regex)].map(m => ({ pattern, regex, index: m.index, ...m.groups, text: m[0] }));
+    // a heading written into the middle of a paragraph: `... Chương 101 ...`
+    const INLINE_HEADING = /(?<![\p{L}\p{N}])(?<word>chương|hồi)\s+(?<n>\d{1,4})(?![\p{L}\p{N}.])/giu;
+
+    function findCandidates(text, name) {
+      let lowerName = name.toLowerCase().normalize();
+      let names = [...new Set([lowerName, lowerName.replace('hệ liệt', '').trim()])].filter(Boolean)
+        .sort((a, z) => z.length - a.length);
+      let nodes = [];
+      let ord = 0;
+      let lineStart = 0;
+      while(lineStart <= text.length) {
+        let lineEnd = text.indexOf('\n', lineStart);
+        if(lineEnd == -1) lineEnd = text.length;
+        let line = text.slice(lineStart, lineEnd);
+        if(/\S/.test(line)) {
+          ord++;
+          let lower = line.toLowerCase();
+          let node = lower.length == line.length ? readHeading(line, lower, names) : null;
+          if(node) nodes.push({ ...node, index: lineStart + node.start, ord });
+          if(line.length < 4000) {
+            for(let m of line.matchAll(INLINE_HEADING)) {
+              let skip = node && m.index < node.start + node.text.length;
+              if(skip || !/\S/.test(line.slice(0, m.index))) continue;
+              let rest = line.slice(m.index + m[0].length);
+              nodes.push({
+                kind: 'chap', n: Number(m.groups.n), chapType: CHAPTER_WORDS[m.groups.word.toLowerCase()],
+                base: 3, inline: true, text: m[0], rest, title: cleanTitle(rest).slice(0, 80),
+                whole: false, shape: 'inline', index: lineStart + m.index, ord,
+              });
+            }
+          }
+        }
+        lineStart = lineEnd + 1;
+      }
+      return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);
     }
 
-    function extractChapters(filename, text, { name }) {
-      let matches = keepUncertainInGaps(findHeadings(text, name));
-      if(matches.length < 2) matches = pagesOf(text);
+    // -- the best path through the nodes
+    const REWARD = {
+      next: 8,          // n after n-1
+      gap: 3,           // taken off for each number a jump skips
+      repeat: 3,        // the same heading again, close by
+      boundary: 7,      // the numbers start over where a book or extra begins
+      carryOn: 4,       // ...or go on from where the book before stopped
+      restart: -6,      // ...and where nothing says so
+      half: 4,
+      end: 6,
+      interlude: 1,
+    };
+    const THRESHOLD = 4.5;
+    const CLOSE = 3;    // lines apart that two headings may still be one
 
-      let chapters = [];
-      matches.forEach(m => {
-        chapters.push(Chapter(m, { chapters, filename, text }));
+    // What a path has reached by a node: the book it is in, whether that is the extras
+    // (phiên ngoại), the chapter number, the half of it (thượng / hạ), whether the book has
+    // ended, and the number the book before stopped at (a book may go on from it)
+    const reached = (node, fields = {}) => ({
+      book: node.bookNum ?? 0, extra: !!node.extra, n: node.n ?? null, half: null, ended: false, carry: 0, ...fields,
+    });
+
+    // `credit` is how far each shape is trusted: shape -> -3..3. With `strongOnly` the nodes
+    // too weak for their shape stay out of the path altogether (see fillGaps)
+    function chooseHeadings(nodes, credit = {}, strongOnly = false) {
+      let score = new Array(nodes.length).fill(-Infinity);
+      let prev = new Array(nodes.length).fill(-1);
+      let joined = new Array(nodes.length).fill(false);
+      let state = new Array(nodes.length);
+      // earlier nodes by the number they ended on, to find the one a number follows
+      let byNumber = new Map();
+      let bestByKey = new Map();   // `${book}/${extra}` -> the best node that ended in that book
+      let books = [];              // book and extra heading nodes seen
+      let top = -1;                // the best path so far ends here
+
+      let remember = (i) => {
+        let { n, book, extra } = state[i];
+        if(n != null) {
+          if(!byNumber.has(n)) byNumber.set(n, []);
+          byNumber.get(n).push(i);
+        }
+        let key = book + '/' + (extra ? 1 : 0);
+        if(!bestByKey.has(key) || score[i] > score[bestByKey.get(key)]) bestByKey.set(key, i);
+      };
+      let apart = (i, j) => nodes[i].ord - nodes[j].ord;
+
+      // the ways into node i. Each calls `go(from, value, reached, joins)` for a way it
+      // sees, and `begin(value, reached)` for a path that could start at the node itself
+      let into = {
+        chap(i, { go, begin }) {
+          let node = nodes[i];
+          let { n, bookNum: book } = node;
+          // carrying on from an earlier number
+          for(let d = 0; d <= 4; d++) {
+            for(let j of byNumber.get(n - d) ?? []) {
+              let s = state[j];
+              if(s.ended || (node.extra && !s.extra)) continue;
+              if(book != null && s.book != 0 && book != s.book) continue;
+              if(d == 0) {
+                if(apart(i, j) <= CLOSE && s.half == null) go(j, REWARD.repeat, { ...s }, true);
+              } else {
+                go(j, REWARD.next - REWARD.gap * (d - 1), { ...s, n, book: book ?? s.book, extra: s.extra || !!node.extra, half: null });
+              }
+            }
+          }
+          // a book or an extra begins, and the numbers may start over
+          for(let j of books) {
+            let s = state[j];
+            // a bare number straight after `Kỳ Bạch Tuyết phiên ngoại` is the first of its extras
+            let opensExtra = s.extra && !node.extra && apart(i, j) <= 4;
+            if(s.extra != !!node.extra && !opensExtra) continue;
+            if(book != null && book != s.book) continue;
+            let value = n <= 3 ? REWARD.boundary : (n == s.carry + 1 ? REWARD.carryOn : REWARD.boundary - 4 - Math.min(n, 10));
+            go(j, value, { ...s, n, half: null });
+          }
+          // a book that names itself in the heading, or extras, with the numbers starting over
+          if(n <= 3 && (book != null || node.extra)) {
+            for(let j of bestByKey.values()) {
+              let s = state[j];
+              if(s.extra == !!node.extra && (book == null || book == s.book)) continue;
+              go(j, REWARD.boundary - 1, reached(node, { book: book ?? s.book, carry: s.n }));
+            }
+          }
+          // the numbers may break anywhere (a series that carries on from 101 after 47), at
+          // a price that only a heading worth the price will pay
+          if(top >= 0 && !state[top].ended && node.base >= 6) {
+            let s = state[top];
+            // the numbers start over inside a book that has been told apart from the others:
+            // the next one began, whether or not it was named
+            let unnamed = book == null && !node.extra && n <= 2 && s.book > 0 && s.n >= 6;
+            go(top, REWARD.restart, { ...s, n, book: book ?? (unnamed ? s.book + 1 : s.book), extra: !!node.extra, half: null, carry: s.n });
+          }
+          let start = n <= 3 ? 3 : -6;
+          if(start > 0) begin(start, reached(node));
+          else begin(start, reached(node), true);
+        },
+        // the last chapter: a repeat of the heading just before it, or the one after it
+        end(i, { go }) {
+          let node = nodes[i];
+          let recent = [];
+          for(let j = i - 1; j >= 0 && recent.length < 40; j--) if(score[j] > -Infinity) recent.push(j);
+          for(let j of recent) {
+            let s = state[j];
+            if(s.ended || s.n == null || s.extra != !!node.extra) continue;
+            if(apart(i, j) <= CLOSE) go(j, REWARD.repeat + 1, { ...s, ended: true }, true);
+            else if(s.n >= 2) go(j, REWARD.end, { ...s, n: s.n + 1, ended: true });
+          }
+        },
+        book(i, { go, begin }) {
+          let node = nodes[i];
+          let b = node.bookNum ?? 0;
+          let extra = node.kind == 'extrahead' || !!node.extra;
+          for(let j of bestByKey.values()) {
+            let s = state[j];
+            // the next book, or one further on when a few were never named
+            let follows = extra ? !s.extra : (!s.extra && (b > s.book || (b <= 2 && s.book == 0)));
+            let skipped = extra ? 0 : Math.max(0, b - s.book - 1);
+            if(follows) go(j, -Math.min(skipped, 3), reached(node, { book: extra ? s.book : b, extra, carry: s.n ?? 0, n: null, bookType: node.bookType }));
+          }
+          begin(3, reached(node, { book: extra ? 0 : b, extra, n: null, bookType: node.bookType }), books.length > 0);
+        },
+        // `Thứ 0 chương phiên ngoại`: a piece set between two chapters, outside their numbers
+        interlude(i, { go }) {
+          if(top >= 0) go(top, REWARD.interlude, { ...state[top] });
+        },
+        // the nearest heading before it that has a number gives the half its chapter
+        half(i, { go }) {
+          let node = nodes[i];
+          for(let j = i - 1; j >= 0; j--) {
+            if(score[j] == -Infinity) continue;
+            let s = state[j];
+            if(s.n == null || s.ended) continue;
+            if(s.half == null || node.half > s.half) go(j, REWARD.half, { ...s, half: node.half });
+            break;
+          }
+        },
+      };
+
+      for(let i = 0; i < nodes.length; i++) {
+        let node = nodes[i];
+        let prior = node.base + (credit[node.shape] ?? 0) - THRESHOLD;
+        if(strongOnly && prior < 0) continue;
+        let best = { value: -Infinity, from: -1, joined: false, as: null };
+        let go = (j, value, as, joins = false) => {
+          if(score[j] + value > best.value) best = { value: score[j] + value, from: j, joined: joins, as };
+        };
+        // a path starting here; unless `onlyIfAlone`, it competes with the ways into the node
+        let begin = (value, as, onlyIfAlone = false) => {
+          if(onlyIfAlone && best.value != -Infinity) return;
+          if(!(best.value > value)) best = { value, from: -1, joined: false, as };
+        };
+        let way = node.kind == 'chap' ? (node.end ? 'end' : node.n != null ? 'chap' : null)
+          : node.kind == 'extrahead' ? 'book' : node.kind;
+        into[way]?.(i, { go, begin });
+        if(best.value == -Infinity) continue;
+        score[i] = best.value + prior;
+        prev[i] = best.from;
+        joined[i] = best.joined;
+        state[i] = best.as;
+        if(node.kind == 'book' || node.kind == 'extrahead') books.push(i);
+        else remember(i);
+        if(top < 0 || score[i] > score[top]) top = i;
+      }
+
+      let path = [];
+      for(let i = top; i >= 0; i = prev[i]) path.push({ i, joined: joined[i], state: state[i] });
+      return path.reverse();
+    }
+
+    // how far each shape is trusted, by how much of it landed on the path: -3 for one
+    // that never does, +3 for one that always does
+    function shapeCredit(nodes, path) {
+      let seen = {}, taken = {};
+      for(let node of nodes) seen[node.shape] = (seen[node.shape] ?? 0) + 1;
+      for(let { i } of path) taken[nodes[i].shape] = (taken[nodes[i].shape] ?? 0) + 1;
+      let credit = {};
+      for(let shape in seen) credit[shape] = 6 * (((taken[shape] ?? 0) + 0.5) / (seen[shape] + 1) - 0.5);
+      return credit;
+    }
+
+    // the headings the path left out because they are weak (a bare `Một ...` has little to
+    // say for itself) are taken back where they fill what is missing: chapter 6 between 5
+    // and 7, chapter 1 and 2 in front of a book's first heading, and nowhere else
+    function fillGaps(nodes, path, credit) {
+      let isChap = (entry) => nodes[entry.i].kind == 'chap' && entry.state.n != null;
+      let weak = [];
+      nodes.forEach((node, i) => {
+        if(node.kind == 'chap' && node.n != null && node.base + (credit[node.shape] ?? 0) - THRESHOLD < 0) weak.push(i);
       });
-
-      // the only pass that needs the text the chapters were cut from. the others read
-      // a tuning argument in that position, so this one closes over it instead
-      let prologue = (chapters) => addPrologue(chapters, { filename, text });
-
-      let log = chapterTracer(chapters);
-      log('parse result');
-      for(let pass of [
-        dedupeByIndex,
-        merge,
-        lockCertain,
-        merge,
-        dedupeChapters,
-        lockContinuous,
-        analyzeUncertains,
-        analyzeUncertains,
-        dedupeChapters,
-        merge,
-        prologue,
-        mergeShortChapters,
-        merge,
-        groupByBook,
-      ]) {
-        console.groupCollapsed(pass.name);
-        pass(chapters);
-        console.groupEnd(pass.name);
-        log(pass.name + ' result');
+      let filled = [];
+      let fill = (from, to, first, last, state) => {
+        // numbers first..last, in the order of the text between nodes `from` and `to`
+        let at = from;
+        for(let e = first; e <= last; e++) {
+          let found;
+          for(let i of weak) {
+            if(i <= at || i >= to) continue;
+            let node = nodes[i];
+            if(node.n != e || (node.extra && !state.extra)) continue;
+            if(!found || node.base > nodes[found].base) found = i;
+          }
+          if(found != null) {
+            filled.push({ i: found, joined: false, state: { ...state, n: e } });
+            at = found;
+          }
+        }
+      };
+      let previous;     // the last chapter on the path
+      let boundary = true;
+      for(let entry of path) {
+        let node = nodes[entry.i];
+        if(node.kind == 'book' || node.kind == 'extrahead') { boundary = true; continue; }
+        if(!isChap(entry) || entry.joined) { continue; }
+        let n = entry.state.n;
+        if(previous && !boundary && entry.state.book == previous.state.book && entry.state.extra == previous.state.extra) {
+          if(n > previous.state.n + 1) fill(previous.i, entry.i, previous.state.n + 1, n - 1, previous.state);
+        } else if(n > 1 && n <= 4 && !node.extra) {
+          fill(previous?.i ?? -1, entry.i, 1, n - 1, { ...entry.state, n: 0 });
+        }
+        previous = entry;
+        boundary = false;
       }
+      return [...path, ...filled].sort((a, z) => a.i - z.i);
+    }
 
+    const END_PHRASE = /^(chương\s+)?(kết|cuối)$/i;
+
+    // a title the heading itself carries, the plainest one when several headings stood together
+    function pickTitle(members) {
+      let titles = members.map(m => m.title).filter(t => t && !END_PHRASE.test(t));
+      titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);
+      // a paragraph that runs on behind the heading is not part of its title
+      let title = titles[0];
+      return title?.length > 100 ? title.slice(0, 100).replace(/\s+\S*$/, '') + '…' : title;
+    }
+
+    function buildChapters(nodes, path, { filename, text }) {
+      let clusters = [];
+      let opening;   // where the book heading in front of the next chapter begins
+      for(let { i, joined, state } of path) {
+        let node = nodes[i];
+        if(node.kind == 'book' || node.kind == 'extrahead') {
+          opening ??= node.index;
+          continue;
+        }
+        if(joined && clusters.length) {
+          clusters.at(-1).members.push(node);
+          clusters.at(-1).state = state;
+          continue;
+        }
+        clusters.push({ members: [node], state, index: Math.min(opening ?? Infinity, node.index) });
+        opening = undefined;
+      }
+      // a book is `Quyển` or `Bộ` throughout, whichever the headings say most often
+      let types = {};
+      for(let { i } of path) {
+        let word = nodes[i].kind == 'book' ? nodes[i].bookType : null;
+        if(word) types[word] = (types[word] ?? 0) + 1;
+      }
+      let bookWord = Object.keys(types).sort((a, z) => types[z] - types[a])[0] ?? 'Quyển';
+      let chapters = [];
+      let section;    // the section whose parts are being listed
+      for(let { members, state, index } of clusters) {
+        let first = members[0];
+        let lead = members.reduce((best, m) => m.base > best.base ? m : best, first);
+        let end = members.find(m => m.end);
+        let numbered = members.find(m => m.n != null && m.kind != 'interlude');
+        let _ = {
+          index,
+          text: lead.text,
+          certain: true,
+          chapType: (members.find(m => m.chapType) ?? {}).chapType ?? (state.extra ? 'Phiên ngoại' : undefined),
+          title: pickTitle(members),
+        };
+        if(end) _.chapText = end.endWord;
+        else if(first.kind == 'half') {
+          _.chapNum = String(state.n);
+          if(first.halfNum != null) Object.assign(_, { halfNum: first.halfNum, halfType: first.halfType });
+          else Object.assign(_, { halfText: first.halfText });
+        }
+        else if(numbered) _.chapNum = String(numbered.n);
+        let chapter = Chapter(_, { chapters, filename, text });
+        // a part whose heading leaves out its section stays in the one before it
+        let type = _.chapType;
+        let inherited = section && !lead.outer && state.book == 0 && type == section.type ? section.name : undefined;
+        if(lead.outer) section = { name: lead.outer, type };
+        else if(!inherited) section = undefined;
+        chapter.group = lead.outer ?? inherited ?? (state.book > 0 ? `${bookWord} ${state.book}` : undefined);
+        chapters.push(chapter);
+      }
+      // a book that opens with no heading of its own, ahead of a `Bộ 2`, is the first
+      let named = chapters.findIndex(c => c.group);
+      if(named > 0) {
+        let [type, number] = chapters[named].group.split(' ');
+        if(Number(number) == 2) {
+          for(let c of chapters.slice(0, named)) c.group = `${type} 1`;
+        }
+      }
       return chapters;
     }
 
-    // console.table of the chapters after each pass, the rows a pass changed marked
-    function chapterTracer(chapters) {
-      let previous = [];
-      return (label) => {
-        let rows = chapters.map(c => ({
-          locked: c.locked != null ? true : undefined,
-          lockType: c.locked,
-          mergeDirection: c.mergeDirection,
-          mergeReason: c.mergeReason,
-          bookType: c._.bookType,
-          bookNum: c._.bookNum,
-          bookTitle: c._.bookTitle,
-          chapType: c._.chapType,
-          chapNum: c._.chapNum,
-          halfType: c._.halfType,
-          halfNum: c._.halfNum,
-          text: c._.text,
-          certain: c._.certain,
-        }));
-        console.groupCollapsed(label);
-        let action = /\w+/.exec(label)[0];
-        if(previous.length == rows.length) {
-          console.table(rows.map((row, i) => ({
-            action: JSON.stringify(row) != JSON.stringify(previous[i]) ? action : undefined,
-            ...row,
-          })));
-        } else {
-          console.table(rows);
-        }
-        console.groupEnd(label);
-        previous = rows;
-      };
+    // headings that carry no number but all begin with the same words and a dash, in
+    // order: `Quy tắc quái đàm — sân vận động...`, `Quy tắc quái đàm — dâm mỹ ký túc xá...`
+    function seriesChapters(text, { filename, name }) {
+      let lines = [];
+      let start = 0;
+      for(let line of text.split('\n')) {
+        let found = line.length < 200 && /^\s*((?:\p{L}+ ){1,4}\p{L}+) ?[—–:-]/u.exec(line);
+        if(found) lines.push({ key: found[1].toLowerCase(), index: start + line.search(/\S/), line: line.trim(), length: found[0].trim().length });
+        start += line.length + 1;
+      }
+      let counts = new Map();
+      for(let { key } of lines) counts.set(key, (counts.get(key) ?? 0) + 1);
+      // the words are the book's own title, or any dialogue that opens with a name and a
+      // dash would pass for a heading
+      let own = name.toLowerCase().normalize();
+      let [key, count] = [...counts].filter(([words]) => own.startsWith(words)).sort((a, z) => z[1] - a[1])[0] ?? [];
+      if(!key || count < 8) return [];
+      let chapters = [];
+      for(let { key: lineKey, index, line, length } of lines) {
+        if(lineKey != key) continue;
+        // what follows the repeated words, less the number that sometimes closes it
+        let title = cleanTitle(line.slice(length)).replace(/\s*\(\s*\S{1,12}\s*\)\s*$/, '');
+        chapters.push(Chapter({ index, text: line, certain: true, chapNum: String(chapters.length + 1), title }, { chapters, filename, text }));
+      }
+      return chapters;
     }
 
-    // ---- passes ---------------------------------------------------------------------------
-    // each reads and edits the chapters in place: it marks what to merge (mergeDirection),
-    // what to trust (locked), and `merge` carries the marks out
-    // `locked` is 'certain' for a heading a certain pattern read, 'continuous' for a guess
-    // that sits between chapters numbered either side of it
-
-    // uncertain matches only fill the gaps between certain chapters: a gap is where the
-    // numbers jump from one certain chapter to the next. Before the first certain chapter,
-    // after the last, or between two that follow on from each other, they are dropped and
-    // their text stays with the chapter before. With no certain chapter at all, the
-    // uncertain ones are all there is, so they count as certain
-    function keepUncertainInGaps(matches) {
-      if(!matches.some(m => m.certain)) {
-        matches.forEach(m => m.certain = true);
-        return matches;
+    // a book with no headings to find is read in pages of this many paragraphs
+    function pagesOf(text, { filename }, paragraphsPerPage = 60) {
+      let pattern = '(.*\n){1,' + paragraphsPerPage + '}';
+      let chapters = [];
+      for(let m of text.matchAll(new RegExp(pattern, 'gimu'))) {
+        chapters.push(Chapter({ index: m.index, text: m[0] }, { chapters, filename, text }));
       }
-      // a chapter that names its number in words has it in chapText; one that names
-      // none (`Lời dẫn`) cannot vouch for what stands beside it, so it is looked past
-      let numberOf = (m) => {
-        let n = Number(m.chapNum ?? m.chapText);
-        return Number.isNaN(n) ? undefined : n;
-      };
-      // continuous: the next certain chapter follows on, or repeats the number (the
-      // halves of one chapter, a heading seen twice). Nothing is missing in between
-      let isGap = (a, b) => !(b == a || b == a + 1);
-      let certains = matches.filter(m => m.certain && numberOf(m) != null);
-      // how far each certain chapter's own book has been carried on by uncertain ones
-      let tails = new Map();
-      return matches.filter(m => {
-        if(m.certain) return true;
-        // the same heading a certain pattern already read
-        if(matches.some(c => c.certain && c.index == m.index)) return false;
-        let ch = certains.findLast(c => c.index < m.index);
-        let cj = certains.find(c => c.index > m.index);
-        if(!ch || !cj) return false;
-        let [a, b] = [numberOf(ch), numberOf(cj)];
-        if(!isGap(a, b)) return false;
-        // it fills the gap only by being a number that is missing from it, so a gap
-        // of 5 -> 8 takes a 6 or a 7 and nothing else
-        let n = numberOf(m);
-        if(n == null) return false;
-        if(b > a) return n > a && n < b;
-        // where the numbers go back, a new book may begin. When the book names itself
-        // in that gap, what it can still miss is the end of the book before, which
-        // carries on from the last certain chapter, and the start of the new one, which
-        // comes after its heading and ahead of its first certain chapter. A line that
-        // starts with a number but fits neither is just a line (`Một giờ a...` at the end
-        // of book 1 is not chapter 1 of book 2). Without a heading nothing says the
-        // numbers went back for a book, so there is no range to hold it to
-        let bookHeading = matches.findLast(c => c.certain && (c.bookNum || c.bookText) && c.index > ch.index && c.index < cj.index);
-        if(!bookHeading) return true;
-        let tail = tails.get(ch) ?? { last: a, next: a + 1 };
-        tails.set(ch, tail);
-        if(n == tail.next || n == tail.last) {
-          [tail.last, tail.next] = [n, n + 1];
-          return true;
-        }
-        return n < b && bookHeading.index < m.index;
-      });
+      return chapters;
     }
 
-    function dedupeByIndex(chapters) {
-      // two patterns hitting the same heading: their matches overlap, or nothing but
-      // the rest of that one line lies between them. A window measured in characters
-      // instead swallowed every chapter short enough to fit inside it, title and all
-      let sameHeading = (ci, cj) => (
-        ci.startIndex + ci._.text.length > cj.startIndex ||
-        !ci.rawContent.includes('\n')
-      );
-      for(let i = 0; i < chapters.length-1; i++) {
-        let [ci, cj] = [chapters[i], chapters[i+1]];
-        if(sameHeading(ci, cj)) {
-          console.log('Dedupe', [ci._.text, cj._.text]);
-          cj.mergeDirection = 'up';
-          cj.mergeReason = 'dedupe';
-        }
-      }
-    }
-
-    function merge(chapters) {
-      //merge up
-      for(let i = chapters.length - 1; i > 0; i--) {
-        let ci = chapters[i];
-        if(ci.mergeDirection == 'up') {
-          mergeBehind(chapters, i, ci.mergeReason);
-        }
-      }
-      //merge down
-      for(let i = chapters.length - 2; i >= 0; i--) {
-        let ci = chapters[i];
-        if(ci.mergeDirection == 'down') {
-          mergeAhead(chapters, i, ci.mergeReason);
-        }
-      }
-    }
-
-    function mergeBehind(chapters, i, reason) {
-      // chapters[i].endIndex = chapters[i+1].endIndex;
-      let [ch, ci] = [chapters[i-1], chapters[i]];
-      let c;
-      // a chapter that is named but not numbered (`Chương kết`) has an identity of its own:
-      // it takes no number from what is merged into it
-      let unnumbered = !ch.chapNo && !Number.isNaN(ch.chapNo);
-      if (unnumbered && ci.chapNo) c = ci;
-      else if (ch.chapNo == ci.chapNo) {
-        if (!ch._.title && ci._.title) c = ci;
-      }
-      //console.log('merge', [ch._.text, ci._.text], 'because', reason, c == ci, { ch, ci });
-      if (c) {
-        Object.assign(ch._, {
-          title: c._.title,
-          chapNum: c._.chapNum,
-          chapText: c._.chapText,
-          bookNum: c._.bookNum,
-          bookText: c._.bookText,
-          bookType: c._.bookType,
-          halfNum: c._.halfNum,
-          halfText: c._.halfText,
-          halfType: c._.halfType,
-        });
-      }
-      chapters.splice(i, 1);
-      //console.log('  ->', [ch._.text])
-      ch.merged++;
-    }
-
-    // nothing in front of this heading is a chapter of its own, so the chapter after
-    // it takes the text over, its own title and all. Left unimplemented, a book that
-    // opened with a line the patterns half-recognized - a name with a number in it,
-    // a date - kept it as a chapter of its own, ahead of the real first one
-    function mergeAhead(chapters, i, reason) {
-      let [ci, cj] = [chapters[i], chapters[i+1]];
-      //console.log('merge down', [ci._.text, cj._.text], 'because', reason);
-      cj._.index = ci._.index;
-      chapters.splice(i, 1);
-      cj.merged++;
-    }
-
-    function lockCertain(chapters) {
-      for(let ci of chapters) {
-        // locked whether or not it names a number (`Bốn mươi chương` names it in words,
-        // `Lời dẫn` not at all): left unlocked, analyzeUncertains took it for a guess and
-        // merged it into its neighbours
-        if(ci._.certain) {
-          console.log('Lock', [ci._.text]);
-          ci.locked = 'certain';
-        }
-      }
-    }
-
-    // `Chương 20: Chương kết` followed by `【chương kết】`: the last chapter says so twice,
-    // once under the number it was given and once without one
-    const END_WORD = /^(chương\s+)?(kết|cuối)$/i;
-    const namesTheEnd = (c) => END_WORD.test(String(c._.chapText ?? '').trim()) || END_WORD.test((c._.title ?? '').trim());
-
-    function dedupeChapters(chapters) {
-      let shouldMerge = (i, j) => {
-        let [ci, cj] = [chapters[i], chapters[j]];
-        if(!cj) return false;
-        if(!ci.locked) return false;
-        if(!cj.locked) return false;
-        if(namesTheEnd(ci) && namesTheEnd(cj)) return true;
-        // a locked chapter may only name its number in words, which lands in chapText
-        // the book is only named where it begins, so a heading that names none is in the
-        // book of the one beside it
-        let sameBook = ci.bookNo == null || cj.bookNo == null || ci.bookNo == cj.bookNo;
-        if(ci.chapter && (String(ci.chapter) == String(cj.chapter)) && sameBook) {
-          //same chap num, same book
-          if(ci._.halfNum == cj._.halfNum) {
-            //same half num
-            return true;
-          }
-          if((ci._.halfNum && !cj._.halfNum) || (!ci._.halfNum && cj._.halfNum)) {
-            //probably same half num
-            return true;
-          }
-        }
-        return false;
-      };
-      let i = 0;
-      while(i < chapters.length) {
-        let j = i+1;
-        while(j < chapters.length) {
-          if(shouldMerge(i, j)) {
-            let [ci, cj] = [chapters[i], chapters[j]];
-            console.log('Dedupe', [ci._.text, cj._.text]);
-            cj.mergeDirection = 'up';
-            cj.mergeReason = 'dedupe';
-            if(namesTheEnd(ci) && namesTheEnd(cj)) {
-              // the end is the chapter, not the number the heading happened to give it
-              let word = [ci._.chapText, cj._.chapText].find(w => END_WORD.test(String(w ?? '').trim()));
-              if(word) {
-                ci._.chapText = word;
-                delete ci._.chapNum;
-              }
-              if(END_WORD.test((ci._.title ?? '').trim())) delete ci._.title;
-            }
-            j++;
-          } else {
-            break;
-          }
-        }
-        i = j;
-      }
-    }
-
-    function lockContinuous(chapters, lookupRange = 10) {
-      let locked = [];
-      //look behind
-      console.group('Look behind');
-      for(let i = 1; i < chapters.length; i++) {
-        let ci = chapters[i];
-        if(!ci._.chapNum) continue;
-        for(let h = i - 1; h >= 0 && h >= i - lookupRange; h--) {
-          let ch = chapters[h];
-          // the range is there to look past headings that name no number at all; the
-          // nearest one that does is the only one that can vouch for this number
-          if(!ch._.chapNum) continue;
-          let shouldLock = false;
-          if(Number(ch._.chapNum) + 1 == Number(ci._.chapNum)) shouldLock = true;
-          else if((ch._.chapNum == ci._.chapNum) && ch._.halfNum && (Number(ch._.halfNum) + 1 == Number(ci._.halfNum))) shouldLock = true;
-          if(shouldLock) {
-            console.log('Lock', [ch._.text, ci._.text]);
-            ch.locked = 'continuous';
-            ci.locked = 'continuous';
-          }
-          break;
-        }
-      }
-      console.groupEnd('Look behind');
-      console.group('Look ahead');
-      //look ahead
-      for(let i = chapters.length - 2; i >= 0; i--) {
-        let ci = chapters[i];
-        if(!ci._.chapNum) continue;
-        if(ci.locked) continue;
-        for(let j = i + 1; j < chapters.length && j < i + lookupRange; j++) {
-          let cj = chapters[j];
-          // likewise: a `(2)` in the front matter is not the second chapter just
-          // because a third one turns up somewhere after the first and the second
-          if(!cj._.chapNum) continue;
-          let shouldLock = false;
-          if(Number(ci._.chapNum) + 1 == Number(cj._.chapNum)) shouldLock = true;
-          else if((ci._.chapNum == cj._.chapNum) && ci._.halfNum && (Number(ci._.halfNum) + 1 == Number(cj._.halfNum))) shouldLock = true;
-          if(shouldLock) {
-            console.log('Lock', [ci._.text, cj._.text]);
-            ci.locked = 'continuous';
-            cj.locked = 'continuous';
-          }
-          break;
-        }
-      }
-      console.groupEnd('Look ahead');
-    }
-
-    function analyzeUncertains(chapters) {
-      let trace = (label, ...chapters) => {
-        console.group(label);
-        console.log(chapters.map(c => c?._.text));
-        console.groupEnd();
-      };
-      // the nearest locked chapter either side of ci
-      let lockedAround = (i) => {
-        let ch = chapters.slice(0, i).findLast(c => c.locked);
-        let cj = chapters.slice(i + 1).find(c => c.locked);
-        return [ch, cj];
-      };
-      // the second half of a chapter whose first half was seen: keep it apart, as the
-      // chapter it is half of. (the chapter's own halfNum is never set, so this holds
-      // whenever the anchor names a half)
-      let isSeparatedHalf = (ci, anchor) => ci._.halfNum && ci.halfNum != anchor._.halfNum;
-      let keepHalf = (ci, anchor) => {
-        trace('keep separated half', anchor, ci);
-        ci._.chapNum = anchor._.chapNum;
-        ci.mergeDirection = 'keep';
-        ci.mergeReason = 'separated half';
-      };
-      let mark = (ci, direction, reason, label, ...around) => {
-        trace(label, ...around);
-        ci.mergeDirection = direction;
-        ci.mergeReason = reason;
-      };
-
-      for(let i = 0; i < chapters.length; i++) {
-        let ci = chapters[i];
-        if(ci.locked) continue; //ignore certain chapters
-        let [ch, cj] = lockedAround(i);
-        if(ch && cj) {
-          let [a, b, n] = [Number(ch._.chapNum), Number(cj._.chapNum), Number(ci._.chapNum)];
-          if(a == b || a + 1 == b) {
-            if(isSeparatedHalf(ci, ch)) keepHalf(ci, ch);
-            else mark(ci, 'up', 'same chapNum as prev/next', 'merge up', ch, ci, cj);
-          } else if(a <= n && n <= b) {
-            trace('lock', ch, ci, cj);
-            ci.locked = 'continuous';
-          } else if(b == 1) {
-            mark(ci, 'up', 'end of book', 'merge end of book', ch, ci, cj);
-          }
-        } else if(ch) {
-          if(isSeparatedHalf(ci, ch)) keepHalf(ci, ch);
-          else mark(ci, 'up', 'merge all', 'merge all up', ch, ci);
-        } else if(cj) {
-          if(isSeparatedHalf(ci, cj)) keepHalf(ci, cj);
-          else mark(ci, 'down', 'merge all', 'merge all down', ci, cj);
-        }
-      }
-    }
-
-    // the book each chapter belongs to, for the list to group them by. A chapter names
-    // its book only where one begins, so the name carries on until another is named.
-    // A book that opens with no heading of its own is the one before the first named
-    // `Bộ 2`, and it is called `Bộ 1`; the title page ahead of the first chapter is in none
-    function groupByBook(chapters) {
-      let first = chapters.find(c => c.book);
-      if(!first) return;
-      let before = chapters.indexOf(first);
-      let opening = first.bookNo == 2 ? first.book.replace(/\d+$/, '1') : undefined;
-      let group;
-      chapters.forEach((c, i) => {
-        if(c.book) group = c.book;
-        else if(i < before) group = c.chapNo != null ? opening : undefined;
-        c.group = group;
-      });
-    }
-
-    // a chapter of a paragraph or two is hardly ever a chapter: it is the text caught
-    // between a heading that was not one and the next real one. It joins the chapter
-    // before it, or the one after when it opens the book. A numbered chapter the
-    // parser is sure of is left alone however short it is - some books really are
-    // written in one-paragraph chapters, and they are not ours to glue together
-    function mergeShortChapters(chapters, minParagraphs = 3) {
-      for(let i = 0; i < chapters.length; i++) {
-        let ci = chapters[i];
-        if(ci.mergeDirection) continue;
-        if(ci.locked) continue;
-        if(ci.paragraphs >= minParagraphs) continue;
-        let direction = i > 0 ? 'up' : (chapters[i+1] ? 'down' : null);
-        if(!direction) continue;
-        console.log('Short', [ci._.text], ci.paragraphs, 'paragraph(s), merge', direction);
-        ci.mergeDirection = direction;
-        ci.mergeReason = 'short';
-      }
+    function extractChapters(filename, text, { name }) {
+      let nodes = findCandidates(text, name);
+      // first take every node, to see which shapes the book writes its headings in
+      let credit = shapeCredit(nodes, chooseHeadings(nodes));
+      let path = chooseHeadings(nodes, credit, true);
+      path = fillGaps(nodes, path, credit);
+      let chapters = buildChapters(nodes, path, { filename, text });
+      // no numbers to follow, but the same words begin every heading
+      let series = seriesChapters(text, { filename, name });
+      if(series.length >= 8 && series.length > chapters.length * 1.2) chapters = series;
+      if(chapters.length < 2) chapters = pagesOf(text, { filename });
+      addPrologue(chapters, { filename, text });
+      return chapters;
     }
 
     // no heading stands in front of the first one, so the title page, the author and
     // the blurb fell outside every chapter and were never read. they open the book as
-    // an entry of their own; a line or two of them is no chapter, and mergeShortChapters
-    // folds that into the first one after this
+    // an entry of their own
     function addPrologue(chapters, { filename, text }) {
       let prologue = text.slice(0, chapters[0]?.startIndex ?? text.length).trim();
       if(!prologue) return;
-      console.log('Prologue of', prologue.length, 'characters');
       chapters.unshift(Chapter({
         title: filename,
         text: filename,

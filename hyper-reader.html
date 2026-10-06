@@ -3291,6 +3291,8 @@
         if(/\d/.test(ch)) {
           let m = /^\d+(?:\.\d+)?/.exec(line.slice(pos));
           let [major, minor] = m[0].split('.');
+          // `0.05` is a fraction (a countdown, a price), not chapter 5 of a book 0
+          if(minor != null && Number(major) == 0) { add('x', pos + m[0].length); continue; }
           // `3.40` is chapter 40 of book 3
           add('N', pos + m[0].length, { value: Number(minor ?? major), book: minor == null ? null : Number(major), digits: true });
           continue;
@@ -3565,7 +3567,7 @@
 
     // `credit` is how far each shape is trusted: shape -> -3..3. With `strongOnly` the nodes
     // too weak for their shape stay out of the path altogether (see fillGaps)
-    function chooseHeadings(nodes, credit = {}, strongOnly = false) {
+    function chooseHeadings(nodes, credit = {}, strongOnly = false, excluded = new Set()) {
       let score = new Array(nodes.length).fill(-Infinity);
       let prev = new Array(nodes.length).fill(-1);
       let joined = new Array(nodes.length).fill(false);
@@ -3682,7 +3684,7 @@
       for(let i = 0; i < nodes.length; i++) {
         let node = nodes[i];
         let prior = node.base + (credit[node.shape] ?? 0) - THRESHOLD;
-        if(strongOnly && prior < 0) continue;
+        if((strongOnly && prior < 0) || excluded.has(i)) continue;
         let best = { value: -Infinity, from: -1, joined: false, as: null };
         let go = (j, value, as, joins = false) => {
           if(score[j] + value > best.value) best = { value: score[j] + value, from: j, joined: joins, as };
@@ -3708,6 +3710,23 @@
       let path = [];
       for(let i = top; i >= 0; i = prev[i]) path.push({ i, joined: joined[i], state: state[i] });
       return path.reverse();
+    }
+
+    // A heading with a single line before the next is not a chapter of a book whose chapters
+    // run to dozens of lines: a list in the story (`Hồi 1: ...`, `Hồi 2: ...`) passes
+    // for a short chain the path is glad to take. The nodes of such a section are left out
+    function tinySections(nodes, path) {
+      let chapters = path.filter(({ i }) => nodes[i].kind == 'chap');
+      let lengths = chapters.slice(1).map(({ i }, k) => nodes[i].ord - nodes[chapters[k].i].ord).sort((a, z) => a - z);
+      let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;
+      let tiny = new Set();
+      // a book of one-paragraph chapters has nothing to tell a list from
+      if(typical < 30) return tiny;
+      chapters.forEach(({ i }, k) => {
+        let next = chapters[k + 1];
+        if(next && !next.joined && nodes[next.i].ord - nodes[i].ord <= 2) tiny.add(i);
+      });
+      return tiny;
     }
 
     // how far each shape is trusted, by how much of it landed on the path: -3 for one
@@ -3882,8 +3901,9 @@
     function extractChapters(filename, text, { name }) {
       let nodes = findCandidates(text, name);
       // first take every node, to see which shapes the book writes its headings in
-      let credit = shapeCredit(nodes, chooseHeadings(nodes));
-      let path = chooseHeadings(nodes, credit, true);
+      let first = chooseHeadings(nodes);
+      let credit = shapeCredit(nodes, first);
+      let path = chooseHeadings(nodes, credit, true, tinySections(nodes, first));
       path = fillGaps(nodes, path, credit);
       let chapters = buildChapters(nodes, path, { filename, text });
       // no numbers to follow, but the same words begin every heading

@@ -3348,6 +3348,8 @@
     const HEADING_RULES = [
       // Chương 5 | Chương kết | Thứ 5 chương | Ba mươi tám chương | Quyển 2 Chương 7 | 【NAME】 Chương 5
       { kind: 'chap', base: 9, re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))` },
+      // Phiên ngoại: 【1】 title
+      { kind: 'chap', base: 9, re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?` },
       // 【NAME】9 | NAME #3 | NAME (5) | 《NAME》2
       { kind: 'chap', base: 7, re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?` },
       // Quyển thứ ba 3: the chapter's number follows its book's
@@ -3370,7 +3372,12 @@
 
     // the title a line carries after its heading: no separator left in front, no bracket behind
     function cleanTitle(rest) {
-      return rest.replace(/^[\s:：.,\-—–/|)\]】”"»*#!]+/u, '').replace(/[\s】\]”"»]+$/u, '');
+      let title = rest.replace(/^[\s:：.,\-—–/|)\]】”"»*#!]+/u, '').trimEnd();
+      // a closing bracket with nothing opened before it goes; one that closes a tag stays
+      while(/[】\]”"»]$/u.test(title) && (title.match(/[】\]”"»]/gu) || []).length > (title.match(/[【\[“«]/gu) || []).length) {
+        title = title.slice(0, -1).trimEnd();
+      }
+      return title;
     }
 
     // how much a line reads like a sentence of the story and not like a title

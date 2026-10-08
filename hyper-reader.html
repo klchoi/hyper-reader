@@ -3465,8 +3465,33 @@
       return spelled.replace(/x+/g, 'X') + (whole ? '' : 'T');
     }
 
+    // `Chính văn` (the main text, as against the extras) labels a heading and is no part of it
+    const SECTION_LABEL = /^\s*chính văn\s+(?=\S)/iu;
+
+    // a chapter in parts: `Chương 27: (thượng)`, `Chương 44: (nhất)`, or a title that ends in
+    // `(hạ)`. The parts are shown one by one, each as the part of its chapter
+    function partOf(title) {
+      let alone = /^\(\s*(\p{L}+(?: \p{L}+)*)\s*\)$/u.exec(title);
+      if(alone) {
+        let word = alone[1].toLowerCase();
+        let value = HALF_WORDS[word] ?? (() => {
+          let number = readNumberWords(word.split(' '), 0);
+          return number?.length == word.split(' ').length ? number.value : null;
+        })();
+        if(value != null) return { half: value, halfText: word, title: '' };
+      }
+      let ending = /\s*\((thượng|trung|hạ)\)$/iu.exec(title);
+      if(ending) return { half: HALF_WORDS[ending[1].toLowerCase()], halfText: ending[1].toLowerCase(), title };
+      return null;
+    }
+
     function readHeading(line, lower, names) {
       if(line.length > 400) return null;
+      let label = SECTION_LABEL.exec(line);
+      if(label) {
+        let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names);
+        return node && { ...node, start: label[0].search(/\S/) };
+      }
       let tokens = lexLine(line, lower, names);
       if(!tokens.some(t => 'NEhbp'.includes(t.cls))) return null;
       let classes = tokens.map(t => t.cls).join('');
@@ -3490,22 +3515,26 @@
         if(read.roles.n != null) {
           title = title.replace(new RegExp(`^(?:\\S+\\s+){0,3}?(?:chương|hồi)\\s+${read.roles.n}\\s*[:：.]*\\s*`, 'iu'), '');
         }
+        let part = read.roles.n != null && partOf(title);
         let hasRoman = tokens.some(t => t.roman);
         let base = baseOf(rule, read, { title, rest, whole, hasRoman, hasPhrase: !!at('ph') });
+        // `Thứ 0 chương` sets a piece between two chapters; a bare 0 (a door code, a countdown) is nothing
+        if(read.roles.n === 0 && !read.marker) continue;
+        if(part) title = part.title;
         let kind = rule.kind == 'chap' && read.roles.n === 0 ? 'interlude' : rule.kind;
         // `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`: the heading of a section, then the one
         // of the part that begins here. The part is the chapter, the section its group
         let inner = rule.kind == 'chap' && read.roles.n != null
           && (/^(.*?)\s*[|｜]\s*(\S.*)$/u.exec(rest) ?? /^(.*?)\s*[【\[]?\s*(thứ\s+\S+\s+hồi\b.*)$/iu.exec(rest));
         if(inner) {
-          let part = readHeading(inner[2].replace(/^[【\[]\s*/, ''), inner[2].replace(/^[【\[]\s*/, '').toLowerCase(), names);
-          if(part && part.kind == 'chap' && part.n != null && !part.outer) {
+          let held = readHeading(inner[2].replace(/^[【\[]\s*/, ''), inner[2].replace(/^[【\[]\s*/, '').toLowerCase(), names);
+          if(held && held.kind == 'chap' && held.n != null && !held.outer) {
             let outer = `${read.marker?.word ?? 'Chương'} ${read.roles.n}`;
-            return { ...part, outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(': '), start: tokens[0].s, text: line.slice(tokens[0].s) };
+            return { ...held, outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(': '), start: tokens[0].s, text: line.slice(tokens[0].s) };
           }
         }
         return {
-          ...read.roles, kind, base, rest, title, whole,
+          ...read.roles, ...(part && { half: part.half, halfText: part.halfText }), kind, base, rest, title, whole,
           shape: shapeOf(tokens, m[0].length, whole),
           text: line.slice(tokens[0].s, last.e),
           start: tokens[0].s,
@@ -3612,9 +3641,11 @@
               if(s.ended || (node.extra && !s.extra)) continue;
               if(book != null && s.book != 0 && book != s.book) continue;
               if(d == 0) {
-                if(apart(i, j) <= CLOSE && s.half == null) go(j, REWARD.repeat, { ...s }, true);
+                // the next part of the same chapter, or the same heading again
+                if(node.half != null && (s.half == null || node.half > s.half)) go(j, REWARD.next, { ...s, half: node.half });
+                else if(apart(i, j) <= CLOSE && (s.half == null || node.half == s.half)) go(j, REWARD.repeat, { ...s }, true);
               } else {
-                go(j, REWARD.next - REWARD.gap * (d - 1), { ...s, n, book: book ?? s.book, extra: s.extra || !!node.extra, half: null });
+                go(j, REWARD.next - REWARD.gap * (d - 1), { ...s, n, book: book ?? s.book, extra: s.extra || !!node.extra, half: node.half ?? null });
               }
             }
           }
@@ -3626,7 +3657,7 @@
             if(s.extra != !!node.extra && !opensExtra) continue;
             if(book != null && book != s.book) continue;
             let value = n <= 3 ? REWARD.boundary : (n == s.carry + 1 ? REWARD.carryOn : REWARD.boundary - 4 - Math.min(n, 10));
-            go(j, value, { ...s, n, half: null });
+            go(j, value, { ...s, n, half: node.half ?? null });
           }
           // a book that names itself in the heading, or extras, with the numbers starting over
           if(n <= 3 && (book != null || node.extra)) {
@@ -3643,7 +3674,7 @@
             // the numbers start over inside a book that has been told apart from the others:
             // the next one began, whether or not it was named
             let unnamed = book == null && !node.extra && n <= 2 && s.book > 0 && s.n >= 6;
-            go(top, REWARD.restart, { ...s, n, book: book ?? (unnamed ? s.book + 1 : s.book), extra: !!node.extra, half: null, carry: s.n });
+            go(top, REWARD.restart, { ...s, n, book: book ?? (unnamed ? s.book + 1 : s.book), extra: !!node.extra, half: node.half ?? null, carry: s.n });
           }
           let start = n <= 3 ? 3 : -6;
           if(start > 0) begin(start, reached(node));
@@ -3850,7 +3881,10 @@
           if(first.halfNum != null) Object.assign(_, { halfNum: first.halfNum, halfType: first.halfType });
           else Object.assign(_, { halfText: first.halfText });
         }
-        else if(numbered) _.chapNum = String(numbered.n);
+        else if(numbered) {
+          _.chapNum = String(numbered.n);
+          if(numbered.half != null && numbered.kind == 'chap') _.halfText = numbered.halfText;
+        }
         let chapter = Chapter(_, { chapters, filename, text });
         // a part whose heading leaves out its section stays in the one before it
         let type = _.chapType;

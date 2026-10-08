@@ -3314,7 +3314,7 @@
           // the end of the last word it read
           let end = pos;
           for(let k = 0; k < number.length; k++) end += (k ? 1 : 0) + words[k].length;
-          add('N', end, { value: number.value });
+          add('N', end, { value: number.value, sino: words[0] in SINO_DIGITS || words[0] == 'thập' });
           continue;
         }
         let roman = readRoman(word);
@@ -3360,6 +3360,8 @@
       { kind: 'extrahead', base: 5, re: `^[LS]*x{1,8}(?<pm>p)$` },
       // Tiết thứ hai | Thứ 1 tiết
       { kind: 'half', base: 5, re: `^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)` },
+      // Nhất, trong sương mù đường về: a Sino-Vietnamese ordinal and a comma
+      { kind: 'chap', base: 5, weakTitled: 4.5, sino: true, re: `^(?<cn>N)(?<sep>S)` },
       // (5) | 【nhất】 | 5. | 22) | 2,
       { kind: 'chap', base: 5, weakTitled: 3, re: `^L?(?<cn>N)R?` },
       // Phòng tắm thiên Chương 1: a few words, then the chapter
@@ -3477,6 +3479,7 @@
         };
         // `một hồi` (a while) and `chín thiên` are not chapters: only `chương` follows a number alone
         if(at('cm2') && at('cm2').word != 'Chương' && !at('tt')) continue;
+        if(rule.sino && (!at('cn').sino || at('sep').text != ',')) continue;
         let last = tokens[m[0].length - 1];
         let rest = line.slice(last.e);
         let whole = !/\S/.test(rest);

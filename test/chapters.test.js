@@ -168,6 +168,10 @@ describe('headings of other shapes', () => {
     let text = book([`Chương 1\n\n${story(8)}`, `Chương 2\n\n${story(8)}`, `Thứ 0 chương phiên ngoại: Cảnh riêng\n\n${story(8)}`, `Chương 3\n\n${story(8)}`, `Chương 4\n\n${story(8)}`]);
     assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Phiên ngoại: Cảnh riêng', 'Chương 3', 'Chương 4']);
   });
+  it('keeps a piece in front of a book\'s first chapter', () => {
+    let text = book(['Quyển thứ nhất', `Chương 1\n\n${story(8)}`, `Chương 2\n\n${story(8)}`, 'Quyển thứ hai', `Thứ 0 chương tự\n\n${story(8)}`, `Chương 1\n\n${story(8)}`, `Chương 2\n\n${story(8)}`]);
+    assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Tự', 'Chương 1', 'Chương 2']);
+  });
   it('finds a heading that follows its book words on the same line', () => {
     let text = book([1, 2, 3].map(n => `Chương ${n}\n\n${story(8, n)}`), `Quyển thứ ba con rối thánh nữ thiên Chương 4: Thất thân cảnh\n\n${story(8)}`, `Chương 5\n\n${story(8)}`);
     assert.equal(real(parse(text))[3].title, 'Chương 4: Thất thân cảnh');

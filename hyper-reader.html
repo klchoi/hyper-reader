@@ -1775,7 +1775,10 @@
         prev[i] = best.from;
         joined[i] = best.joined;
         state[i] = best.as;
-        if(node.kind === 'book' || node.kind === 'extrahead') books.push(i);
+        // a piece in front of a book's first chapter (its preface, `Thứ 0 chương tự`) opens the
+        // book as its heading does
+        let opensBook = node.kind === 'interlude' && state[i].n == null;
+        if(node.kind === 'book' || node.kind === 'extrahead' || opensBook) books.push(i);
         else remember(i);
         if(top < 0 || score[i] > score[top]) top = i;
       }
@@ -4103,7 +4106,7 @@
     // @book:begin - what the tests load of the page: a book, and what is stored of it
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 5;
+    const PARSER_VERSION = 6;
 
     // a book: where it came from, and its chapters once the text has been read (see readBook)
     function Book(file) {

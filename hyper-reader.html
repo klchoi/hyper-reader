@@ -3396,6 +3396,32 @@
     // `Chính văn` (the main text, as against the extras) labels a heading and is no part of it
     const SECTION_LABEL = /^\s*chính văn\s+(?=\S)/iu;
 
+    // A heading found in the text, a candidate for a chapter. Every one has all of these:
+    //   kind      'chap' | 'book' | 'extrahead' | 'half' | 'interlude'
+    //   base      how much it speaks for itself, 0-10, before the book's own style weighs in
+    //   where     index (in the text), start (in its line), ord (the rank of its line among the
+    //             lines that have anything in them)
+    //   said      text (the heading as written), title (what follows), rest (the line after it),
+    //             whole (nothing follows)
+    //   shape     what it looks like, for the trust a book gives that look
+    //   chapter   n, span (the last of a run: `7-10`), end / endWord (`kết`, `cuối`), chapType,
+    //             extra (phiên ngoại), and a part of it: half (1 thượng, 2 trung, 3 hạ, or a
+    //             number), halfText, halfNum, halfType
+    //   book      bookNum, bookType
+    //   outer     the section it is a part of: `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`
+    //   inline    found in the middle of a line, not at its start
+    const HEADING_DEFAULTS = {
+      kind: 'chap', base: 0, index: 0, start: 0, ord: 0, text: '', title: '', rest: '', whole: false, shape: '',
+      n: null, span: null, end: false, endWord: null, chapType: null, extra: false,
+      half: null, halfText: null, halfNum: null, halfType: null,
+      bookNum: null, bookType: null, outer: null, inline: false,
+    };
+
+    function heading(fields) {
+      for(let key in fields) if(!(key in HEADING_DEFAULTS)) throw new Error(`a heading has no ${key}`);
+      return { ...HEADING_DEFAULTS, ...fields };
+    }
+
     // a chapter in parts: `Chương 27: (thượng)`, `Chương 44: (nhất)`, or a title that ends in
     // `(hạ)`. The parts are shown one by one, each as the part of its chapter
     function partOf(title) {
@@ -3458,15 +3484,15 @@
           let held = readHeading(inner[2].replace(/^[【\[]\s*/, ''), inner[2].replace(/^[【\[]\s*/, '').toLowerCase(), names);
           if(held && held.kind == 'chap' && held.n != null && !held.outer) {
             let outer = `${read.marker?.word ?? 'Chương'} ${read.roles.n}`;
-            return { ...held, outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(': '), start: tokens[0].s, text: line.slice(tokens[0].s) };
+            return heading({ ...held, outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(': '), start: tokens[0].s, text: line.slice(tokens[0].s) });
           }
         }
-        return {
+        return heading({
           ...read.roles, ...(part && { half: part.half, halfText: part.halfText }), kind, base, rest, title, whole,
           shape: shapeOf(tokens, m[0].length, whole),
           text: line.slice(tokens[0].s, last.e),
           start: tokens[0].s,
-        };
+        });
       }
       return null;
     }
@@ -3489,7 +3515,7 @@
           ord++;
           let lower = line.toLowerCase();
           let node = lower.length == line.length ? readHeading(line, lower, names) : null;
-          if(node) nodes.push({ ...node, index: lineStart + node.start, ord });
+          if(node) nodes.push(heading({ ...node, index: lineStart + node.start, ord }));
           if(line.length < 4000) {
             for(let m of line.matchAll(INLINE_HEADING)) {
               // a line that opens with a heading has only a title after it: `(Chương 75: Xong,
@@ -3497,11 +3523,11 @@
               let skip = node && node.base >= 6;
               if(skip || !/\S/.test(line.slice(0, m.index))) continue;
               let rest = line.slice(m.index + m[0].length);
-              nodes.push({
+              nodes.push(heading({
                 kind: 'chap', n: Number(m.groups.n), chapType: CHAPTER_WORDS[m.groups.word.toLowerCase()],
                 base: 3, inline: true, text: m[0], rest, title: cleanTitle(rest).slice(0, 80),
-                whole: false, shape: 'inline', index: lineStart + m.index, ord,
-              });
+                shape: 'inline', index: lineStart + m.index, ord,
+              }));
             }
           }
         }
@@ -3525,13 +3551,20 @@
     const THRESHOLD = 4.5;
     const CLOSE = 3;    // lines apart that two headings may still be one
 
-    // What a path has reached by a node: the book it is in, whether that is the extras
-    // (phiên ngoại), the chapter number, the half of it (thượng / hạ), whether the book has
-    // ended, and the number the book before stopped at (a book may go on from it)
+    // What a path has reached by a node, and all the paths need to go on from it:
+    //   book    the book it is in, 0 when no book has been told apart
+    //   extra   whether that is the extras (phiên ngoại)
+    //   n       the chapter number it stands at (the last of a run)
+    //   half    the part of that chapter (thượng / trung / hạ), or null
+    //   ended   the book has had its last chapter
+    //   carry   the number the book before stopped at, which a book may go on from
     const reached = (node, fields = {}) => ({
       book: node.bookNum ?? 0, extra: !!node.extra, n: node.span ?? node.n ?? null, half: null, ended: false, carry: 0, ...fields,
     });
 
+    // The best path through the headings, as a list of { i, joined, state }: the heading's place
+    // in `nodes`, whether it is the same heading as the one before (a repeat, or an end said
+    // twice), and what the path has reached by it.
     // `credit` is how far each shape is trusted: shape -> -3..3. With `strongOnly` the nodes
     // too weak for their shape stay out of the path altogether (see fillGaps)
     function chooseHeadings(nodes, credit = {}, strongOnly = false, excluded = new Set()) {
@@ -3629,9 +3662,9 @@
             // the next book, or one further on when a few were never named
             let follows = extra ? !s.extra : (!s.extra && (b > s.book || (b <= 2 && s.book == 0)));
             let skipped = extra ? 0 : Math.max(0, b - s.book - 1);
-            if(follows) go(j, -Math.min(skipped, 3), reached(node, { book: extra ? s.book : b, extra, carry: s.n ?? 0, n: null, bookType: node.bookType }));
+            if(follows) go(j, -Math.min(skipped, 3), reached(node, { book: extra ? s.book : b, extra, carry: s.n ?? 0, n: null }));
           }
-          begin(3, reached(node, { book: extra ? 0 : b, extra, n: null, bookType: node.bookType }), books.length > 0);
+          begin(3, reached(node, { book: extra ? 0 : b, extra, n: null }), books.length > 0);
         },
         // `Thứ 0 chương phiên ngoại`: a piece set between two chapters, outside their numbers
         interlude(i, { go }) {

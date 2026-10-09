@@ -3090,12 +3090,12 @@
     //   text    the heading as it stands in the book
 
     function chapterTitle({ type = 'Chương', number, part, title, text }, ordinal) {
-      title = title?.replace(/^[\s\/|\\]+/, '') ?? '';
       // a lone `/` or `|` after the chapter word was a separator with nothing behind it
+      title = title?.replace(/^[\s\/|\\]+/, '') ?? '';
       let isExtra = (s) => /phiên ngoại/iu.test(s ?? '');
       let extra = isExtra(text) && !isExtra(title) && !isExtra(type) ? 'Phiên ngoại' : undefined;
-      let heading = [extra, number != null && `${type} ${number}`].filter(Boolean).join(' ');
-      let named = [heading, title.replace(/./, c => c.toUpperCase())].filter(Boolean).join(': ');
+      let label = [extra, number != null && `${type} ${number}`].filter(Boolean).join(' ');
+      let named = [label, title.replace(/./, c => c.toUpperCase())].filter(Boolean).join(': ');
       let shown = part && !title.includes(`(${part.text})`) ? part : null;
       let full = [shown?.leading && `${shown.text}:`, named, shown && !shown.leading && `(${shown.text})`].filter(Boolean).join(' ');
       return full || `${type} ${ordinal + 1}`;
@@ -3206,7 +3206,8 @@
     // ==== 1. Words and numbers ===================================================================
     const WORD_DIGITS = { một: 1, mốt: 1, hai: 2, ba: 3, bốn: 4, tư: 4, năm: 5, lăm: 5, sáu: 6, bảy: 7, tám: 8, chín: 9 };
     const SINO_DIGITS = { nhất: 1, nhị: 2, tam: 3, tứ: 4, ngũ: 5, lục: 6, thất: 7, bát: 8, cửu: 9 };
-    // after `mươi` only these read as a unit: `hai mươi tư` is 24, `tư` alone is not a number
+    // the units that may follow `mươi`: `hai mươi tư` is 24, `ba mươi mốt` 31 (`mốt` and `lăm` are
+    // the forms a unit takes there)
     const TENS_UNITS = ['mốt', 'hai', 'ba', 'bốn', 'tư', 'lăm', 'sáu', 'bảy', 'tám', 'chín'];
 
     // the longest number the words at `i` read as: { value, length } in words, or null
@@ -3580,6 +3581,23 @@
     // a heading written into the middle of a paragraph: `... Chương 101 ...`
     const INLINE_HEADING = /(?<![\p{L}\p{N}])(?<word>chương|hồi)\s+(?<n>\d{1,4})(?![\p{L}\p{N}.])/giu;
 
+    // headings written into the middle of a line, which a line that opens with a heading
+    // of its own does not have: `(Chương 75: Xong, thỉnh mong chờ Chương 76: ...)` points at the
+    // next chapter, it does not begin it
+    function inlineHeadings(line, lineStart, ord) {
+      let found = [];
+      for(let m of line.matchAll(INLINE_HEADING)) {
+        if(!/\S/.test(line.slice(0, m.index))) continue;
+        let rest = line.slice(m.index + m[0].length);
+        found.push(heading({
+          kind: 'chap', n: Number(m.groups.n), chapType: CHAPTER_WORDS[m.groups.word.toLowerCase()],
+          base: TUNING.base.inline, inline: true, text: m[0], rest, title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),
+          shape: 'inline', index: lineStart + m.index, ord,
+        }));
+      }
+      return found;
+    }
+
     function findCandidates(text, name) {
       let lowerName = name.toLowerCase().normalize();
       let names = [...new Set([lowerName, lowerName.replace('hệ liệt', '').trim()])].filter(Boolean)
@@ -3596,20 +3614,8 @@
           let lower = line.toLowerCase();
           let node = lower.length == line.length ? readHeading(line, lower, names) : null;
           if(node) nodes.push(heading({ ...node, index: lineStart + node.start, ord }));
-          if(line.length < 4000) {
-            for(let m of line.matchAll(INLINE_HEADING)) {
-              // a line that opens with a heading has only a title after it: `(Chương 75: Xong,
-              // thỉnh mong chờ Chương 76: ...)` points at the next chapter, it does not begin it
-              let skip = node && node.base >= TUNING.path.breakMinBase;
-              if(skip || !/\S/.test(line.slice(0, m.index))) continue;
-              let rest = line.slice(m.index + m[0].length);
-              nodes.push(heading({
-                kind: 'chap', n: Number(m.groups.n), chapType: CHAPTER_WORDS[m.groups.word.toLowerCase()],
-                base: TUNING.base.inline, inline: true, text: m[0], rest, title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),
-                shape: 'inline', index: lineStart + m.index, ord,
-              }));
-            }
-          }
+          let opensWithHeading = node && node.base >= TUNING.path.breakMinBase;
+          if(!opensWithHeading && line.length < 4000) nodes.push(...inlineHeadings(line, lineStart, ord));
         }
         lineStart = lineEnd + 1;
       }

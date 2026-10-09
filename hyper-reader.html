@@ -1023,8 +1023,8 @@
   <!-- The chapter parser: a script of its own so a worker can be made from it (see
        readBook) as well as the page running it. It touches nothing of the page. -->
   <script id="chapter-parser">
-    function normalizeFileContent(text) {
-      text = text.normalize();
+    function normalizeFileContent(source) {
+      let text = source.normalize();
       text = text.replace(/[\r\n]+/g, '\n');
       text = text.replace(/\t+/g, '\n');
       text = text.replace(/(?<=\S) {2,}(?=\p{Lu})/gu, '\n');
@@ -1044,7 +1044,7 @@
       text = text.replace(/\b(?<protocol>https?:)(?:\/\/)? (?<path>(?:\w+)(?:\. \w+)+(?:\/(?:(?:\. )?[\w\/])+)?)/gm, (...args) => {
         let { protocol, path } = args.pop();
         path = path.replace(/\s/g, '');
-        if (protocol) return protocol + '//' + path;
+        if (protocol) return `${protocol}//${path}`;
         return path;
       });
       text = text.replaceAll('cha mẹ vợ', 'mẹ vợ');
@@ -1082,7 +1082,7 @@
       return drafts.map(({ offset, group, heading }, i) => {
         let title = chapterTitle(heading, i);
         let end = drafts[i + 1]?.offset ?? text.length;
-        return { id: slug(title) + '-' + i, title, offset, group, content: text.slice(offset, end).trim() };
+        return { id: `${slug(title)}-${i}`, title, offset, group, content: text.slice(offset, end).trim() };
       });
     }
 
@@ -1195,33 +1195,33 @@
       };
       // 100-199 read out digit by digit: `nhất lẻ loi` is 100, `nhất lẻ một` 101,
       // `nhất nhất linh` 110. `lẻ loi` stands for two zeros, `lẻ` and `linh` for one
-      if(w(0) == 'nhất') {
-        let digit = (x) => (x == 'lẻ' || x == 'linh') ? 0 : (SINO_DIGITS[x] ?? WORD_DIGITS[x]);
-        if(w(1) == 'lẻ' && w(2) == 'loi') take(100, 3);
+      if(w(0) === 'nhất') {
+        let digit = (x) => (x === 'lẻ' || x === 'linh') ? 0 : (SINO_DIGITS[x] ?? WORD_DIGITS[x]);
+        if(w(1) === 'lẻ' && w(2) === 'loi') take(100, 3);
         if(['lẻ', 'linh', ...Object.keys(SINO_DIGITS)].includes(w(1)) && digit(w(2)) != null) {
           take(100 + 10 * digit(w(1)) + digit(w(2)), 3);
         }
       }
-      if(w(0) == 'mười') {
+      if(w(0) === 'mười') {
         take(10, 1);
-        if(w(1) in WORD_DIGITS && w(1) != 'tư') take(10 + WORD_DIGITS[w(1)], 2);
+        if(w(1) in WORD_DIGITS && w(1) !== 'tư') take(10 + WORD_DIGITS[w(1)], 2);
       }
       if(w(0) in WORD_DIGITS) {
         take(WORD_DIGITS[w(0)], 1);
-        if(w(1) == 'mươi') {
+        if(w(1) === 'mươi') {
           let tens = 10 * WORD_DIGITS[w(0)];
           take(tens, 2);
           if(TENS_UNITS.includes(w(2))) take(tens + WORD_DIGITS[w(2)], 3);
         }
       }
       let sino = (k) => SINO_DIGITS[w(k)];
-      if(w(0) == 'thập') {
+      if(w(0) === 'thập') {
         take(10, 1);
         if(sino(1)) take(10 + sino(1), 2);
       }
       if(sino(0)) {
         take(sino(0), 1);
-        if(w(1) == 'thập') {
+        if(w(1) === 'thập') {
           take(sino(0) * 10, 2);
           if(sino(2)) take(sino(0) * 10 + sino(2), 3);
         }
@@ -1269,7 +1269,7 @@
           let m = /^\d+(?:\.\d+)?/.exec(line.slice(pos));
           let [major, minor] = m[0].split('.');
           // `0.05` is a fraction (a countdown, a price), not chapter 5 of a book 0
-          if(minor != null && Number(major) == 0) { add('x', pos + m[0].length); continue; }
+          if(minor != null && Number(major) === 0) { add('x', pos + m[0].length); continue; }
           // `3.40` is chapter 40 of book 3
           add('N', pos + m[0].length, { value: Number(minor ?? major), book: minor == null ? null : Number(major), digits: true });
           continue;
@@ -1291,7 +1291,7 @@
           // the end of the last word it read
           let end = pos;
           for(let k = 0; k < number.length; k++) end += (k ? 1 : 0) + words[k].length;
-          add('N', end, { value: number.value, sino: words[0] in SINO_DIGITS || words[0] == 'thập' });
+          add('N', end, { value: number.value, sino: words[0] in SINO_DIGITS || words[0] === 'thập' });
           continue;
         }
         let roman = readRoman(word);
@@ -1299,16 +1299,16 @@
         let end = pos + word.length;
         if(roman != null && word.length <= 7) add('N', end, { value: roman, roman: true });
         else if(lowered in CHAPTER_WORDS) add('c', end, { word: CHAPTER_WORDS[lowered] });
-        else if((lowered == 'phiên' || lowered == 'ngoại') && /^(phiên ngoại|ngoại truyện)/.test(lower.slice(pos))) {
+        else if((lowered === 'phiên' || lowered === 'ngoại') && /^(phiên ngoại|ngoại truyện)/.test(lower.slice(pos))) {
           let both = /^(phiên ngoại|ngoại truyện)/.exec(lower.slice(pos))[0];
           add('p', pos + both.length, { word: both[0].toUpperCase() + both.slice(1) });
         }
-        else if(lowered == 'giai' && lower.startsWith('giai đoạn', pos)) add('b', pos + 'giai đoạn'.length, { word: 'Giai đoạn' });
+        else if(lowered === 'giai' && lower.startsWith('giai đoạn', pos)) add('b', pos + 'giai đoạn'.length, { word: 'Giai đoạn' });
         else if(lowered in BOOK_WORDS) add('b', end, { word: BOOK_WORDS[lowered] });
-        else if(lowered == 'thứ' || lowered == 'đệ') add('t', end);
-        else if(lowered == 'tiết') add('f', end);
+        else if(lowered === 'thứ' || lowered === 'đệ') add('t', end);
+        else if(lowered === 'tiết') add('f', end);
         else if(lowered in HALF_WORDS) add('h', end, { value: HALF_WORDS[lowered], word: lowered });
-        else if(lowered == 'kết' || lowered == 'cuối') {
+        else if(lowered === 'kết' || lowered === 'cuối') {
           // `Chương kết` ends the book; `Kết quả là` and `Cuối cùng` are only sentences
           let after = /^\s*(\S)/.exec(line.slice(end));
           let lone = !after || /[^\p{L}\p{N}]/u.test(after[1]);
@@ -1364,19 +1364,19 @@
       // Quyển thứ hai | Bộ 2 | Thứ 4 cuốn
       { kind: 'book', base: 6, re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}` },
       // Kỳ Bạch Tuyết phiên ngoại
-      { kind: 'extrahead', base: 5, re: `^[LS]*x{1,8}(?<pm>p)$` },
+      { kind: 'extrahead', base: 5, re: '^[LS]*x{1,8}(?<pm>p)$' },
       // Tiết thứ hai | Thứ 1 tiết
-      { kind: 'half', base: 5, re: `^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)` },
+      { kind: 'half', base: 5, re: '^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)' },
       // Nhất, trong sương mù đường về: a Sino-Vietnamese ordinal and a comma
-      { kind: 'chap', base: 5, weakTitled: 4.5, sino: true, re: `^(?<cn>N)(?<sep>S)` },
+      { kind: 'chap', base: 5, weakTitled: 4.5, sino: true, re: '^(?<cn>N)(?<sep>S)' },
       // (5) | 【nhất】 | 5. | 22) | 2,
-      { kind: 'chap', base: 5, weakTitled: 3, re: `^L?(?<cn>N)R?` },
+      { kind: 'chap', base: 5, weakTitled: 3, re: '^L?(?<cn>N)R?' },
       // Phòng tắm thiên Chương 1: a few words, then the chapter
-      { kind: 'chap', base: 6, re: `^[LS]*(?<pre>[xc]{1,6})(?<cm>c)(?<cn>N)(?![xNE])` },
+      { kind: 'chap', base: 6, re: '^[LS]*(?<pre>[xc]{1,6})(?<cm>c)(?<cn>N)(?![xNE])' },
       // Kỳ Bạch Tuyết (nhất) | Kiều thê chuyện xưa (nhất) | Quy tắc quái đàm — mới vào học viện (1)
-      { kind: 'chap', base: 4, re: `^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R` },
+      { kind: 'chap', base: 4, re: '^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R' },
       // (hạ)
-      { kind: 'half', base: 5, re: `^L?(?<hm>h)R?$` },
+      { kind: 'half', base: 5, re: '^L?(?<hm>h)R?$' },
     ].map(rule => ({ ...rule, re: new RegExp(rule.re, 'd') }));
 
     // the title a line carries after its heading: no separator left in front, no bracket behind
@@ -1396,7 +1396,7 @@
       let commas = (rest.match(/[,;]/g) || []).length;
       if(rest.length > t.longerThan) cost += t.long;
       if(commas >= t.commas) cost += t.manyCommas;
-      else if(commas == 1 && rest.length > t.oneCommaOver) cost += t.oneComma;
+      else if(commas === 1 && rest.length > t.oneCommaOver) cost += t.oneComma;
       if(rest.length > t.sentenceOver && /[.!?…"”]$/.test(rest)) cost += t.sentence;
       return cost;
     }
@@ -1405,7 +1405,7 @@
       let span = m.indices.groups.pre ?? m.indices.groups.ph;
       if(!span) return null;
       let words = tokens.slice(span[0], span[1]);
-      let dash = m.indices.groups.ph ? words.findLastIndex(t => t.cls == 'S') : -1;
+      let dash = m.indices.groups.ph ? words.findLastIndex(t => t.cls === 'S') : -1;
       let from = words[dash + 1] ?? words[0];
       return cleanTitle([line.slice(from.s, words.at(-1).e), cleanTitle(rest)].filter(Boolean).join(' '));
     }
@@ -1415,15 +1415,15 @@
       let roles = {};
       let number = at('cn') ?? at('cn2');
       let marker = at('cm') ?? at('cm2');
-      if(rule.kind == 'chap') {
-        if(number.cls == 'E') Object.assign(roles, { end: true, endWord: number.word });
+      if(rule.kind === 'chap') {
+        if(number.cls === 'E') Object.assign(roles, { end: true, endWord: number.word });
         else {
           roles.n = number.value;
           if(number.book != null) roles.bookNum = number.book;
         }
         if(marker) {
           roles.chapType = marker.word ?? marker.text;
-          if(marker.cls == 'p' || at('pm0')) {
+          if(marker.cls === 'p' || at('pm0')) {
             roles.extra = true;
             roles.chapType = (at('pm0') ?? marker).word;
           }
@@ -1435,8 +1435,8 @@
         roles.bookNum = bookNumber.value;
         roles.bookType = (at('bm') ?? at('bm2') ?? at('bm3')).word;
       }
-      if(rule.kind == 'extrahead') roles.extra = true;
-      if(rule.kind == 'half') {
+      if(rule.kind === 'extrahead') roles.extra = true;
+      if(rule.kind === 'half') {
         let numbered = at('hn') ?? at('hn2');
         if(numbered) Object.assign(roles, { halfNum: numbered.value, halfType: 'tiết', half: numbered.value });
         else Object.assign(roles, { half: at('hm').value, halfText: at('hm').word });
@@ -1451,14 +1451,14 @@
       if(rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? TUNING.base.decimal : 0) + (number?.digits ? TUNING.base.digits : 0);
       // `3.07` is hardly ever anything but a chapter
       else if(number?.book != null) base += TUNING.base.decimal;
-      if(marker?.cls == 'c' && marker.word == 'Thiên') base += TUNING.base.thien;
+      if(marker?.cls === 'c' && marker.word === 'Thiên') base += TUNING.base.thien;
       if(hasPhrase && whole) base += TUNING.base.phraseAlone;
       // a book heading must stand on its own line to be believed, or be followed by a colon and
       // a short title (`Quyển thứ nhất: Kinh thành phong vân`): `Hai bộ ngực...` is prose
       // (`(quyển thứ nhất: Hoàn!)` ends a volume, it does not open one; a phase is only a heading alone)
       let ending = /(?:^|\s)(?:hoàn|xong|kết thúc)(?:$|[\s.!)])/iu.test(title);
       let bookMax = TUNING.base.bookTitleMax;
-      if(rule.kind == 'book') base += whole || (titled && title.length <= bookMax && !ending) ? TUNING.base.bookAlone : (title.length > bookMax || ending || roles.bookType == 'Giai đoạn' ? TUNING.base.bookProse : 0);
+      if(rule.kind === 'book') base += whole || (titled && title.length <= bookMax && !ending) ? TUNING.base.bookAlone : (title.length > bookMax || ending || roles.bookType === 'Giai đoạn' ? TUNING.base.bookProse : 0);
       // a heading with its marker (`Chương 10: ...`) is still one when the paragraph runs on
       // behind it on the same line; only a bare number is made doubtful by that
       base -= marker ? Math.min(proseCost(title), TUNING.base.markerProseMax) : proseCost(title);
@@ -1472,7 +1472,7 @@
     // digits is told from one in words: sentences begin with `Một` by the hundred and with
     // `192` almost never, and `3.07` is a chapter
     function shapeOf(tokens, length, whole) {
-      let spelled = tokens.slice(0, length).map(t => t.cls != 'N' ? t.cls : t.book != null ? 'D' : t.digits ? '#' : 'N').join('');
+      let spelled = tokens.slice(0, length).map(t => t.cls !== 'N' ? t.cls : t.book != null ? 'D' : t.digits ? '#' : 'N').join('');
       return spelled.replace(/x+/g, 'X') + (whole ? '' : 'T');
     }
 
@@ -1487,7 +1487,7 @@
         let word = alone[1].toLowerCase();
         let value = HALF_WORDS[word] ?? (() => {
           let number = readNumberWords(word.split(' '), 0);
-          return number?.length == word.split(' ').length ? number.value : null;
+          return number?.length === word.split(' ').length ? number.value : null;
         })();
         if(value != null) return { half: value, halfText: word, title: '' };
       }
@@ -1514,8 +1514,8 @@
           return span ? tokens[span[0]] : null;
         };
         // `một hồi` (a while) and `chín thiên` are not chapters: only `chương` follows a number alone
-        if(at('cm2') && at('cm2').word != 'Chương' && !at('tt')) continue;
-        if(rule.sino && (!at('cn').sino || at('sep').text != ',')) continue;
+        if(at('cm2') && at('cm2').word !== 'Chương' && !at('tt')) continue;
+        if(rule.sino && (!at('cn').sino || at('sep').text !== ',')) continue;
         let last = tokens[m[0].length - 1];
         let rest = line.slice(last.e);
         let whole = !/\S/.test(rest);
@@ -1532,14 +1532,14 @@
         // `Thứ 0 chương` sets a piece between two chapters; a bare 0 (a door code, a countdown) is nothing
         if(read.roles.n === 0 && !read.marker) continue;
         if(part) title = part.title;
-        let kind = rule.kind == 'chap' && read.roles.n === 0 ? 'interlude' : rule.kind;
+        let kind = rule.kind === 'chap' && read.roles.n === 0 ? 'interlude' : rule.kind;
         // `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`: the heading of a section, then the one
         // of the part that begins here. The part is the chapter, the section its group
-        let inner = rule.kind == 'chap' && read.roles.n != null
+        let inner = rule.kind === 'chap' && read.roles.n != null
           && (/^(.*?)\s*[|｜]\s*(\S.*)$/u.exec(rest) ?? /^(.*?)\s*[【\[]?\s*(thứ\s+\S+\s+hồi\b.*)$/iu.exec(rest));
         if(inner) {
           let held = readHeading(inner[2].replace(/^[【\[]\s*/, ''), inner[2].replace(/^[【\[]\s*/, '').toLowerCase(), names);
-          if(held && held.kind == 'chap' && held.n != null && !held.outer) {
+          if(held && held.kind === 'chap' && held.n != null && !held.outer) {
             let outer = `${read.marker?.word ?? 'Chương'} ${read.roles.n}`;
             return heading({ ...held, outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(': '), start: tokens[0].s, text: line.slice(tokens[0].s) });
           }
@@ -1583,12 +1583,12 @@
       let lineStart = 0;
       while(lineStart <= text.length) {
         let lineEnd = text.indexOf('\n', lineStart);
-        if(lineEnd == -1) lineEnd = text.length;
+        if(lineEnd === -1) lineEnd = text.length;
         let line = text.slice(lineStart, lineEnd);
         if(/\S/.test(line)) {
           ord++;
           let lower = line.toLowerCase();
-          let node = lower.length == line.length ? readHeading(line, lower, names) : null;
+          let node = lower.length === line.length ? readHeading(line, lower, names) : null;
           if(node) nodes.push(heading({ ...node, index: lineStart + node.start, ord }));
           let opensWithHeading = node && node.base >= TUNING.path.breakMinBase;
           if(!opensWithHeading && line.length < 4000) nodes.push(...inlineHeadings(line, lineStart, ord));
@@ -1635,7 +1635,7 @@
           if(!byNumber.has(n)) byNumber.set(n, []);
           byNumber.get(n).push(i);
         }
-        let key = book + '/' + (extra ? 1 : 0);
+        let key = `${book}/${extra ? 1 : 0}`;
         if(!bestByKey.has(key) || score[i] > score[bestByKey.get(key)]) bestByKey.set(key, i);
       };
       let apart = (i, j) => nodes[i].ord - nodes[j].ord;
@@ -1651,11 +1651,11 @@
             for(let j of byNumber.get(n - d) ?? []) {
               let s = state[j];
               if(s.ended || (node.extra && !s.extra)) continue;
-              if(book != null && s.book != 0 && book != s.book) continue;
-              if(d == 0) {
+              if(book != null && s.book !== 0 && book !== s.book) continue;
+              if(d === 0) {
                 // the next part of the same chapter, or the same heading again
                 if(node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, { ...s, half: node.half });
-                else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half == s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
+                else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
               } else {
                 go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, word: node.bookType ?? s.word, extra: s.extra || !!node.extra, half: node.half ?? null });
               }
@@ -1666,16 +1666,16 @@
             let s = state[j];
             // a bare number straight after `Kỳ Bạch Tuyết phiên ngoại` is the first of its extras
             let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;
-            if(s.extra != !!node.extra && !opensExtra) continue;
-            if(book != null && book != s.book) continue;
-            let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : (n == s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap));
+            if(s.extra !== !!node.extra && !opensExtra) continue;
+            if(book != null && book !== s.book) continue;
+            let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : (n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap));
             go(j, value, { ...s, n: node.span ?? n, half: node.half ?? null });
           }
           // a book that names itself in the heading, or extras, with the numbers starting over
           if(n <= TUNING.path.smallNumber && (book != null || node.extra)) {
             for(let j of bestByKey.values()) {
               let s = state[j];
-              if(s.extra == !!node.extra && (book == null || book == s.book)) continue;
+              if(s.extra === !!node.extra && (book == null || book === s.book)) continue;
               go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, word: node.bookType ?? s.word, kind: s.kind, carry: s.n }));
             }
           }
@@ -1699,7 +1699,7 @@
           for(let j = i - 1; j >= 0 && recent.length < TUNING.path.endLookback; j--) if(score[j] > -Infinity) recent.push(j);
           for(let j of recent) {
             let s = state[j];
-            if(s.ended || s.n == null || s.extra != !!node.extra) continue;
+            if(s.ended || s.n == null || s.extra !== !!node.extra) continue;
             if(apart(i, j) <= TUNING.path.closeLines) go(j, TUNING.reward.repeat + 1, { ...s, ended: true }, true);
             else if(s.n >= TUNING.path.endMin) go(j, TUNING.reward.end, { ...s, n: s.n + 1, ended: true });
           }
@@ -1707,16 +1707,16 @@
         book(i, { go, begin }) {
           let node = nodes[i];
           let b = node.bookNum ?? 0;
-          let extra = node.kind == 'extrahead' || !!node.extra;
+          let extra = node.kind === 'extrahead' || !!node.extra;
           for(let j of bestByKey.values()) {
             let s = state[j];
             // the next book, or one further on when a few were never named; or a book of another
             // kind, which numbers apart from the rest (`Bộ 02` after `Quyển 13`)
-            let next = b > s.book || (b <= 2 && s.book == 0);
-            let ofAnotherKind = !extra && !next && s.word != null && node.bookType != null && s.word != node.bookType;
+            let next = b > s.book || (b <= 2 && s.book === 0);
+            let ofAnotherKind = !extra && !next && s.word != null && node.bookType != null && s.word !== node.bookType;
             let follows = extra ? !s.extra : (!s.extra && (next || ofAnotherKind));
             let skipped = extra || ofAnotherKind ? 0 : Math.max(0, b - s.book - 1);
-            let kind = ofAnotherKind || (!extra && node.bookType != null && node.bookType == s.kind) ? node.bookType : null;
+            let kind = ofAnotherKind || (!extra && node.bookType != null && node.bookType === s.kind) ? node.bookType : null;
             if(follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, { book: extra ? s.book : b, kind, extra, carry: s.n ?? 0, n: null }));
           }
           begin(TUNING.path.startAlone, reached(node, { book: extra ? 0 : b, extra, n: null }), books.length > 0);
@@ -1729,7 +1729,7 @@
         half(i, { go }) {
           let node = nodes[i];
           for(let j = i - 1; j >= 0; j--) {
-            if(score[j] == -Infinity) continue;
+            if(score[j] === -Infinity) continue;
             let s = state[j];
             if(s.n == null || s.ended) continue;
             if(s.half == null || node.half > s.half) go(j, TUNING.reward.half, { ...s, half: node.half });
@@ -1748,18 +1748,18 @@
         };
         // a path starting here; unless `onlyIfAlone`, it competes with the ways into the node
         let begin = (value, as, onlyIfAlone = false) => {
-          if(onlyIfAlone && best.value != -Infinity) return;
+          if(onlyIfAlone && best.value !== -Infinity) return;
           if(!(best.value > value)) best = { value, from: -1, joined: false, as };
         };
-        let way = node.kind == 'chap' ? (node.end ? 'end' : node.n != null ? 'chap' : null)
-          : node.kind == 'extrahead' ? 'book' : node.kind;
+        let way = node.kind === 'chap' ? (node.end ? 'end' : node.n != null ? 'chap' : null)
+          : node.kind === 'extrahead' ? 'book' : node.kind;
         into[way]?.(i, { go, begin });
-        if(best.value == -Infinity) continue;
+        if(best.value === -Infinity) continue;
         score[i] = best.value + prior;
         prev[i] = best.from;
         joined[i] = best.joined;
         state[i] = best.as;
-        if(node.kind == 'book' || node.kind == 'extrahead') books.push(i);
+        if(node.kind === 'book' || node.kind === 'extrahead') books.push(i);
         else remember(i);
         if(top < 0 || score[i] > score[top]) top = i;
       }
@@ -1773,7 +1773,7 @@
     // run to dozens of lines: a list in the story (`Hồi 1: ...`, `Hồi 2: ...`) passes
     // for a short chain the path is glad to take. The nodes of such a section are left out
     function tinySections(nodes, path) {
-      let chapters = path.filter(({ i }) => nodes[i].kind == 'chap');
+      let chapters = path.filter(({ i }) => nodes[i].kind === 'chap');
       let lengths = chapters.slice(1).map(({ i }, k) => nodes[i].ord - nodes[chapters[k].i].ord).sort((a, z) => a - z);
       let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;
       let tiny = new Set();
@@ -1789,7 +1789,8 @@
     // how far each shape is trusted, by how much of it landed on the path: -3 for one
     // that never does, +3 for one that always does
     function shapeCredit(nodes, path) {
-      let seen = {}, taken = {};
+      let seen = {};
+      let taken = {};
       for(let node of nodes) seen[node.shape] = (seen[node.shape] ?? 0) + 1;
       for(let { i } of path) taken[nodes[i].shape] = (taken[nodes[i].shape] ?? 0) + 1;
       let credit = {};
@@ -1801,10 +1802,10 @@
     // say for itself) are taken back where they fill what is missing: chapter 6 between 5
     // and 7, chapter 1 and 2 in front of a book's first heading, and nowhere else
     function fillGaps(nodes, path, credit) {
-      let isChap = (entry) => nodes[entry.i].kind == 'chap' && entry.state.n != null;
+      let isChap = (entry) => nodes[entry.i].kind === 'chap' && entry.state.n != null;
       let weak = [];
       nodes.forEach((node, i) => {
-        if(node.kind == 'chap' && node.n != null && node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold < 0) weak.push(i);
+        if(node.kind === 'chap' && node.n != null && node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold < 0) weak.push(i);
       });
       let filled = [];
       let fill = (from, to, first, last, state) => {
@@ -1815,7 +1816,7 @@
           for(let i of weak) {
             if(i <= at || i >= to) continue;
             let node = nodes[i];
-            if(node.n != e || (node.extra && !state.extra)) continue;
+            if(node.n !== e || (node.extra && !state.extra)) continue;
             if(!found || node.base > nodes[found].base) found = i;
           }
           if(found != null) {
@@ -1828,10 +1829,10 @@
       let boundary = true;
       for(let entry of path) {
         let node = nodes[entry.i];
-        if(node.kind == 'book' || node.kind == 'extrahead') { boundary = true; continue; }
+        if(node.kind === 'book' || node.kind === 'extrahead') { boundary = true; continue; }
         if(!isChap(entry) || entry.joined) { continue; }
         let n = entry.state.n;
-        if(previous && !boundary && entry.state.book == previous.state.book && entry.state.extra == previous.state.extra) {
+        if(previous && !boundary && entry.state.book === previous.state.book && entry.state.extra === previous.state.extra) {
           if(n > previous.state.n + 1) fill(previous.i, entry.i, previous.state.n + 1, n - 1, previous.state);
         } else if(n > 1 && n <= TUNING.fill.firstMax && !node.extra) {
           fill(previous?.i ?? -1, entry.i, 1, n - 1, { ...entry.state, n: 0 });
@@ -1851,7 +1852,7 @@
       titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);
       // a paragraph that runs on behind the heading is not part of its title
       let title = titles[0];
-      return title?.length > TUNING.drafts.titleMax ? title.slice(0, TUNING.drafts.titleMax).replace(/\s+\S*$/, '') + '…' : title;
+      return title?.length > TUNING.drafts.titleMax ? `${title.slice(0, TUNING.drafts.titleMax).replace(/\s+\S*$/, '')}…` : title;
     }
 
     function buildChapters(nodes, path) {
@@ -1859,7 +1860,7 @@
       let opening;   // where the book heading in front of the next chapter begins
       for(let { i, joined, state } of path) {
         let node = nodes[i];
-        if(node.kind == 'book' || node.kind == 'extrahead') {
+        if(node.kind === 'book' || node.kind === 'extrahead') {
           opening ??= node.index;
           continue;
         }
@@ -1874,7 +1875,7 @@
       // a book is `Quyển` or `Bộ` throughout, whichever the headings say most often
       let types = {};
       for(let { i } of path) {
-        let word = nodes[i].kind == 'book' ? nodes[i].bookType : null;
+        let word = nodes[i].kind === 'book' ? nodes[i].bookType : null;
         if(word) types[word] = (types[word] ?? 0) + 1;
       }
       let bookWord = Object.keys(types).sort((a, z) => types[z] - types[a])[0] ?? 'Quyển';
@@ -1884,20 +1885,20 @@
         let first = members[0];
         let lead = members.reduce((best, m) => m.base > best.base ? m : best, first);
         let end = members.find(m => m.end);
-        let numbered = members.find(m => m.n != null && m.kind != 'interlude');
-        let type = (members.find(m => m.chapType) ?? {}).chapType ?? (state.extra ? 'Phiên ngoại' : undefined);
+        let numbered = members.find(m => m.n != null && m.kind !== 'interlude');
+        let type = members.find(m => m.chapType)?.chapType ?? (state.extra ? 'Phiên ngoại' : undefined);
         let heading = { type, title: pickTitle(members), text: lead.text };
         if(end) heading.number = end.endWord;
-        else if(first.kind == 'half') {
+        else if(first.kind === 'half') {
           heading.number = String(state.n);
           heading.part = first.halfNum != null ? { text: `${first.halfType} ${first.halfNum}`, leading: true } : { text: first.halfText };
         }
         else if(numbered) {
           heading.number = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);
-          if(numbered.half != null && numbered.kind == 'chap') heading.part = { text: numbered.halfText };
+          if(numbered.half != null && numbered.kind === 'chap') heading.part = { text: numbered.halfText };
         }
         // a part whose heading leaves out its section stays in the one before it
-        let inherited = section && !lead.outer && state.book == 0 && type == section.type ? section.name : undefined;
+        let inherited = section && !lead.outer && state.book === 0 && type === section.type ? section.name : undefined;
         if(lead.outer) section = { name: lead.outer, type };
         else if(!inherited) section = undefined;
         let group = lead.outer ?? inherited ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : undefined);
@@ -1907,7 +1908,7 @@
       let named = drafts.findIndex(d => d.group);
       if(named > 0) {
         let [, type, number] = /^(.*) (\d+)$/.exec(drafts[named].group) ?? [];
-        if(Number(number) == 2) {
+        if(Number(number) === 2) {
           for(let d of drafts.slice(0, named)) d.group = `${type} 1`;
         }
       }
@@ -1933,7 +1934,7 @@
       if(!key || count < TUNING.drafts.seriesMin) return [];
       let drafts = [];
       for(let { key: lineKey, index, line, length } of lines) {
-        if(lineKey != key) continue;
+        if(lineKey !== key) continue;
         // what follows the repeated words, less the number that sometimes closes it
         let title = cleanTitle(line.slice(length)).replace(/\s*\(\s*\S{1,12}\s*\)\s*$/, '');
         drafts.push({ offset: index, heading: { number: String(drafts.length + 1), title, text: line } });
@@ -1943,7 +1944,7 @@
 
     // a book with no headings to find is read in pages of this many paragraphs
     function pagesOf(text, paragraphsPerPage = TUNING.drafts.pageParagraphs) {
-      let pattern = '(.*\n){1,' + paragraphsPerPage + '}';
+      let pattern = `(.*\n){1,${paragraphsPerPage}}`;
       return [...text.matchAll(new RegExp(pattern, 'gimu'))].map(m => ({ offset: m.index, heading: { text: m[0] } }));
     }
 
@@ -1972,15 +1973,15 @@
       return [{ offset: 0, heading: { title: filename, text: filename } }, ...drafts];
     }
 
-    function slug(s) {
-      s = latinize(s);
-      s = s.replace(/\W+/g, '-');
-      s = s.replace(/^-+|-+$/g, '');
-      s = s.toLowerCase();
-      return s;
+    function slug(text) {
+      return latinize(text)
+        .replace(/\W+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase();
     }
 
-    function latinize(s) {
+    function latinize(source) {
+      let s = source;
       s = s.replace(/[ÁĂẮẶẰẲẴǍÂẤẬẦẨẪÄǞȦǠẠȀÀẢȂĀĄÅǺḀȺÃⱯᴀ]/g, 'A');
       s = s.replace(/[Ꜳ]/g, 'AA');
       s = s.replace(/[ÆǼǢᴁ]/g, 'AE');
@@ -2112,7 +2113,7 @@
 
     class HashRouter extends EventTarget {
       parse(hash) {
-        return [...(new URLSearchParams(hash)).entries()].reduce((route, [k, v]) => (route[k] = v, route), {});
+        return Object.fromEntries(new URLSearchParams(hash));
       }
       get(key) {
         return new URLSearchParams(location.hash.slice(1)).get(key);
@@ -2122,12 +2123,14 @@
       }
       route(route) {
         let hash = new URLSearchParams(Object.entries(route).filter(([k, v]) => v !== '' && v != null)).toString();
-        if (hash) hash = '#' + hash;
+        if (hash) hash = `#${hash}`;
         return hash;
       }
       push(to) {
         let from = this.current();
         let allKeys = Object.keys({ ...from, ...to });
+        // the url holds strings and the page numbers, and an absent value is null or undefined
+        // biome-ignore lint/suspicious/noDoubleEquals: loose on purpose, '12' is 12 here
         let changed = allKeys.some(key => from[key] != to[key]);
         if (changed) {
           let url = new URL(location.href);
@@ -2138,6 +2141,8 @@
       replace(to) {
         let from = this.current();
         let allKeys = Object.keys({ ...from, ...to });
+        // the url holds strings and the page numbers, and an absent value is null or undefined
+        // biome-ignore lint/suspicious/noDoubleEquals: loose on purpose, '12' is 12 here
         let changed = allKeys.some(key => from[key] != to[key]);
         if (changed) {
           let url = new URL(location.href);
@@ -2308,7 +2313,7 @@
 
         let ranges = [];
         let q = state.commandPalette.q;
-        document.querySelectorAll('#command-palette a').forEach(el => {
+        for (let el of document.querySelectorAll('#command-palette a')) {
           let text = el.firstChild;
           let match = latinize(text.textContent).toLowerCase();
           if(match.includes(q)) {
@@ -2319,7 +2324,7 @@
             range.setEnd(text, end);
             ranges.push(range);
           }
-        });
+        }
         let hl = new Highlight(...ranges);
         CSS.highlights.set('match', hl);
       }
@@ -2348,7 +2353,7 @@
             case 'ctrl':
             case 'shift':
             case 'alt':
-              opts[k + 'Key'] = true;
+              opts[`${k}Key`] = true;
               break;
             case 'cmd':
             case 'win':
@@ -2360,7 +2365,7 @@
           }
           return opts;
         }, {});
-        if(event.key.toLowerCase() == opts.key.toLowerCase() && ['metaKey', 'ctrlKey', 'shiftKey', 'altKey'].every(f => Boolean(event[f]) == Boolean(opts[f]))) {
+        if(event.key.toLowerCase() === opts.key.toLowerCase() && ['metaKey', 'ctrlKey', 'shiftKey', 'altKey'].every(f => Boolean(event[f]) === Boolean(opts[f]))) {
           event.preventDefault();
           dispatch(action);
         }
@@ -2384,7 +2389,7 @@
     // a setting css can select on goes on the element. A list or a shape is for the
     // app to read and only reads as junk in an attribute, so it stays out of one
     let applyDataset = (key, value) => {
-      if (value != null && typeof value == 'object') return;
+      if (value != null && typeof value === 'object') return;
       document.documentElement.dataset[key] = (value ?? '');
     };
     let ApplySettings = (state, settings) => [
@@ -2528,7 +2533,7 @@
       }
       lines.push({ text: chapter.content.slice(at), offset: chapter.offset + at });
       // a correction that split or joined a line would shift every line after it
-      if(fixed.length == lines.length) lines.forEach((line, i) => line.text = fixed[i]);
+      if(fixed.length === lines.length) for(let [i, line] of lines.entries()) line.text = fixed[i];
       return lines;
     };
     // where the reader is: the topmost paragraph the page has not scrolled past. They
@@ -2537,7 +2542,8 @@
     let offsetAtTop = () => {
       let paragraphs = document.querySelectorAll('article [data-offset]');
       if(!paragraphs.length) return;
-      let low = 0, high = paragraphs.length - 1;
+      let low = 0;
+      let high = paragraphs.length - 1;
       while(low < high) {
         let middle = (low + high) >> 1;
         if(paragraphs[middle].getBoundingClientRect().bottom > 0) high = middle;
@@ -2746,8 +2752,8 @@
     // comes back as `Bà xã`, mid-sentence as `bà xã`, and a shout stays a shout
     let followCase = (src, dst) => {
       let _case = getCase(src.trim().split(/\s+/)[0]);
-      if(_case == 'upper') return dst.toUpperCase();
-      if(_case == 'title') return dst[0].toUpperCase() + dst.slice(1).toLowerCase();
+      if(_case === 'upper') return dst.toUpperCase();
+      if(_case === 'title') return dst[0].toUpperCase() + dst.slice(1).toLowerCase();
       return dst.toLowerCase();
     };
     // the name a `from -> to` entry ends up written as in the text, which is what
@@ -2760,7 +2766,7 @@
       } else {
         to = useCase(from, to);
       }
-      if(typeof to == 'function') to = to(from);
+      if(typeof to === 'function') to = to(from);
       return to && mapNameWords(to);
     };
     memoize(function correctNames(content, names) {
@@ -2784,7 +2790,7 @@
       for(let { text, relationship } of entries) {
         if(relationship || text.match(/->|→/)) continue;
         let words = text.split(/\s/);
-        if(words.length == 3 || words.length == 4) entries.push({ text: words.at(-2) + ' ' + words.at(-1) });
+        if(words.length === 3 || words.length === 4) entries.push({ text: words.at(-2) + ' ' + words.at(-1) });
       }
       for(let { text, relationship } of entries) {
         text = text.trim();
@@ -2802,7 +2808,7 @@
         if(from) {
           let fromRegex = new RegExp(`(?<=^|[^\\p{L}])${nameWordPattern(from)}(?=[^\\p{L}]|$)`, 'gui');
           content = content.replaceAll(fromRegex, name => (
-            mapNameWords(typeof to == 'function' ? to(name) : to)
+            mapNameWords(typeof to === 'function' ? to(name) : to)
           ));
         }
       }
@@ -2892,7 +2898,7 @@
     };
     let shortNameId = (nameId) => {
       let words = nameId.trim().split(/\s+/);
-      if(words.length == 3 || words.length == 4) return words.slice(-2).join(' ');
+      if(words.length === 3 || words.length === 4) return words.slice(-2).join(' ');
     };
     // every name the editor already knows about, one id per entry
     let nameIdsOf = (names) => (names || '').split(/[\n,]/)
@@ -2915,7 +2921,7 @@
         let hasArrow = /->|→/.test(entry);
         let to = editedName(entry);
         // a lowercase entry is a wording fix, not a name to highlight
-        if(!to || getCase(to) == 'lower') continue;
+        if(!to || getCase(to) === 'lower') continue;
         lineNames.push(to);
         // add short name automatically
         let shortName = hasArrow ? undefined : shortNameId(to);
@@ -3133,7 +3139,7 @@
             for(let match of el.textContent.matchAll(nameRegex)) {
               collect(index + 1, match[0]);
               let words = match[0].split(/\s/);
-              if(words.length == 3 || words.length == 4) collect(index + 1, words.at(-2) + ' ' + words.at(-1));
+              if(words.length === 3 || words.length === 4) collect(index + 1, words.at(-2) + ' ' + words.at(-1));
             }
           });
         });
@@ -3382,7 +3388,7 @@
         addEventListener('dragover', event => { event.preventDefault(); });
         addEventListener('drop', event => {
           event.preventDefault();
-          let files = [...event.dataTransfer.files].filter(file => file.type == 'text/plain');
+          let files = [...event.dataTransfer.files].filter(file => file.type === 'text/plain');
           dispatch(StoreFiles, { files });
         });
       }
@@ -3638,7 +3644,7 @@
         return (action, payload) => {
           if (!action) return;
 
-          if (typeof action == 'function' && action.name.match(/^[A-Z]/)) {
+          if (typeof action === 'function' && action.name.match(/^[A-Z]/)) {
             let log = [action.name];
             if (payload !== undefined) log.push(payload);
             //console.warn(...log);
@@ -3748,7 +3754,7 @@
               h('div', { class: 'table' }, [
                 h('a', {
                   class: 'th text-left',
-                  'data-sort': settings.sort.field == 'name' && settings.sort.direction,
+                  'data-sort': settings.sort.field === 'name' && settings.sort.direction,
                   href: '#',
                   onclick: (_, event) => {
                     event.preventDefault();
@@ -3759,7 +3765,7 @@
                 }, h('span', {}, text('File'))),
                 h('a', {
                   class: 'th text-right',
-                  'data-sort': settings.sort.field == 'size' && settings.sort.direction,
+                  'data-sort': settings.sort.field === 'size' && settings.sort.direction,
                   href: '#',
                   onclick: (_, event) => {
                     event.preventDefault();
@@ -3770,7 +3776,7 @@
                 }, h('span', {}, text('Size'))),
                 h('a', {
                   class: 'th text-right',
-                  'data-sort': settings.sort.field == 'chapterCount' && settings.sort.direction,
+                  'data-sort': settings.sort.field === 'chapterCount' && settings.sort.direction,
                   href: '#',
                   onclick: (_, event) => {
                     event.preventDefault();
@@ -3781,7 +3787,7 @@
                 }, h('span', {}, text('Chapters'))),
                 h('a', {
                   class: 'th text-right',
-                  'data-sort': settings.sort.field == 'updatedAt' && settings.sort.direction,
+                  'data-sort': settings.sort.field === 'updatedAt' && settings.sort.direction,
                   href: '#',
                   onclick: (_, event) => {
                     event.preventDefault();
@@ -3795,18 +3801,18 @@
                   let { field, direction } = settings.sort;
                   let A = Book(a), Z = Book(z);
                   let result;
-                  if (field == 'name') {
+                  if (field === 'name') {
                     result = A.name.localeCompare(Z.name, 'vi-VN', { sensitivity: 'accent' });
-                  } else if (field == 'size') {
+                  } else if (field === 'size') {
                     result = a[field] - z[field];
-                  } else if (field == 'updatedAt') {
+                  } else if (field === 'updatedAt') {
                     a = new Date(progress[A.id]?.[field] || 0);
                     z = new Date(progress[Z.id]?.[field] || 0);
                     result = a - z;
-                  } else if (field == 'chapterCount') {
+                  } else if (field === 'chapterCount') {
                     result = (progress[A.id]?.[field] || 1) - (progress[Z.id]?.[field] || 1);
                   }
-                  if ((direction == 'desc') && (result != 0)) result = -result;
+                  if ((direction === 'desc') && (result !== 0)) result = -result;
                   return result;
                 }).flatMap(file => {
                   let book = Book(file);
@@ -3973,10 +3979,10 @@
                   h('button', {
                     class: { selected: fontPicker.target == target },
                     onclick: [SetFontTarget, target],
-                    title: target == 'reading'
+                    title: target === 'reading'
                       ? 'The font the paragraphs are set in'
                       : 'The font everything else is set in',
-                  }, text(target == 'reading' ? 'Reading' : 'Interface'))
+                  }, text(target === 'reading' ? 'Reading' : 'Interface'))
                 ))
               ]),
               h('input', {
@@ -4049,9 +4055,9 @@
                   value: namesEditor.names,
                   oninput: (_, event) => [SetNames, event.target.value],
                   onkeydown: (_, event) => {
-                    if (event.key == 'Escape') {
+                    if (event.key === 'Escape') {
                       return [ToggleNamesEditor, { open: false }];
-                    } else if (event.key == 'Enter' && event.metaKey) {
+                    } else if (event.key === 'Enter' && event.metaKey) {
                       return [MultipleActions, [
                         [ToggleNamesEditor, { open: false }],
                         [SaveNames, { bookId: book.id, names: namesEditor.names }],
@@ -4240,7 +4246,7 @@
 
     function debug(...args) {
       // return;
-      if (args.length == 1) {
+      if (args.length === 1) {
         console.table(Object.values(args[0])[0]);
       } else {
         console.info(...args);
@@ -4293,14 +4299,14 @@
     }
 
     function toCase(word, _case) {
-      if (_case == 'upper') return word.toUpperCase();
-      if (_case == 'lower') return word.toLowerCase();
-      if (_case == 'title') return titleCase(word);
+      if (_case === 'upper') return word.toUpperCase();
+      if (_case === 'lower') return word.toLowerCase();
+      if (_case === 'title') return titleCase(word);
       return word;
     }
 
     memoize(function useCase(src, dst) {
-      if (getCase(src) == 'lower' && getCase(dst) == 'lower') return titleCase(dst);
+      if (getCase(src) === 'lower' && getCase(dst) === 'lower') return titleCase(dst);
       let srcWords = src.split(' ');
       let dstWords = dst.split(' ');
       if (srcWords.length == dstWords.length) {

@@ -2,7 +2,10 @@
   "organizeImports": { "enabled": true },
   "linter": {
     "enabled": true,
-    "rules": { "recommended": true }
+    "rules": {
+      "recommended": true,
+      "style": { "useConst": "off", "useNumberNamespace": "off" }
+    }
   },
   "formatter": {
     "indentWidth": 2

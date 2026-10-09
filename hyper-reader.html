@@ -3326,6 +3326,7 @@
           let both = /^(phiên ngoại|ngoại truyện)/.exec(lower.slice(pos))[0];
           add('p', pos + both.length, { word: both[0].toUpperCase() + both.slice(1) });
         }
+        else if(lowered == 'giai' && lower.startsWith('giai đoạn', pos)) add('b', pos + 'giai đoạn'.length, { word: 'Giai đoạn' });
         else if(lowered in BOOK_WORDS) add('b', end, { word: BOOK_WORDS[lowered] });
         else if(lowered == 'thứ' || lowered == 'đệ') add('t', end);
         else if(lowered == 'tiết') add('f', end);
@@ -3350,6 +3351,8 @@
       { kind: 'chap', base: 9, re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))` },
       // Phiên ngoại: 【1】 title
       { kind: 'chap', base: 9, re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?` },
+      // Thứ 7-10 chương: several chapters under one heading
+      { kind: 'chap', base: 9, re: `^${DECOR}(?<tt>t)?(?<cn>N)S(?<cn3>N)(?<cm2>c)` },
       // 【NAME】9 | NAME #3 | NAME (5) | 《NAME》2
       { kind: 'chap', base: 7, re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?` },
       // Quyển thứ ba 3: the chapter's number follows its book's
@@ -3423,6 +3426,7 @@
           }
         }
       }
+      if(at('cn3')) roles.span = at('cn3').value;
       let bookNumber = at('bn') ?? at('bn2') ?? at('bn3');
       if(bookNumber) {
         roles.bookNum = bookNumber.value;
@@ -3438,7 +3442,7 @@
     }
 
     // how much the heading speaks for itself, 0-10, before the book's own style weighs in
-    function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase }) {
+    function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase, titled }) {
       let base = rule.base;
       // a bare number with a title after it is the weakest shape of all; in digits less so
       if(rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? 2 : 0) + (number?.digits ? 1.5 : 0);
@@ -3446,8 +3450,11 @@
       else if(number?.book != null) base += 2;
       if(marker?.cls == 'c' && marker.word == 'Thiên') base -= 4;
       if(hasPhrase && whole) base += 1;
-      // a book heading must stand on its own line to be believed: `Hai bộ ngực...` is prose
-      if(rule.kind == 'book') base += whole ? 3 : (title.length > 40 ? -10 : 0);
+      // a book heading must stand on its own line to be believed, or be followed by a colon and
+      // a short title (`Quyển thứ nhất: Kinh thành phong vân`): `Hai bộ ngực...` is prose
+      // (`(quyển thứ nhất: Hoàn!)` ends a volume, it does not open one; a phase is only a heading alone)
+      let ending = /(?:^|\s)(?:hoàn|xong|kết thúc)(?:$|[\s.!)])/iu.test(title);
+      if(rule.kind == 'book') base += whole || (titled && title.length <= 40 && !ending) ? 3 : (title.length > 40 || ending || roles.bookType == 'Giai đoạn' ? -10 : 0);
       // a heading with its marker (`Chương 10: ...`) is still one when the paragraph runs on
       // behind it on the same line; only a bare number is made doubtful by that
       base -= marker ? Math.min(proseCost(title), 2) : proseCost(title);
@@ -3517,7 +3524,7 @@
         }
         let part = read.roles.n != null && partOf(title);
         let hasRoman = tokens.some(t => t.roman);
-        let base = baseOf(rule, read, { title, rest, whole, hasRoman, hasPhrase: !!at('ph') });
+        let base = baseOf(rule, read, { title, rest, whole, hasRoman, hasPhrase: !!at('ph'), titled: /^[:：]$/.test(last.text) });
         // `Thứ 0 chương` sets a piece between two chapters; a bare 0 (a door code, a countdown) is nothing
         if(read.roles.n === 0 && !read.marker) continue;
         if(part) title = part.title;
@@ -3601,7 +3608,7 @@
     // (phiên ngoại), the chapter number, the half of it (thượng / hạ), whether the book has
     // ended, and the number the book before stopped at (a book may go on from it)
     const reached = (node, fields = {}) => ({
-      book: node.bookNum ?? 0, extra: !!node.extra, n: node.n ?? null, half: null, ended: false, carry: 0, ...fields,
+      book: node.bookNum ?? 0, extra: !!node.extra, n: node.span ?? node.n ?? null, half: null, ended: false, carry: 0, ...fields,
     });
 
     // `credit` is how far each shape is trusted: shape -> -3..3. With `strongOnly` the nodes
@@ -3645,7 +3652,7 @@
                 if(node.half != null && (s.half == null || node.half > s.half)) go(j, REWARD.next, { ...s, half: node.half });
                 else if(apart(i, j) <= CLOSE && (s.half == null || node.half == s.half)) go(j, REWARD.repeat, { ...s }, true);
               } else {
-                go(j, REWARD.next - REWARD.gap * (d - 1), { ...s, n, book: book ?? s.book, extra: s.extra || !!node.extra, half: node.half ?? null });
+                go(j, REWARD.next - REWARD.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, extra: s.extra || !!node.extra, half: node.half ?? null });
               }
             }
           }
@@ -3657,7 +3664,7 @@
             if(s.extra != !!node.extra && !opensExtra) continue;
             if(book != null && book != s.book) continue;
             let value = n <= 3 ? REWARD.boundary : (n == s.carry + 1 ? REWARD.carryOn : REWARD.boundary - 4 - Math.min(n, 10));
-            go(j, value, { ...s, n, half: node.half ?? null });
+            go(j, value, { ...s, n: node.span ?? n, half: node.half ?? null });
           }
           // a book that names itself in the heading, or extras, with the numbers starting over
           if(n <= 3 && (book != null || node.extra)) {
@@ -3674,7 +3681,7 @@
             // the numbers start over inside a book that has been told apart from the others:
             // the next one began, whether or not it was named
             let unnamed = book == null && !node.extra && n <= 2 && s.book > 0 && s.n >= 6;
-            go(top, REWARD.restart, { ...s, n, book: book ?? (unnamed ? s.book + 1 : s.book), extra: !!node.extra, half: node.half ?? null, carry: s.n });
+            go(top, REWARD.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), extra: !!node.extra, half: node.half ?? null, carry: s.n });
           }
           let start = n <= 3 ? 3 : -6;
           if(start > 0) begin(start, reached(node));
@@ -3882,7 +3889,7 @@
           else Object.assign(_, { halfText: first.halfText });
         }
         else if(numbered) {
-          _.chapNum = String(numbered.n);
+          _.chapNum = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);
           if(numbered.half != null && numbered.kind == 'chap') _.halfText = numbered.halfText;
         }
         let chapter = Chapter(_, { chapters, filename, text });

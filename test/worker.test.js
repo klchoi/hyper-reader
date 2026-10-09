@@ -37,22 +37,25 @@ function page({ failing = false, missing = false } = {}) {
     terminate() { this.thread?.terminate(); }
   }
   let document = { getElementById: () => ({ textContent: parserScript() }) };
-  let console = { log() {}, info() {}, group() {}, groupEnd() {} };
+  let said = [];
+  let console = { log() {}, info: (...message) => said.push(message.join(' ')), group() {}, groupEnd() {} };
   let code = `${parserScript()}\n${between('// @book:begin', '// @book:end')}\n${between('// @worker:begin', '// @worker:end')}\nreturn { readBook, stop: () => parserWorker?.terminate() };`;
   // `Worker` left out is a browser that has none
-  return new Function('document', 'Worker', 'URL', 'Blob', 'console', code)(document, missing ? undefined : Worker, URL, Blob, console);
+  let loaded = new Function('document', 'Worker', 'URL', 'Blob', 'console', code)(document, missing ? undefined : Worker, URL, Blob, console);
+  return { ...loaded, said };
 }
 
 describe('reading a book in a worker', () => {
   let stop;
   afterEach(() => stop?.());
   it('gives the chapters the page would have made', async () => {
-    let { readBook, stop: s } = page();
+    let { readBook, stop: s, said } = page();
     stop = s;
     let book = await readBook(file, text);
     assert.deepEqual(book.chapters.map(c => c.title), ['Sách thử', 'Chương 1: Tiêu đề 1', 'Chương 2: Tiêu đề 2', 'Chương 3: Tiêu đề 3']);
     assert.equal(book.name, 'Sách thử');
     assert.equal(book.id, 'sach-thu');
+    assert.deepEqual(said, ['Chapters of "Sách thử": read in a worker']);
   });
   it('reads several books at once, each to its own result', async () => {
     let { readBook, stop: s } = page();
@@ -62,15 +65,17 @@ describe('reading a book in a worker', () => {
     assert.ok(b.chapters[1].title.includes('Tên'));
   });
   it('reads the book itself where a worker cannot be made', async () => {
-    let { readBook, stop: s } = page({ missing: true });
+    let { readBook, stop: s, said } = page({ missing: true });
     stop = s;
     let book = await readBook(file, text);
     assert.equal(book.chapters.length, 4);
+    assert.ok(said.some(m => m.includes('read in the page')));
   });
   it('reads the book itself when the worker fails', async () => {
-    let { readBook, stop: s } = page({ failing: true });
+    let { readBook, stop: s, said } = page({ failing: true });
     stop = s;
     let book = await readBook(file, text);
     assert.equal(book.chapters.length, 4);
+    assert.ok(said.some(m => m.includes('the worker could not run')));
   });
 });

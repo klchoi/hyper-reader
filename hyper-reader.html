@@ -4135,7 +4135,9 @@
     let reading = new Map();   // id -> { name, text, resolve }
     let readings = 0;
 
-    function readInPage(name, text) {
+    // which way a book was read is said in the console, so a page opened from a file can tell
+    function readInPage(name, text, why) {
+      console.info(`Chapters of "${name}": read in the page (${why})`);
       return extractChapters(name, normalizeFileContent(text), { name });
     }
 
@@ -4151,14 +4153,17 @@
         worker.onmessage = ({ data: { id, chapters, error } }) => {
           let job = reading.get(id);
           reading.delete(id);
-          if (error) job?.resolve(readInPage(job.name, job.text));
-          else job?.resolve(chapters);
+          if (error) job?.resolve(readInPage(job.name, job.text, `the worker failed: ${error}`));
+          else {
+            console.info(`Chapters of "${job?.name}": read in a worker`);
+            job?.resolve(chapters);
+          }
         };
         // a worker that cannot run leaves its books to the page
         worker.onerror = () => {
           worker.terminate();
           parserWorker = null;
-          for (let job of reading.values()) job.resolve(readInPage(job.name, job.text));
+          for (let job of reading.values()) job.resolve(readInPage(job.name, job.text, 'the worker could not run'));
           reading.clear();
         };
         return worker;
@@ -4171,7 +4176,7 @@
     // the chapters of a book's text
     function chaptersOf(name, text) {
       parserWorker ??= startParserWorker();
-      if (!parserWorker) return Promise.resolve(readInPage(name, text));
+      if (!parserWorker) return Promise.resolve(readInPage(name, text, 'no worker could be made'));
       return new Promise(resolve => {
         let id = ++readings;
         reading.set(id, { name, text, resolve });

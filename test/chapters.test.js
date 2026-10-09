@@ -212,6 +212,16 @@ describe('books', () => {
     let chapters = real(parse(book(front, first)));
     assert.deepEqual(titles(chapters).slice(0, 3), ['Chương 1: Nhân vật', 'Chương 2: Thế lực', 'Chương 1']);
   });
+  it('groups the books a file holds under the names their title lines give', () => {
+    let titled = (title) => [`Tên sách: ${title}`, 'Tác giả: ai đó', ...[1, 2, 3].map(n => `Thứ ${n} chương\n\n${story(6, n)}`)];
+    let chapters = real(parse(book(titled('Ngoại truyện: Ba cô gái'), titled('Tiền truyện: Vịnh Văn'))));
+    assert.deepEqual([...new Set(chapters.map(c => c.group))], ['Ngoại truyện: Ba cô gái', 'Tiền truyện: Vịnh Văn']);
+    assert.ok(chapters[3].content.startsWith('Tên sách: Tiền truyện'));
+  });
+  it('takes a lone title line for the title page\'s own', () => {
+    let text = book('Tên sách: Sách thử', [1, 2, 3].map(n => `Thứ ${n} chương\n\n${story(6, n)}`));
+    assert.ok(parse(text).every(c => !c.group));
+  });
   it('does not take a sentence about a book for one', () => {
     let text = book([1, 2, 3, 4].map(n => `Chương ${n}\n\n${story(6, n)}`), 'Hai bộ quần áo nằm trên giường rất đẹp mắt.');
     assert.ok(parse(text).every(c => !c.group));

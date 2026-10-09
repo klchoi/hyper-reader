@@ -1069,6 +1069,7 @@
         thien: -4,           // `Cửu thiên chi thượng ...`: `thiên` is a chapter word only now and then
         phraseAlone: 1,      // `Kỳ Bạch Tuyết (nhất)` with nothing after it
         bookAlone: 3,        // a book heading on its own line, or `Quyển thứ nhất: Kinh thành phong vân`
+        bookTitle: 8,        // `Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`, one of the books a file holds
         bookTitleMax: 40,    // ...with a title no longer than this
         bookProse: -10,      // a book word that begins a sentence: `Hai bộ ngực ...`
         markerProseMax: 2,   // the most a paragraph running on behind `Chương 10:` counts against it
@@ -1316,14 +1317,15 @@
     //   chapter   n, span (the last of a run: `7-10`), end / endWord (`kết`, `cuối`), chapType,
     //             extra (phiên ngoại), and a part of it: half (1 thượng, 2 trung, 3 hạ, or a
     //             number), halfText, halfNum, halfType
-    //   book      bookNum, bookType
+    //   book      bookNum, bookType, and bookName for a book that names itself and has no
+    //             number (`Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`)
     //   outer     the section it is a part of: `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`
     //   inline    found in the middle of a line, not at its start
     const HEADING_DEFAULTS = {
       kind: 'chap', base: 0, index: 0, start: 0, ord: 0, text: '', title: '', rest: '', whole: false, shape: '',
       n: null, span: null, end: false, endWord: null, chapType: null, extra: false,
       half: null, halfText: null, halfNum: null, halfType: null,
-      bookNum: null, bookType: null, outer: null, inline: false,
+      bookNum: null, bookType: null, bookName: null, outer: null, inline: false,
     };
 
     function heading(fields) {
@@ -1485,8 +1487,15 @@
       return number?.length === words.length ? number.value : null;
     }
 
+    // `Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`: the title of one of the books a file holds
+    const BOOK_TITLE = /^\s*tên sách\s*[:：]\s*(\S.*?)\s*$/iu;
+
     function readHeading(line, lower, names) {
       if(line.length > 400) return null;
+      let named = BOOK_TITLE.exec(line);
+      if(named) {
+        return heading({ kind: 'book', base: TUNING.base.bookTitle, bookName: named[1], title: named[1], text: line.trim(), start: line.search(/\S/), shape: 'named' });
+      }
       let label = SECTION_LABEL.exec(line);
       if(label) {
         let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names);
@@ -1584,6 +1593,8 @@
         }
         lineStart = lineEnd + 1;
       }
+      // one title line is the title page's own: it takes two for the file to hold books
+      if(nodes.filter(node => node.bookName).length < 2) nodes = nodes.filter(node => !node.bookName);
       return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);
     }
 
@@ -1593,13 +1604,15 @@
     //   word    what the last book named was called (`Quyển`, `Bộ`, `Giai đoạn`), if any was
     //   kind    the word of a book that numbers apart from the others (`Bộ 02` after the `Quyển`s),
     //           null while the books are of the one kind
+    //   name    the name of a book that names itself and has no number (`Tên sách: ...`), until
+    //           a chapter numbers it (`Thứ 1 chương (bộ 02)`)
     //   extra   whether that is the extras (phiên ngoại)
     //   n       the chapter number it stands at (the last of a run)
     //   half    the part of that chapter (thượng / trung / hạ), or null
     //   ended   the book has had its last chapter
     //   carry   the number the book before stopped at, which a book may go on from
     const reached = (node, fields = {}) => ({
-      book: node.bookNum ?? 0, word: node.bookType, kind: null, extra: !!node.extra, n: node.span ?? node.n ?? null, half: null, ended: false, carry: 0, ...fields,
+      book: node.bookNum ?? 0, word: node.bookType, kind: null, name: node.bookName, extra: !!node.extra, n: node.span ?? node.n ?? null, half: null, ended: false, carry: 0, ...fields,
     });
 
     // The best path through the headings, as a list of { i, joined, state }: the heading's place
@@ -1645,7 +1658,7 @@
               if(node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, { ...s, half: node.half });
               else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
             } else {
-              go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, word: node.bookType ?? s.word, extra: s.extra || !!node.extra, half: node.half ?? null });
+              go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, word: node.bookType ?? s.word, name: book != null ? null : s.name, extra: s.extra || !!node.extra, half: node.half ?? null });
             }
           }
         }
@@ -1660,9 +1673,11 @@
           // a bare number straight after `Kỳ Bạch Tuyết phiên ngoại` is the first of its extras
           let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;
           if(s.extra !== !!node.extra && !opensExtra) continue;
-          if(book != null && book !== s.book) continue;
+          // a book that only names itself takes the number its first chapter gives it
+          if(book != null && book !== s.book && !s.name) continue;
           let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : (n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap));
-          go(j, value, { ...s, n: node.span ?? n, half: node.half ?? null });
+          let numbered = book != null && { book, word: node.bookType ?? s.word, name: null };
+          go(j, value, { ...s, n: node.span ?? n, half: node.half ?? null, ...numbered });
         }
       };
 
@@ -1674,7 +1689,7 @@
         for(let j of bestByKey.values()) {
           let s = state[j];
           if(s.extra === !!node.extra && (book == null || book === s.book)) continue;
-          go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, word: node.bookType ?? s.word, kind: s.kind, carry: s.n }));
+          go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, word: node.bookType ?? s.word, kind: s.kind, name: book == null ? s.name : null, carry: s.n }));
         }
       };
 
@@ -1688,7 +1703,7 @@
         // the numbers start over inside a book that has been told apart from the others:
         // the next one began, whether or not it was named
         let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && s.n >= TUNING.path.unnamedFrom;
-        go(top, TUNING.reward.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), word: node.bookType ?? s.word, extra: !!node.extra, half: node.half ?? null, carry: s.n });
+        go(top, TUNING.reward.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), word: node.bookType ?? s.word, name: book != null ? null : s.name, extra: !!node.extra, half: node.half ?? null, carry: s.n });
       };
 
       let startingHere = (i, { begin }) => {
@@ -1724,6 +1739,12 @@
           let node = nodes[i];
           let b = node.bookNum ?? 0;
           let extra = node.kind === 'extrahead' || !!node.extra;
+          // a book that names itself and has no number is the next one, after whatever came
+          if(node.bookName && node.bookNum == null) {
+            for(let j of bestByKey.values()) go(j, 0, reached(node, { book: state[j].book + 1, carry: state[j].n ?? 0, n: null }));
+            begin(TUNING.path.startAlone, reached(node, { book: 1, n: null }), books.length > 0);
+            return;
+          }
           for(let j of bestByKey.values()) {
             let s = state[j];
             // the next book, or one further on when a few were never named; or a book of another
@@ -1946,7 +1967,7 @@
         let inherited = section && !lead.outer && state.book === 0 && type === section.type ? section.name : undefined;
         if(lead.outer) section = { name: lead.outer, type };
         else if(!inherited) section = undefined;
-        let group = lead.outer ?? inherited ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : undefined);
+        let group = lead.outer ?? inherited ?? state.name ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : undefined);
         drafts.push({ offset: index, group, heading });
       }
       // a book that opens with no heading of its own, ahead of a `Bộ 2`, is the first
@@ -4106,7 +4127,7 @@
     // @book:begin - what the tests load of the page: a book, and what is stored of it
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 6;
+    const PARSER_VERSION = 7;
 
     // a book: where it came from, and its chapters once the text has been read (see readBook)
     function Book(file) {

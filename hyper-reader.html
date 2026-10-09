@@ -3110,6 +3110,76 @@
       });
     }
 
+    // ---- tuning -------------------------------------------------------------------------
+    // Every number the parser was tuned with, and what it is for. They were set by running
+    // the parser over a library of books (tools/check-books.js); change one and run it again.
+    const TUNING = {
+      // 3. how much a heading speaks for itself, 0 to 10, before the book's own style weighs in
+      base: {
+        decimal: 2,          // `3.07` is hardly ever anything but a chapter
+        digits: 1.5,         // a number in digits, bare, beside a title: sentences rarely begin with one
+        thien: -4,           // `Cửu thiên chi thượng ...`: `thiên` is a chapter word only now and then
+        phraseAlone: 1,      // `Kỳ Bạch Tuyết (nhất)` with nothing after it
+        bookAlone: 3,        // a book heading on its own line, or `Quyển thứ nhất: Kinh thành phong vân`
+        bookTitleMax: 40,    // ...with a title no longer than this
+        bookProse: -10,      // a book word that begins a sentence: `Hai bộ ngực ...`
+        markerProseMax: 2,   // the most a paragraph running on behind `Chương 10:` counts against it
+        titlePage: -6,       // `【NAME】1-74 tác giả: ...`
+        roman: -2,           // roman numerals read as a word more often than as a number
+        inline: 3,           // a heading in the middle of a line
+        inlineTitleMax: 80,  // and the title it is given, in characters
+      },
+      // 3. how much a line reads like a sentence of the story and not like a title
+      prose: {
+        longerThan: 100, long: 3,         // a line this long
+        commas: 2, manyCommas: 2,         // this many commas
+        oneCommaOver: 40, oneComma: 1,    // one comma in a line this long
+        sentenceOver: 50, sentence: 2,    // a line this long that ends like a sentence
+      },
+      // 4. the path: what a step from one heading to the next is worth
+      reward: {
+        next: 8,             // n after n-1
+        gap: 3,              // taken off for each number a jump skips
+        repeat: 3,           // the same heading again, close by
+        boundary: 7,         // the numbers start over where a book or extra begins
+        carryOn: 4,          // ...or go on from where the book before stopped
+        restart: -6,         // ...and where nothing says so
+        half: 4,             // the next part of a chapter
+        end: 6,              // the last chapter
+        interlude: 1,        // a piece set between two chapters
+      },
+      path: {
+        threshold: 4.5,      // what a heading must be worth to be on the path by itself
+        closeLines: 3,       // lines apart that two headings may still be one
+        gapMax: 4,           // numbers a jump may skip
+        smallNumber: 3,      // a number up to this may be the first of a book
+        startAlone: 3,       // worth of a path that starts at a small number...
+        startFar: -6,        // ...and at any other
+        lateStartCost: 4,    // a book that starts at a big number, off the boundary reward
+        lateStartCap: 10,    // ...up to this many
+        opensExtraLines: 4,  // lines after `Kỳ Bạch Tuyết phiên ngoại` its first chapter may stand
+        breakMinBase: 6,     // how much a heading must say for itself to break the numbers
+        unnamedFrom: 6,      // the numbers starting over after this many chapters is a new book...
+        unnamedUpTo: 2,      // ...when they start over at this or lower
+        endLookback: 40,     // headings back an end (`Chương kết`) looks for the chapter it closes
+        endMin: 2,           // ...which must be at least this number
+        skippedBooksMax: 3,  // books never named that a named one may skip over
+      },
+      // 4. how far a shape is trusted, by how much of it landed on the path
+      trust: { scale: 6 },
+      // 4. a heading with a line or so before the next, in a book of long chapters
+      tiny: { typicalAtLeast: 30, lines: 2 },
+      // 4. weak headings taken back to fill a gap: the first of a book up to this number
+      fill: { firstMax: 4 },
+      // 5. the drafts
+      drafts: {
+        titleMax: 100,       // characters of a title, before a paragraph running on is cut
+        seriesMin: 8,        // headings that begin alike, to be a series
+        seriesOver: 1.2,     // ...and more than the numbered headings by this factor
+        pageParagraphs: 60,  // paragraphs to a page, when a book has no headings
+      },
+    };
+
     // ---- the parser ---------------------------------------------------------------------
     // Contents, in the order of the file:
     //   1. Words and numbers   `hai mươi tư`, `nhất lẻ một`, `XIV` as numbers
@@ -3344,17 +3414,16 @@
 
     // how much a line reads like a sentence of the story and not like a title
     function proseCost(rest) {
+      let t = TUNING.prose;
       let cost = 0;
       let commas = (rest.match(/[,;]/g) || []).length;
-      if(rest.length > 100) cost += 3;
-      if(commas >= 2) cost += 2;
-      else if(commas == 1 && rest.length > 40) cost += 1;
-      if(rest.length > 50 && /[.!?…"”]$/.test(rest)) cost += 2;
+      if(rest.length > t.longerThan) cost += t.long;
+      if(commas >= t.commas) cost += t.manyCommas;
+      else if(commas == 1 && rest.length > t.oneCommaOver) cost += t.oneComma;
+      if(rest.length > t.sentenceOver && /[.!?…"”]$/.test(rest)) cost += t.sentence;
       return cost;
     }
 
-    // the words that open the title when the number comes after them: `Phòng tắm thiên
-    // Chương 1`, or `Quy tắc quái đàm — mới vào học viện (1)` (after the last dash)
     function leadingTitle(m, tokens, line, rest) {
       let span = m.indices.groups.pre ?? m.indices.groups.ph;
       if(!span) return null;
@@ -3402,22 +3471,23 @@
     function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase, titled }) {
       let base = rule.base;
       // a bare number with a title after it is the weakest shape of all; in digits less so
-      if(rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? 2 : 0) + (number?.digits ? 1.5 : 0);
+      if(rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? TUNING.base.decimal : 0) + (number?.digits ? TUNING.base.digits : 0);
       // `3.07` is hardly ever anything but a chapter
-      else if(number?.book != null) base += 2;
-      if(marker?.cls == 'c' && marker.word == 'Thiên') base -= 4;
-      if(hasPhrase && whole) base += 1;
+      else if(number?.book != null) base += TUNING.base.decimal;
+      if(marker?.cls == 'c' && marker.word == 'Thiên') base += TUNING.base.thien;
+      if(hasPhrase && whole) base += TUNING.base.phraseAlone;
       // a book heading must stand on its own line to be believed, or be followed by a colon and
       // a short title (`Quyển thứ nhất: Kinh thành phong vân`): `Hai bộ ngực...` is prose
       // (`(quyển thứ nhất: Hoàn!)` ends a volume, it does not open one; a phase is only a heading alone)
       let ending = /(?:^|\s)(?:hoàn|xong|kết thúc)(?:$|[\s.!)])/iu.test(title);
-      if(rule.kind == 'book') base += whole || (titled && title.length <= 40 && !ending) ? 3 : (title.length > 40 || ending || roles.bookType == 'Giai đoạn' ? -10 : 0);
+      let bookMax = TUNING.base.bookTitleMax;
+      if(rule.kind == 'book') base += whole || (titled && title.length <= bookMax && !ending) ? TUNING.base.bookAlone : (title.length > bookMax || ending || roles.bookType == 'Giai đoạn' ? TUNING.base.bookProse : 0);
       // a heading with its marker (`Chương 10: ...`) is still one when the paragraph runs on
       // behind it on the same line; only a bare number is made doubtful by that
-      base -= marker ? Math.min(proseCost(title), 2) : proseCost(title);
+      base -= marker ? Math.min(proseCost(title), TUNING.base.markerProseMax) : proseCost(title);
       // the title page: `【NAME】1-74 tác giả: ...`
-      if(/tác giả/.test(rest) || /^\s*[-–~]\s*\d/.test(rest)) base -= 6;
-      if(hasRoman) base -= 2;
+      if(/tác giả/.test(rest) || /^\s*[-–~]\s*\d/.test(rest)) base += TUNING.base.titlePage;
+      if(hasRoman) base += TUNING.base.roman;
       return base;
     }
 
@@ -3530,12 +3600,12 @@
             for(let m of line.matchAll(INLINE_HEADING)) {
               // a line that opens with a heading has only a title after it: `(Chương 75: Xong,
               // thỉnh mong chờ Chương 76: ...)` points at the next chapter, it does not begin it
-              let skip = node && node.base >= 6;
+              let skip = node && node.base >= TUNING.path.breakMinBase;
               if(skip || !/\S/.test(line.slice(0, m.index))) continue;
               let rest = line.slice(m.index + m[0].length);
               nodes.push(heading({
                 kind: 'chap', n: Number(m.groups.n), chapType: CHAPTER_WORDS[m.groups.word.toLowerCase()],
-                base: 3, inline: true, text: m[0], rest, title: cleanTitle(rest).slice(0, 80),
+                base: TUNING.base.inline, inline: true, text: m[0], rest, title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),
                 shape: 'inline', index: lineStart + m.index, ord,
               }));
             }
@@ -3547,20 +3617,6 @@
     }
 
     // ==== 4. The path ============================================================================
-    const REWARD = {
-      next: 8,          // n after n-1
-      gap: 3,           // taken off for each number a jump skips
-      repeat: 3,        // the same heading again, close by
-      boundary: 7,      // the numbers start over where a book or extra begins
-      carryOn: 4,       // ...or go on from where the book before stopped
-      restart: -6,      // ...and where nothing says so
-      half: 4,
-      end: 6,
-      interlude: 1,
-    };
-    const THRESHOLD = 4.5;
-    const CLOSE = 3;    // lines apart that two headings may still be one
-
     // What a path has reached by a node, and all the paths need to go on from it:
     //   book    the book it is in, 0 when no book has been told apart
     //   extra   whether that is the extras (phiên ngoại)
@@ -3606,17 +3662,17 @@
           let node = nodes[i];
           let { n, bookNum: book } = node;
           // carrying on from an earlier number
-          for(let d = 0; d <= 4; d++) {
+          for(let d = 0; d <= TUNING.path.gapMax; d++) {
             for(let j of byNumber.get(n - d) ?? []) {
               let s = state[j];
               if(s.ended || (node.extra && !s.extra)) continue;
               if(book != null && s.book != 0 && book != s.book) continue;
               if(d == 0) {
                 // the next part of the same chapter, or the same heading again
-                if(node.half != null && (s.half == null || node.half > s.half)) go(j, REWARD.next, { ...s, half: node.half });
-                else if(apart(i, j) <= CLOSE && (s.half == null || node.half == s.half)) go(j, REWARD.repeat, { ...s }, true);
+                if(node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, { ...s, half: node.half });
+                else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half == s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
               } else {
-                go(j, REWARD.next - REWARD.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, extra: s.extra || !!node.extra, half: node.half ?? null });
+                go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, extra: s.extra || !!node.extra, half: node.half ?? null });
               }
             }
           }
@@ -3624,30 +3680,30 @@
           for(let j of books) {
             let s = state[j];
             // a bare number straight after `Kỳ Bạch Tuyết phiên ngoại` is the first of its extras
-            let opensExtra = s.extra && !node.extra && apart(i, j) <= 4;
+            let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;
             if(s.extra != !!node.extra && !opensExtra) continue;
             if(book != null && book != s.book) continue;
-            let value = n <= 3 ? REWARD.boundary : (n == s.carry + 1 ? REWARD.carryOn : REWARD.boundary - 4 - Math.min(n, 10));
+            let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : (n == s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap));
             go(j, value, { ...s, n: node.span ?? n, half: node.half ?? null });
           }
           // a book that names itself in the heading, or extras, with the numbers starting over
-          if(n <= 3 && (book != null || node.extra)) {
+          if(n <= TUNING.path.smallNumber && (book != null || node.extra)) {
             for(let j of bestByKey.values()) {
               let s = state[j];
               if(s.extra == !!node.extra && (book == null || book == s.book)) continue;
-              go(j, REWARD.boundary - 1, reached(node, { book: book ?? s.book, carry: s.n }));
+              go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, carry: s.n }));
             }
           }
           // the numbers may break anywhere (a series that carries on from 101 after 47), at
           // a price that only a heading worth the price will pay
-          if(top >= 0 && !state[top].ended && node.base >= 6) {
+          if(top >= 0 && !state[top].ended && node.base >= TUNING.path.breakMinBase) {
             let s = state[top];
             // the numbers start over inside a book that has been told apart from the others:
             // the next one began, whether or not it was named
-            let unnamed = book == null && !node.extra && n <= 2 && s.book > 0 && s.n >= 6;
-            go(top, REWARD.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), extra: !!node.extra, half: node.half ?? null, carry: s.n });
+            let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && s.n >= TUNING.path.unnamedFrom;
+            go(top, TUNING.reward.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), extra: !!node.extra, half: node.half ?? null, carry: s.n });
           }
-          let start = n <= 3 ? 3 : -6;
+          let start = n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;
           if(start > 0) begin(start, reached(node));
           else begin(start, reached(node), true);
         },
@@ -3655,12 +3711,12 @@
         end(i, { go }) {
           let node = nodes[i];
           let recent = [];
-          for(let j = i - 1; j >= 0 && recent.length < 40; j--) if(score[j] > -Infinity) recent.push(j);
+          for(let j = i - 1; j >= 0 && recent.length < TUNING.path.endLookback; j--) if(score[j] > -Infinity) recent.push(j);
           for(let j of recent) {
             let s = state[j];
             if(s.ended || s.n == null || s.extra != !!node.extra) continue;
-            if(apart(i, j) <= CLOSE) go(j, REWARD.repeat + 1, { ...s, ended: true }, true);
-            else if(s.n >= 2) go(j, REWARD.end, { ...s, n: s.n + 1, ended: true });
+            if(apart(i, j) <= TUNING.path.closeLines) go(j, TUNING.reward.repeat + 1, { ...s, ended: true }, true);
+            else if(s.n >= TUNING.path.endMin) go(j, TUNING.reward.end, { ...s, n: s.n + 1, ended: true });
           }
         },
         book(i, { go, begin }) {
@@ -3672,13 +3728,13 @@
             // the next book, or one further on when a few were never named
             let follows = extra ? !s.extra : (!s.extra && (b > s.book || (b <= 2 && s.book == 0)));
             let skipped = extra ? 0 : Math.max(0, b - s.book - 1);
-            if(follows) go(j, -Math.min(skipped, 3), reached(node, { book: extra ? s.book : b, extra, carry: s.n ?? 0, n: null }));
+            if(follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, { book: extra ? s.book : b, extra, carry: s.n ?? 0, n: null }));
           }
-          begin(3, reached(node, { book: extra ? 0 : b, extra, n: null }), books.length > 0);
+          begin(TUNING.path.startAlone, reached(node, { book: extra ? 0 : b, extra, n: null }), books.length > 0);
         },
         // `Thứ 0 chương phiên ngoại`: a piece set between two chapters, outside their numbers
         interlude(i, { go }) {
-          if(top >= 0) go(top, REWARD.interlude, { ...state[top] });
+          if(top >= 0) go(top, TUNING.reward.interlude, { ...state[top] });
         },
         // the nearest heading before it that has a number gives the half its chapter
         half(i, { go }) {
@@ -3687,7 +3743,7 @@
             if(score[j] == -Infinity) continue;
             let s = state[j];
             if(s.n == null || s.ended) continue;
-            if(s.half == null || node.half > s.half) go(j, REWARD.half, { ...s, half: node.half });
+            if(s.half == null || node.half > s.half) go(j, TUNING.reward.half, { ...s, half: node.half });
             break;
           }
         },
@@ -3695,7 +3751,7 @@
 
       for(let i = 0; i < nodes.length; i++) {
         let node = nodes[i];
-        let prior = node.base + (credit[node.shape] ?? 0) - THRESHOLD;
+        let prior = node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold;
         if((strongOnly && prior < 0) || excluded.has(i)) continue;
         let best = { value: -Infinity, from: -1, joined: false, as: null };
         let go = (j, value, as, joins = false) => {
@@ -3733,10 +3789,10 @@
       let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;
       let tiny = new Set();
       // a book of one-paragraph chapters has nothing to tell a list from
-      if(typical < 30) return tiny;
+      if(typical < TUNING.tiny.typicalAtLeast) return tiny;
       chapters.forEach(({ i }, k) => {
         let next = chapters[k + 1];
-        if(next && !next.joined && nodes[next.i].ord - nodes[i].ord <= 2) tiny.add(i);
+        if(next && !next.joined && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);
       });
       return tiny;
     }
@@ -3748,7 +3804,7 @@
       for(let node of nodes) seen[node.shape] = (seen[node.shape] ?? 0) + 1;
       for(let { i } of path) taken[nodes[i].shape] = (taken[nodes[i].shape] ?? 0) + 1;
       let credit = {};
-      for(let shape in seen) credit[shape] = 6 * (((taken[shape] ?? 0) + 0.5) / (seen[shape] + 1) - 0.5);
+      for(let shape in seen) credit[shape] = TUNING.trust.scale * (((taken[shape] ?? 0) + 0.5) / (seen[shape] + 1) - 0.5);
       return credit;
     }
 
@@ -3759,7 +3815,7 @@
       let isChap = (entry) => nodes[entry.i].kind == 'chap' && entry.state.n != null;
       let weak = [];
       nodes.forEach((node, i) => {
-        if(node.kind == 'chap' && node.n != null && node.base + (credit[node.shape] ?? 0) - THRESHOLD < 0) weak.push(i);
+        if(node.kind == 'chap' && node.n != null && node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold < 0) weak.push(i);
       });
       let filled = [];
       let fill = (from, to, first, last, state) => {
@@ -3788,7 +3844,7 @@
         let n = entry.state.n;
         if(previous && !boundary && entry.state.book == previous.state.book && entry.state.extra == previous.state.extra) {
           if(n > previous.state.n + 1) fill(previous.i, entry.i, previous.state.n + 1, n - 1, previous.state);
-        } else if(n > 1 && n <= 4 && !node.extra) {
+        } else if(n > 1 && n <= TUNING.fill.firstMax && !node.extra) {
           fill(previous?.i ?? -1, entry.i, 1, n - 1, { ...entry.state, n: 0 });
         }
         previous = entry;
@@ -3806,7 +3862,7 @@
       titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);
       // a paragraph that runs on behind the heading is not part of its title
       let title = titles[0];
-      return title?.length > 100 ? title.slice(0, 100).replace(/\s+\S*$/, '') + '…' : title;
+      return title?.length > TUNING.drafts.titleMax ? title.slice(0, TUNING.drafts.titleMax).replace(/\s+\S*$/, '') + '…' : title;
     }
 
     function buildChapters(nodes, path) {
@@ -3885,7 +3941,7 @@
       // dash would pass for a heading
       let own = name.toLowerCase().normalize();
       let [key, count] = [...counts].filter(([words]) => own.startsWith(words)).sort((a, z) => z[1] - a[1])[0] ?? [];
-      if(!key || count < 8) return [];
+      if(!key || count < TUNING.drafts.seriesMin) return [];
       let drafts = [];
       for(let { key: lineKey, index, line, length } of lines) {
         if(lineKey != key) continue;
@@ -3897,7 +3953,7 @@
     }
 
     // a book with no headings to find is read in pages of this many paragraphs
-    function pagesOf(text, paragraphsPerPage = 60) {
+    function pagesOf(text, paragraphsPerPage = TUNING.drafts.pageParagraphs) {
       let pattern = '(.*\n){1,' + paragraphsPerPage + '}';
       return [...text.matchAll(new RegExp(pattern, 'gimu'))].map(m => ({ offset: m.index, heading: { text: m[0] } }));
     }
@@ -3913,7 +3969,7 @@
       let drafts = buildChapters(nodes, path);
       // no numbers to follow, but the same words begin every heading
       let series = seriesChapters(text, { name });
-      if(series.length >= 8 && series.length > drafts.length * 1.2) drafts = series;
+      if(series.length >= TUNING.drafts.seriesMin && series.length > drafts.length * TUNING.drafts.seriesOver) drafts = series;
       if(drafts.length < 2) drafts = pagesOf(text);
       return finishChapters(withPrologue(drafts, filename, text), text);
     }

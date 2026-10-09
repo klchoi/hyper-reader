@@ -3110,22 +3110,30 @@
       });
     }
 
-    // ---- chapter extraction -------------------------------------------------------------
+    // ---- the parser ---------------------------------------------------------------------
+    // Contents, in the order of the file:
+    //   1. Words and numbers   `hai mươi tư`, `nhất lẻ một`, `XIV` as numbers
+    //   2. Lines into tokens   a line as a string of classes (number, chapter word, bracket, ...)
+    //   3. Headings            the shapes a heading takes, and the candidate found at each line
+    //   4. The path            the best way through the candidates, and the checks around it
+    //   5. Drafts              the path as chapters, or pages, or a series, and the title page
+    //   6. extractChapters     the whole, in a few lines
+    //
     // The headings of a book are the lines whose numbers run in sequence: 1, 2, 3 ... A line
     // that merely looks like a heading (`Một giờ sau...`, `Kết quả là...`) has a number that
     // fits nowhere in that sequence, so the sequence is what is looked for, not the look.
     //
-    //   1. findCandidates  every line that could be a heading, read into a node (number,
-    //                      marker words, book, title) with how much its shape speaks for it
-    //   2. chooseHeadings  the best path through the nodes: a number followed by the next one
-    //                      scores, a repeat close by is the same heading, a jump costs, a
-    //                      book or an extra (phiên ngoại) may start the numbers over
-    //   3. buildChapters   the chosen nodes become chapters, with their title and book
+    //   findCandidates    every line that could be a heading, read into a node (number,
+    //                       marker words, book, title) with how much its shape speaks for it
+    //   chooseHeadings    the best path through the nodes: a number followed by the next one
+    //                       scores, a repeat close by is the same heading, a jump costs, a
+    //                       book or an extra (phiên ngoại) may start the numbers over
+    //   buildChapters     the chosen nodes become chapters, with their title and book
     //
     // A shape (`【N】`, `Chương N: T`, `(N) T`) that mostly lands on the path is trusted
     // more on a second look, so a book's own style outweighs the one-off lines.
 
-    // -- numbers, in words
+    // ==== 1. Words and numbers ===================================================================
     const WORD_DIGITS = { một: 1, mốt: 1, hai: 2, ba: 3, bốn: 4, tư: 4, năm: 5, lăm: 5, sáu: 6, bảy: 7, tám: 8, chín: 9 };
     const SINO_DIGITS = { nhất: 1, nhị: 2, tam: 3, tứ: 4, ngũ: 5, lục: 6, thất: 7, bát: 8, cửu: 9 };
     // after `mươi` only these read as a unit: `hai mươi tư` is 24, `tư` alone is not a number
@@ -3185,7 +3193,8 @@
       return total > 0 && total < 4000 ? total : null;
     }
 
-    // -- one line into tokens. A token's class is one letter:
+    // ==== 2. Lines into tokens ===================================================================
+    // A token's class is one letter:
     //   N number   E end word (kết, cuối)   c chapter word   p phiên ngoại / ngoại truyện
     //   b book word   t thứ / đệ   f tiết   h thượng / trung / hạ
     //   n the book's own name   L opening bracket   R closing bracket   S other mark   x any word
@@ -3263,7 +3272,34 @@
       return tokens;
     }
 
-    // -- the shapes a heading can take, over the token classes. The first that fits wins
+    // ==== 3. Headings ============================================================================
+    // A heading found in the text, a candidate for a chapter. Every one has all of these:
+    //   kind      'chap' | 'book' | 'extrahead' | 'half' | 'interlude'
+    //   base      how much it speaks for itself, 0-10, before the book's own style weighs in
+    //   where     index (in the text), start (in its line), ord (the rank of its line among the
+    //             lines that have anything in them)
+    //   said      text (the heading as written), title (what follows), rest (the line after it),
+    //             whole (nothing follows)
+    //   shape     what it looks like, for the trust a book gives that look
+    //   chapter   n, span (the last of a run: `7-10`), end / endWord (`kết`, `cuối`), chapType,
+    //             extra (phiên ngoại), and a part of it: half (1 thượng, 2 trung, 3 hạ, or a
+    //             number), halfText, halfNum, halfType
+    //   book      bookNum, bookType
+    //   outer     the section it is a part of: `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`
+    //   inline    found in the middle of a line, not at its start
+    const HEADING_DEFAULTS = {
+      kind: 'chap', base: 0, index: 0, start: 0, ord: 0, text: '', title: '', rest: '', whole: false, shape: '',
+      n: null, span: null, end: false, endWord: null, chapType: null, extra: false,
+      half: null, halfText: null, halfNum: null, halfType: null,
+      bookNum: null, bookType: null, outer: null, inline: false,
+    };
+
+    function heading(fields) {
+      for(let key in fields) if(!(key in HEADING_DEFAULTS)) throw new Error(`a heading has no ${key}`);
+      return { ...HEADING_DEFAULTS, ...fields };
+    }
+
+    // the shapes a heading can take, over the token classes. The first that fits wins
     const DECOR = '[LS]*';
     const NAME_PART = '(?:nR?S?)?';
     const BOOK_PART = '(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?';
@@ -3396,32 +3432,6 @@
     // `Chính văn` (the main text, as against the extras) labels a heading and is no part of it
     const SECTION_LABEL = /^\s*chính văn\s+(?=\S)/iu;
 
-    // A heading found in the text, a candidate for a chapter. Every one has all of these:
-    //   kind      'chap' | 'book' | 'extrahead' | 'half' | 'interlude'
-    //   base      how much it speaks for itself, 0-10, before the book's own style weighs in
-    //   where     index (in the text), start (in its line), ord (the rank of its line among the
-    //             lines that have anything in them)
-    //   said      text (the heading as written), title (what follows), rest (the line after it),
-    //             whole (nothing follows)
-    //   shape     what it looks like, for the trust a book gives that look
-    //   chapter   n, span (the last of a run: `7-10`), end / endWord (`kết`, `cuối`), chapType,
-    //             extra (phiên ngoại), and a part of it: half (1 thượng, 2 trung, 3 hạ, or a
-    //             number), halfText, halfNum, halfType
-    //   book      bookNum, bookType
-    //   outer     the section it is a part of: `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`
-    //   inline    found in the middle of a line, not at its start
-    const HEADING_DEFAULTS = {
-      kind: 'chap', base: 0, index: 0, start: 0, ord: 0, text: '', title: '', rest: '', whole: false, shape: '',
-      n: null, span: null, end: false, endWord: null, chapType: null, extra: false,
-      half: null, halfText: null, halfNum: null, halfType: null,
-      bookNum: null, bookType: null, outer: null, inline: false,
-    };
-
-    function heading(fields) {
-      for(let key in fields) if(!(key in HEADING_DEFAULTS)) throw new Error(`a heading has no ${key}`);
-      return { ...HEADING_DEFAULTS, ...fields };
-    }
-
     // a chapter in parts: `Chương 27: (thượng)`, `Chương 44: (nhất)`, or a title that ends in
     // `(hạ)`. The parts are shown one by one, each as the part of its chapter
     function partOf(title) {
@@ -3536,7 +3546,7 @@
       return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);
     }
 
-    // -- the best path through the nodes
+    // ==== 4. The path ============================================================================
     const REWARD = {
       next: 8,          // n after n-1
       gap: 3,           // taken off for each number a jump skips
@@ -3787,6 +3797,7 @@
       return [...path, ...filled].sort((a, z) => a.i - z.i);
     }
 
+    // ==== 5. Drafts ==============================================================================
     const END_PHRASE = /^(chương\s+)?(kết|cuối)$/i;
 
     // a title the heading itself carries, the plainest one when several headings stood together
@@ -3891,6 +3902,7 @@
       return [...text.matchAll(new RegExp(pattern, 'gimu'))].map(m => ({ offset: m.index, heading: { text: m[0] } }));
     }
 
+    // ==== 6. extractChapters =====================================================================
     function extractChapters(filename, text, { name }) {
       let nodes = findCandidates(text, name);
       // first take every node, to see which shapes the book writes its headings in

@@ -1117,6 +1117,8 @@
       trust: { scale: 6 },
       // 4. a heading with a line or so before the next, in a book of long chapters
       tiny: { typicalAtLeast: 30, lines: 2 },
+      // 4. a contents list at the head of a book: this many entries, from the least to the most
+      contents: { minEntries: 3, maxEntries: 60 },
       // 4. weak headings taken back to fill a gap: the first of a book up to this number
       fill: { firstMax: 4 },
       // 5. the drafts
@@ -1800,6 +1802,32 @@
       return tiny;
     }
 
+    // A contents list at the head of a book: a few headings close together (some with a few
+    // lines of notes under them), after which the book starts its numbers over and goes
+    // through them again. The entries are part of the title page, not chapters. Told by four
+    // things together: there are several entries (two sections in front of the first book,
+    // `Nhân vật giới thiệu`, are no list), the whole list is shorter than the chapter after
+    // it (or than a chapter usually is), the chapter after it starts again at the list's
+    // first number or lower, and every number the list names comes again later
+    function frontContents(nodes, path) {
+      let chapters = path.filter(({ i, joined }) => !joined && nodes[i].kind !== 'book' && nodes[i].kind !== 'extrahead');
+      let lines = (k) => (chapters[k + 1] ? nodes[chapters[k + 1].i].ord : Infinity) - nodes[chapters[k].i].ord;
+      let number = (k) => chapters[k].state.n;
+      let lengths = chapters.slice(0, -1).map((_, k) => lines(k)).sort((a, z) => a - z);
+      let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;
+      for(let k = Math.min(chapters.length - 1, TUNING.contents.maxEntries); k >= TUNING.contents.minEntries; k--) {
+        let head = chapters.slice(0, k);
+        let total = head.reduce((sum, _, j) => sum + lines(j), 0);
+        if(total >= Math.max(lines(k), typical)) continue;
+        let numbers = head.map((_, j) => number(j)).filter(n => n != null);
+        // the numbers go back (the parts of one chapter, `Chương 44: (nhất)`, `(nhị)`, never do)
+        if(!numbers.length || number(k) == null || number(k) > Math.min(...numbers) || number(k) >= Math.max(...numbers)) continue;
+        let later = new Set(chapters.slice(k).map((_, j) => number(k + j)));
+        if(numbers.every(n => later.has(n))) return new Set(head.map(({ i }) => i));
+      }
+      return new Set();
+    }
+
     // how far each shape is trusted, by how much of it landed on the path: -3 for one
     // that never does, +3 for one that always does
     function shapeCredit(nodes, path) {
@@ -1970,6 +1998,8 @@
       let credit = shapeCredit(nodes, first);
       let path = chooseHeadings(nodes, credit, true, tinySections(nodes, first));
       path = fillGaps(nodes, path, credit);
+      let listed = frontContents(nodes, path);
+      path = path.filter(({ i }) => !listed.has(i));
       let drafts = buildChapters(nodes, path);
       // no numbers to follow, but the same words begin every heading
       let series = seriesChapters(text, { name });
@@ -4073,7 +4103,7 @@
     // @book:begin - what the tests load of the page: a book, and what is stored of it
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 4;
+    const PARSER_VERSION = 5;
 
     // a book: where it came from, and its chapters once the text has been read (see readBook)
     function Book(file) {

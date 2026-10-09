@@ -97,6 +97,13 @@ describe('what is not a chapter', () => {
     assert.equal(chapters.length, 10);
     assert.ok(chapters.every(c => c.content.split('\n').length > 40));
   });
+  it('a contents list whose entries carry a few lines each', () => {
+    let list = [1, 2, 3, 4].map(n => `Chương ${n}: Tên ${n}\n\n${story(3, n)}`);
+    let long = Array.from({ length: 10 }, (_, k) => `Chương ${k + 1}: Tên ${k + 1}\n\n${story(40, k)}`);
+    let chapters = parse(book(list, long));
+    assert.equal(real(chapters).length, 10);
+    assert.ok(chapters[0].content.includes('Chương 4: Tên 4'));
+  });
   it('a story that mentions a chapter in a sentence', () => {
     let text = book(chapterText(1), 'Nàng đọc lại, đến Chương 9 thì dừng lại vì mệt.', story(3), chapterText(2), chapterText(3), chapterText(4));
     assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4']);
@@ -194,6 +201,12 @@ describe('books', () => {
     let phase = (word, first) => [`【Sách thử】 giai đoạn thứ ${word}`, ...[0, 1, 2].map(k => `Chương ${first + k}\n\n${story(6, k)}`)];
     let chapters = real(parse(book(phase('nhất', 1), phase('hai', 4))));
     assert.deepEqual([...new Set(chapters.map(c => c.group))], ['Giai đoạn 1', 'Giai đoạn 2']);
+  });
+  it('keeps the sections in front of the first book, which are no contents list', () => {
+    let front = [`Chương 1: Nhân vật\n\n${story(3)}`, `Chương 2: Thế lực\n\n${story(12)}`];
+    let first = ['Quyển thứ nhất: Tên nhất', ...[1, 2, 3, 4, 5].map(n => `Chương ${n}\n\n${story(40, n)}`)];
+    let chapters = real(parse(book(front, first)));
+    assert.deepEqual(titles(chapters).slice(0, 3), ['Chương 1: Nhân vật', 'Chương 2: Thế lực', 'Chương 1']);
   });
   it('does not take a sentence about a book for one', () => {
     let text = book([1, 2, 3, 4].map(n => `Chương ${n}\n\n${story(6, n)}`), 'Hai bộ quần áo nằm trên giường rất đẹp mắt.');

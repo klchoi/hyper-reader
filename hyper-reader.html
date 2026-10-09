@@ -1248,6 +1248,25 @@
     const CHAPTER_WORDS = { chương: 'Chương', hồi: 'Hồi', thiên: 'Thiên' };
     const BOOK_WORDS = { quyển: 'Quyển', tập: 'Tập', bộ: 'Bộ', cuốn: 'Cuốn', quý: 'Quý' };
     const HALF_WORDS = { thượng: 1, trung: 2, hạ: 3 };
+    // the words that are a class of token by themselves (a class and what it carries), and the
+    // phrases of two words that are
+    const KNOWN_WORDS = new Map([
+      ...Object.entries(CHAPTER_WORDS).map(([word, shown]) => [word, ['c', { word: shown }]]),
+      ...Object.entries(BOOK_WORDS).map(([word, shown]) => [word, ['b', { word: shown }]]),
+      ...Object.entries(HALF_WORDS).map(([word, value]) => [word, ['h', { value, word }]]),
+      ['thứ', ['t', {}]], ['đệ', ['t', {}]], ['tiết', ['f', {}]],
+    ]);
+    const KNOWN_PHRASES = [['phiên ngoại', 'p', 'Phiên ngoại'], ['ngoại truyện', 'p', 'Ngoại truyện'], ['giai đoạn', 'b', 'Giai đoạn']];
+
+    // the token a word or a phrase of two begins, as [class, what it carries, its length], or null
+    function readKnownWord(word, lower, pos) {
+      for(let [phrase, cls, shown] of KNOWN_PHRASES) {
+        if(lower.startsWith(phrase, pos)) return [cls, { word: shown }, phrase.length];
+      }
+      let known = KNOWN_WORDS.get(word);
+      return known && [...known, word.length];
+    }
+
     const OPENERS = '【[(（《“"«';
     const CLOSERS = '】])）》”"»';
 
@@ -1297,17 +1316,9 @@
         let roman = readRoman(word);
         let lowered = words[0];
         let end = pos + word.length;
+        let known = readKnownWord(lowered, lower, pos);
         if(roman != null && word.length <= 7) add('N', end, { value: roman, roman: true });
-        else if(lowered in CHAPTER_WORDS) add('c', end, { word: CHAPTER_WORDS[lowered] });
-        else if((lowered === 'phiên' || lowered === 'ngoại') && /^(phiên ngoại|ngoại truyện)/.test(lower.slice(pos))) {
-          let both = /^(phiên ngoại|ngoại truyện)/.exec(lower.slice(pos))[0];
-          add('p', pos + both.length, { word: both[0].toUpperCase() + both.slice(1) });
-        }
-        else if(lowered === 'giai' && lower.startsWith('giai đoạn', pos)) add('b', pos + 'giai đoạn'.length, { word: 'Giai đoạn' });
-        else if(lowered in BOOK_WORDS) add('b', end, { word: BOOK_WORDS[lowered] });
-        else if(lowered === 'thứ' || lowered === 'đệ') add('t', end);
-        else if(lowered === 'tiết') add('f', end);
-        else if(lowered in HALF_WORDS) add('h', end, { value: HALF_WORDS[lowered], word: lowered });
+        else if(known) add(known[0], pos + known[2], known[1]);
         else if(lowered === 'kết' || lowered === 'cuối') {
           // `Chương kết` ends the book; `Kết quả là` and `Cuối cùng` are only sentences
           let after = /^\s*(\S)/.exec(line.slice(end));

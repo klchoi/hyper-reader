@@ -1495,16 +1495,20 @@
     function partOf(title) {
       let alone = /^\(\s*(\p{L}+(?: \p{L}+)*)\s*\)$/u.exec(title);
       if(alone) {
-        let word = alone[1].toLowerCase();
-        let value = HALF_WORDS[word] ?? (() => {
-          let number = readNumberWords(word.split(' '), 0);
-          return number?.length === word.split(' ').length ? number.value : null;
-        })();
-        if(value != null) return { half: value, halfText: word, title: '' };
+        let value = valueOfPart(alone[1].toLowerCase());
+        if(value != null) return { half: value, halfText: alone[1].toLowerCase(), title: '' };
       }
       let ending = /\s*\((thượng|trung|hạ)\)$/iu.exec(title);
       if(ending) return { half: HALF_WORDS[ending[1].toLowerCase()], halfText: ending[1].toLowerCase(), title };
       return null;
+    }
+
+    // the number a part is written as: `thượng` is 1, `hạ` 3, `nhất` 1, `hai mươi` 20; null if it is no number
+    function valueOfPart(word) {
+      if(word in HALF_WORDS) return HALF_WORDS[word];
+      let words = word.split(' ');
+      let number = readNumberWords(words, 0);
+      return number?.length === words.length ? number.value : null;
     }
 
     function readHeading(line, lower, names) {

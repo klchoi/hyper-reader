@@ -146,6 +146,23 @@ describe('books', () => {
     assert.deepEqual(titles(chapters), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 1', 'Chương 2', 'Chương 3']);
     assert.deepEqual([...new Set(chapters.map(c => c.group))], ['Quyển 1', 'Quyển 2']);
   });
+  it('labels a book of another kind by its own word', () => {
+    let second = ['Bộ 02', ...[1, 2, 3].map(n => `Chương ${n}\n\n${story(6, n)}`)];
+    let chapters = real(parse(book(volume('nhất', 1), volume('hai', 4), second)));
+    assert.deepEqual([...new Set(chapters.map(c => c.group))], ['Quyển 1', 'Quyển 2', 'Bộ 2']);
+    assert.deepEqual(titles(chapters).slice(-3), ['Chương 1', 'Chương 2', 'Chương 3']);
+  });
+  it('calls the books one thing when the headings say it two ways', () => {
+    let mixed = [volume('nhất', 1), ['Cuốn 2: Tên hai', ...[4, 5, 6].map(n => `Chương ${n}\n\n${story(6, n)}`)], ['Quyển 3: Tên ba', ...[7, 8, 9].map(n => `Chương ${n}\n\n${story(6, n)}`)]];
+    let groups = [...new Set(real(parse(book(...mixed))).map(c => c.group))];
+    assert.equal(groups.length, 3);
+    assert.ok(new Set(groups.map(g => g.split(' ')[0])).size == 1);
+  });
+  it('names the phase before the first one a heading names', () => {
+    let phase = (word, first) => [`【Sách thử】 giai đoạn thứ ${word}`, ...[0, 1, 2].map(k => `Chương ${first + k}\n\n${story(6, k)}`)];
+    let chapters = real(parse(book(phase('nhất', 1), phase('hai', 4))));
+    assert.deepEqual([...new Set(chapters.map(c => c.group))], ['Giai đoạn 1', 'Giai đoạn 2']);
+  });
   it('does not take a sentence about a book for one', () => {
     let text = book([1, 2, 3, 4].map(n => `Chương ${n}\n\n${story(6, n)}`), 'Hai bộ quần áo nằm trên giường rất đẹp mắt.');
     assert.ok(parse(text).every(c => !c.group));

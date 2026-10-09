@@ -3625,13 +3625,16 @@
     // ==== 4. The path ============================================================================
     // What a path has reached by a node, and all the paths need to go on from it:
     //   book    the book it is in, 0 when no book has been told apart
+    //   word    what the last book named was called (`Quyển`, `Bộ`, `Giai đoạn`), if any was
+    //   kind    the word of a book that numbers apart from the others (`Bộ 02` after the `Quyển`s),
+    //           null while the books are of the one kind
     //   extra   whether that is the extras (phiên ngoại)
     //   n       the chapter number it stands at (the last of a run)
     //   half    the part of that chapter (thượng / trung / hạ), or null
     //   ended   the book has had its last chapter
     //   carry   the number the book before stopped at, which a book may go on from
     const reached = (node, fields = {}) => ({
-      book: node.bookNum ?? 0, extra: !!node.extra, n: node.span ?? node.n ?? null, half: null, ended: false, carry: 0, ...fields,
+      book: node.bookNum ?? 0, word: node.bookType, kind: null, extra: !!node.extra, n: node.span ?? node.n ?? null, half: null, ended: false, carry: 0, ...fields,
     });
 
     // The best path through the headings, as a list of { i, joined, state }: the heading's place
@@ -3678,7 +3681,7 @@
                 if(node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, { ...s, half: node.half });
                 else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half == s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
               } else {
-                go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, extra: s.extra || !!node.extra, half: node.half ?? null });
+                go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, word: node.bookType ?? s.word, extra: s.extra || !!node.extra, half: node.half ?? null });
               }
             }
           }
@@ -3697,7 +3700,7 @@
             for(let j of bestByKey.values()) {
               let s = state[j];
               if(s.extra == !!node.extra && (book == null || book == s.book)) continue;
-              go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, carry: s.n }));
+              go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, word: node.bookType ?? s.word, kind: s.kind, carry: s.n }));
             }
           }
           // the numbers may break anywhere (a series that carries on from 101 after 47), at
@@ -3707,7 +3710,7 @@
             // the numbers start over inside a book that has been told apart from the others:
             // the next one began, whether or not it was named
             let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && s.n >= TUNING.path.unnamedFrom;
-            go(top, TUNING.reward.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), extra: !!node.extra, half: node.half ?? null, carry: s.n });
+            go(top, TUNING.reward.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), word: node.bookType ?? s.word, extra: !!node.extra, half: node.half ?? null, carry: s.n });
           }
           let start = n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;
           if(start > 0) begin(start, reached(node));
@@ -3731,10 +3734,14 @@
           let extra = node.kind == 'extrahead' || !!node.extra;
           for(let j of bestByKey.values()) {
             let s = state[j];
-            // the next book, or one further on when a few were never named
-            let follows = extra ? !s.extra : (!s.extra && (b > s.book || (b <= 2 && s.book == 0)));
-            let skipped = extra ? 0 : Math.max(0, b - s.book - 1);
-            if(follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, { book: extra ? s.book : b, extra, carry: s.n ?? 0, n: null }));
+            // the next book, or one further on when a few were never named; or a book of another
+            // kind, which numbers apart from the rest (`Bộ 02` after `Quyển 13`)
+            let next = b > s.book || (b <= 2 && s.book == 0);
+            let ofAnotherKind = !extra && !next && s.word != null && node.bookType != null && s.word != node.bookType;
+            let follows = extra ? !s.extra : (!s.extra && (next || ofAnotherKind));
+            let skipped = extra || ofAnotherKind ? 0 : Math.max(0, b - s.book - 1);
+            let kind = ofAnotherKind || (!extra && node.bookType != null && node.bookType == s.kind) ? node.bookType : null;
+            if(follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, { book: extra ? s.book : b, kind, extra, carry: s.n ?? 0, n: null }));
           }
           begin(TUNING.path.startAlone, reached(node, { book: extra ? 0 : b, extra, n: null }), books.length > 0);
         },
@@ -3917,13 +3924,13 @@
         let inherited = section && !lead.outer && state.book == 0 && type == section.type ? section.name : undefined;
         if(lead.outer) section = { name: lead.outer, type };
         else if(!inherited) section = undefined;
-        let group = lead.outer ?? inherited ?? (state.book > 0 ? `${bookWord} ${state.book}` : undefined);
+        let group = lead.outer ?? inherited ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : undefined);
         drafts.push({ offset: index, group, heading });
       }
       // a book that opens with no heading of its own, ahead of a `Bộ 2`, is the first
       let named = drafts.findIndex(d => d.group);
       if(named > 0) {
-        let [type, number] = drafts[named].group.split(' ');
+        let [, type, number] = /^(.*) (\d+)$/.exec(drafts[named].group) ?? [];
         if(Number(number) == 2) {
           for(let d of drafts.slice(0, named)) d.group = `${type} 1`;
         }

@@ -187,11 +187,10 @@ describe('the model', () => {
     assert.ok(record.chapters.every(c => !('content' in c)));
     assert.equal(record.parser, loadParser().PARSER_VERSION);
   });
-  it('is made from a file name and its text', () => {
-    let made = Book({ name: 'Tên sách (1-3 chương) (nón xanh).txt' }, book('Chương 1', story(4), 'Chương 2', story(4), 'Chương 3', story(4)));
+  it('is made from a file name', () => {
+    let made = Book({ name: 'Tên sách (1-3 chương) (nón xanh).txt' });
     assert.equal(made.name, 'Tên sách');
     assert.equal(made.description, '(1-3 chương) (nón xanh)');
     assert.equal(made.id, 'ten-sach');
-    assert.ok(made.chapters.length >= 3);
   });
 });

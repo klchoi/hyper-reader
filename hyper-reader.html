@@ -481,7 +481,6 @@
         list-style: none;
         display: flex;
         flex-direction: column;
-        gap: 0.5em;
         align-items: start;
         li {
           max-width: 100%;
@@ -490,10 +489,6 @@
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          padding-top: 0.1ex;
-          padding-bottom: 0.1ex;
-          padding-left: calc(var(--gap) * 0.25);
-          padding-right: calc(var(--gap) * 0.25);
           &.active {
             background: var(--body-font-color);
             outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
@@ -505,6 +500,12 @@
             }
           }
           a {
+            display: block;
+            /* the space between the entries is the links' own, so there is nowhere between
+               them that a click falls through */
+            padding: calc(0.1ex + 0.25em) calc(var(--gap) * 0.25);
+            overflow: hidden;
+            text-overflow: ellipsis;
             color: var(--body-font-color);
             &:hover {
               color: var(--link-color);
@@ -517,7 +518,8 @@
           &.book {
             font-size: 0.75em;
             opacity: 0.6;
-            padding-top: calc(var(--gap) * 0.5);
+            /* the links' 0.25em, read at this smaller size */
+            padding: calc(var(--gap) * 0.5 + 0.25em / 0.75) calc(var(--gap) * 0.25) calc(0.1ex + 0.25em / 0.75);
           }
         }
       }

@@ -36,12 +36,15 @@ function page({ failing = false, missing = false } = {}) {
     postMessage(message) { this.thread?.postMessage(message); }
     terminate() { this.thread?.terminate(); }
   }
-  let document = { getElementById: () => ({ textContent: parserScript() }) };
+  // the app mounts on <body>, and the parser's script element is gone after the first look
+  let mounted = false;
+  let document = { getElementById: (id) => (mounted || id !== 'chapter-parser' ? null : { textContent: parserScript() }) };
   let said = [];
   let console = { log() {}, info: (...message) => said.push(message.join(' ')), group() {}, groupEnd() {} };
-  let code = `${parserScript()}\n${between('// @book:begin', '// @book:end')}\n${between('// @worker:begin', '// @worker:end')}\nreturn { readBook, stop: () => parserWorker?.terminate() };`;
+  let code = `${parserScript()}\n${between('// @source:begin', '// @source:end')}\nmount();\n${between('// @book:begin', '// @book:end')}\n${between('// @worker:begin', '// @worker:end')}\nreturn { readBook, stop: () => parserWorker?.terminate() };`;
   // `Worker` left out is a browser that has none
-  let loaded = new Function('document', 'Worker', 'URL', 'Blob', 'console', code)(document, missing ? undefined : Worker, URL, Blob, console);
+  let mount = () => { mounted = true; };
+  let loaded = new Function('document', 'Worker', 'URL', 'Blob', 'console', 'mount', code)(document, missing ? undefined : Worker, URL, Blob, console, mount);
   return { ...loaded, said };
 }
 

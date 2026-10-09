@@ -2116,6 +2116,12 @@
     import _ from 'https://cdn.jsdelivr.net/npm/lodash-es/+esm';
     import chromaJs from 'https://cdn.jsdelivr.net/npm/chroma-js@2.4/+esm';
 
+    // @source:begin
+    // the parser's own text, for the worker that reads books (see readBook). Taken now: the app
+    // mounts on <body> and the script element is gone once it has
+    const PARSER_SOURCE = document.getElementById('chapter-parser').textContent;
+    // @source:end
+
     class HashRouter extends EventTarget {
       parse(hash) {
         return Object.fromEntries(new URLSearchParams(hash));
@@ -4096,7 +4102,7 @@
             try { postMessage({ id, chapters: extractChapters(name, normalizeFileContent(text), { name }) }); }
             catch (error) { postMessage({ id, error: String(error?.message ?? error) }); }
           };`;
-        let source = document.getElementById('chapter-parser').textContent + glue;
+        let source = PARSER_SOURCE + glue;
         let worker = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
         worker.onmessage = ({ data: { id, chapters, error } }) => {
           let job = reading.get(id);

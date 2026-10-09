@@ -6,14 +6,11 @@ drop a book on it, and read by chapter. Books and reading progress are kept in t
 
 ## Running it
 
-Open `hyper-reader.html` in a browser. Two things depend on how it is opened:
-
-- **From a file (`file://`)** the page works, but it reads a book on the page itself, which holds
-  the page still for a few seconds on a big one. A browser may refuse the worker it would use; the
-  console says which way a book was read (`Chapters of "...": read in a worker` or `... in the page
-  (why)`).
-- **From a local server** (`python3 -m http.server`, then `http://localhost:8000/hyper-reader.html`)
-  the worker works, and so does listing the fonts installed on the machine.
+Open `hyper-reader.html` in a browser, from the file or from a local server
+(`python3 -m http.server`, then `http://localhost:8000/hyper-reader.html`). A book is read in a
+worker, so a big one does not hold the page still; the console says which way each book was
+read (`Chapters of "...": read in a worker`, or `... read in the page (why)` when no worker
+could be had). Listing the fonts installed on the machine needs the local server.
 
 ## What is in the page
 

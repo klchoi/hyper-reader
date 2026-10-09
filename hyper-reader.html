@@ -3021,6 +3021,7 @@
       }
     });
 
+    // @parser:begin - what the tests load; keep it free of the page and its state
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
     const PARSER_VERSION = 4;
@@ -3881,6 +3882,9 @@
       return [{ offset: 0, heading: { title: filename, text: filename } }, ...drafts];
     }
 
+    // @parser:end
+
+    // @slug:begin
     function slug(s) {
       s = latinize(s);
       s = s.replace(/\W+/g, '-');
@@ -4011,6 +4015,8 @@
       s = s.replace(/[ю]/g, 'yu');
       return s;
     }
+
+    // @slug:end
 
     function titleizeHumanName(s, minOccurence = 10, occurenceThreshold = 0.8) {
       let debug = false;

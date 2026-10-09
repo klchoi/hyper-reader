@@ -135,6 +135,38 @@ describe('parts, ranges and extras', () => {
   });
 });
 
+describe('headings of other shapes', () => {
+  it('reads a series whose headings begin alike and carry no number', () => {
+    let text = book(Array.from({ length: 10 }, (_, k) => `Quy tắc quái đàm — cảnh ${'abcdefghij'[k]}\n\n${story(8, k)}`));
+    let chapters = real(parse(text, 'Quy tắc quái đàm'));
+    assert.equal(chapters.length, 10);
+    assert.deepEqual(titles(chapters).slice(0, 2), ['Chương 1: Cảnh a', 'Chương 2: Cảnh b']);
+  });
+  it('does not take a name and a dash in dialogue for a series', () => {
+    let lines = Array.from({ length: 12 }, (_, k) => `Tô Bạch — ${words[k % 10]} đã tới, ngươi mau ra mà xem.\n\n${story(5, k)}`);
+    let chapters = real(parse(book(lines), 'Một cuốn sách khác'));
+    assert.ok(chapters.length < 3);
+  });
+  it('groups the parts of a section under its heading', () => {
+    let text = book([[2, 1], [2, 2], [2, 3], [3, 1], [3, 2], [3, 3]].map(([c, h], k) => `Chương ${c}: Phần ${c} | thứ ${h} hồi cảnh ${k}\n\n${story(8, k)}`));
+    let chapters = real(parse(text));
+    assert.deepEqual(titles(chapters).slice(0, 4), ['Hồi 1: Cảnh 0', 'Hồi 2: Cảnh 1', 'Hồi 3: Cảnh 2', 'Hồi 1: Cảnh 3']);
+    assert.deepEqual([...new Set(chapters.map(c => c.group))], ['Chương 2: Phần 2', 'Chương 3: Phần 3']);
+  });
+  it('shows the parts a chapter is written in by number', () => {
+    let text = book(['nhất', 'nhị', 'tam', 'tứ', 'ngũ'].map((p, k) => `Chương 44: (${p})\n\n${story(8, k)}`));
+    assert.deepEqual(titles(real(parse(text))), ['Chương 44 (nhất)', 'Chương 44 (nhị)', 'Chương 44 (tam)', 'Chương 44 (tứ)', 'Chương 44 (ngũ)']);
+  });
+  it('keeps a piece set between two chapters outside their numbers', () => {
+    let text = book([`Chương 1\n\n${story(8)}`, `Chương 2\n\n${story(8)}`, `Thứ 0 chương phiên ngoại: Cảnh riêng\n\n${story(8)}`, `Chương 3\n\n${story(8)}`, `Chương 4\n\n${story(8)}`]);
+    assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Phiên ngoại: Cảnh riêng', 'Chương 3', 'Chương 4']);
+  });
+  it('finds a heading that follows its book words on the same line', () => {
+    let text = book([1, 2, 3].map(n => `Chương ${n}\n\n${story(8, n)}`), `Quyển thứ ba con rối thánh nữ thiên Chương 4: Thất thân cảnh\n\n${story(8)}`, `Chương 5\n\n${story(8)}`);
+    assert.equal(real(parse(text))[3].title, 'Chương 4: Thất thân cảnh');
+  });
+});
+
 describe('books', () => {
   const volume = (name, first) => [`Quyển thứ ${name}: Tên ${name}`, ...[0, 1, 2].map(k => `Chương ${first + k}\n\n${story(6, k)}`)];
   it('groups chapters under the book that names itself', () => {

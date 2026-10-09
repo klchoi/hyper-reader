@@ -3373,8 +3373,12 @@
         addEventListener('dragover', event => { event.preventDefault(); });
         addEventListener('drop', event => {
           event.preventDefault();
-          let files = [...event.dataTransfer.files].filter(file => file.type === 'text/plain');
-          dispatch(StoreFiles, { files });
+          // a book is a .txt file; some systems hand one over without a type, so the name decides
+          let dropped = [...event.dataTransfer.files];
+          let files = dropped.filter(file => /\.txt$/i.test(file.name));
+          let ignored = dropped.filter(file => !files.includes(file));
+          if (ignored.length) console.info('Not a .txt book, left out:', ignored.map(file => file.name));
+          if (files.length) dispatch(StoreFiles, { files });
         });
       }
     ];

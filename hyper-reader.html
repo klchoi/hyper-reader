@@ -2419,9 +2419,9 @@
             return [
               tx.objectStore('files').put(file, book.id),
               tx.objectStore('fileContents').put(fileContent, book.id),
-              tx.objectStore('books').put(book.toJSON(), book.id),
+              tx.objectStore('books').put(bookRecord(book), book.id),
               ...chapterKeys.filter(k => k.startsWith(book.id + '/')).map(k => tx.objectStore('chapters').delete(k)),
-              ...book.chapters.map(c => tx.objectStore('chapters').put(c.toJSON(), book.id + '/' + c.id)),
+              ...book.chapters.map(c => tx.objectStore('chapters').put(c, book.id + '/' + c.id)),
             ];
           }),
           tx.done,
@@ -2630,7 +2630,7 @@
           settings.uiFontWeight && `--ui-font-weight: ${Number(settings.uiFontWeight)};`,
         ].filter(Boolean).join(' ');
         // the sliders follow the same toggle the list does
-        let currentBook;
+        let currentGroup;
         let picked = fontSettings[fontPicker.target];
         let pickedFont = settings[picked.family];
         let pickedSize = settings[picked.size] || 18;
@@ -2644,7 +2644,7 @@
                   ...book.chapters.flatMap(c => [
                     // only the chapter that names its book opens a group: the ones after it
                     // belong to it until another book is named
-                    c.book && c.book != currentBook && h('li', { class: 'book' }, text(currentBook = c.book)),
+                    c.group && c.group != currentGroup && h('li', { class: 'book' }, text(currentGroup = c.group)),
                     h('li', { class: { active: c.id == chapter.id } }, [
                       h('a', {
                         href: router.route(bookRoute({ bookId: book.id, offset: c.offset })),
@@ -3023,10 +3023,11 @@
 
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 3;
+    const PARSER_VERSION = 4;
 
-    function Book(file, fileContent, chapters) {
-      let id, name, description;
+    // a book: where it came from, and its chapters when the text has been read
+    function Book(file, fileContent) {
+      let id, name, description, chapters;
       if (file?.name) {
         name = /(?<name>^[^(]*).*?\.txt/.exec(file.name.normalize()).groups.name.trim();
         description = /(?<description>\(.*)\.txt/.exec(file?.name.normalize())?.groups?.description?.trim();
@@ -3034,28 +3035,15 @@
       }
       if (fileContent) {
         fileContent = normalizeFileContent(fileContent);
-        // fileContent = titleizeHumanName(fileContent);
         chapters = extractChapters(name, fileContent, { name });
       }
-      return {
-        id,
-        name,
-        description,
-        chapters,
-        toJSON() {
-          return {
-            id,
-            name,
-            description,
-            parser: PARSER_VERSION,
-            chapters: chapters.map(c => {
-              c = c.toJSON();
-              delete c.content;
-              return c;
-            }),
-          }
-        }
-      };
+      return { id, name, description, chapters };
+    }
+
+    // what is stored of a book: the list of its chapters without their text, which is kept
+    // chapter by chapter
+    function bookRecord({ id, name, description, chapters }) {
+      return { id, name, description, parser: PARSER_VERSION, chapters: chapters.map(({ content, ...listed }) => listed) };
     }
 
     function normalizeFileContent(text) {
@@ -3086,107 +3074,39 @@
       return text;
     }
 
-    let printed = true;
-    function Chapter(_, { chapters, filename, text }) {
-      return {
-        _,
-        merged: 1,
-        get title() {
-          let originalTitle = _.title || _.titleShort;
-          // a lone `/` or `|` after the chapter word is a separator with nothing behind it
-          originalTitle = originalTitle?.replace(/^[\s\/|\\]+/, '');
-          let title, titleBook, titleChap, phienNgoai, halfPre, halfPost;
-          // the book is named by the group the list puts the chapter under, so it only
-          // stays in a title with no chapter to name instead (the bare `Bộ 2` line)
-          if (this.chapter == null) titleBook = this.book;
-          if (/phiên ngoại/iu.test(_.text) && !/phiên ngoại/iu.test(originalTitle) && !/phiên ngoại/iu.test(_.chapType)) phienNgoai = 'Phiên ngoại';
-          if (this.chapter != null) titleChap = this.chapType + ' ' + this.chapter;
-          if (this.half && !originalTitle?.includes('(' + this.half + ')')) {
-            if (_.halfType) halfPre = this.half + ':';
-            else halfPost = '(' + this.half + ')';
-          }
-          title = [titleBook, phienNgoai, titleChap].filter(Boolean).join(' ');
-          title = [title, (originalTitle || '').replace(/./, c => c.toUpperCase())].filter(Boolean).join(': ');
-          title = [halfPre, title, halfPost].filter(Boolean).join(' ');
-          if (!title) title = this.chapType + ' ' + (this.i + 1);
-          if (!printed) {
-            printed = true;
-          }
-          return title;
-        },
-        get i() {
-          return chapters.indexOf(this);
-        },
-        get startIndex() {
-          // return text.lastIndexOf('\n', _.index);
-          return _.index;
-        },
-        // what the url tracks a book by, so a live chapter reads like a stored one
-        get offset() {
-          return this.startIndex;
-        },
-        get endIndex() {
-          if (this.i == chapters.length-1) return text.length;
-          return chapters[this.i + 1].startIndex;
-        },
-        get id() {
-          return slug(this.title) + '-' + this.i;
-        },
-        get content() {
-          return text.slice(this.startIndex, this.endIndex).trim();
-        },
-        // untrimmed: whether a line break follows the heading is the whole question
-        // when deciding if the next match is the same heading again
-        get rawContent() {
-          return text.slice(this.startIndex, this.endIndex);
-        },
-        // what the reader would see on the page, heading line and all
-        get paragraphs() {
-          return this.content.split('\n').filter(line => line.trim()).length;
-        },
-        get chapter() {
-          return _.chapNum || _.chapText;
-        },
-        get chapNo() {
-          if (this.chapter) return Number(this.chapter)
-        },
-        get chapType() {
-          return _.chapType || 'Chương'
-        },
-        get length() {
-          return this.endIndex - this.startIndex;
-        },
-        get half() {
-          return [_.halfType, _.halfNum || _.halfText].filter(Boolean).join(' ');
-        },
-        get halfNo() {
-          if (_.halfNum) return Number(_.halfNum);
-        },
-        get halfType() {
-          return _.halfType;
-        },
-        get bookType() {
-          if (_.bookType) return _.bookType.toLowerCase().replace(/^./, c => c.toUpperCase());
-        },
-        get bookNo() {
-          if (_.bookNum) return Number(_.bookNum);
-          if (_.bookText) return Number(_.bookText);
-        },
-        get book() {
-          if(_.bookNum || _.bookText) {
-            return [_.bookType || 'Quyển', Number(_.bookNum) || Number(_.bookText)].filter(Boolean).join(' ');
-          }
-        },
-        toJSON() {
-          return {
-            id: this.id,
-            title: this.title,
-            offset: this.offset,
-            book: this.group,
-            content: this.content,
-          }
-        }
-      };
+    // ---- chapters -----------------------------------------------------------------------
+    // A chapter, as the rest of the app knows it:
+    //   { id, title, offset, group, content }
+    // where it starts in the text, what the list calls it, the group (a book, a section)
+    // the list puts it under, and its text. The extraction below describes each chapter as a
+    // draft - `{ offset, group, heading }` - and finishChapters turns the drafts into these.
+    //
+    // heading: { type, number, part, title, text }
+    //   type    the word before the number: `Chương`, `Hồi`, `Phiên ngoại`
+    //   number  `27`, `1-6` for a run of chapters, `kết` for the last one
+    //   part    { text: 'thượng' } after the number, { text: 'tiết 2', leading: true } before it
+    //   title   what the heading says besides, as written
+    //   text    the heading as it stands in the book
+
+    function chapterTitle({ type = 'Chương', number, part, title, text }, ordinal) {
+      title = title?.replace(/^[\s\/|\\]+/, '') ?? '';
+      // a lone `/` or `|` after the chapter word was a separator with nothing behind it
+      let isExtra = (s) => /phiên ngoại/iu.test(s ?? '');
+      let extra = isExtra(text) && !isExtra(title) && !isExtra(type) ? 'Phiên ngoại' : undefined;
+      let heading = [extra, number != null && `${type} ${number}`].filter(Boolean).join(' ');
+      let named = [heading, title.replace(/./, c => c.toUpperCase())].filter(Boolean).join(': ');
+      let shown = part && !title.includes(`(${part.text})`) ? part : null;
+      let full = [shown?.leading && `${shown.text}:`, named, shown && !shown.leading && `(${shown.text})`].filter(Boolean).join(' ');
+      return full || `${type} ${ordinal + 1}`;
+    }
+
+    // the drafts, in order, as chapters: each one runs to where the next begins
+    function finishChapters(drafts, text) {
+      return drafts.map(({ offset, group, heading }, i) => {
+        let title = chapterTitle(heading, i);
+        let end = drafts[i + 1]?.offset ?? text.length;
+        return { id: slug(title) + '-' + i, title, offset, group, content: text.slice(offset, end).trim() };
+      });
     }
 
     // ---- chapter extraction -------------------------------------------------------------
@@ -3844,7 +3764,7 @@
       return title?.length > 100 ? title.slice(0, 100).replace(/\s+\S*$/, '') + '…' : title;
     }
 
-    function buildChapters(nodes, path, { filename, text }) {
+    function buildChapters(nodes, path) {
       let clusters = [];
       let opening;   // where the book heading in front of the next chapter begins
       for(let { i, joined, state } of path) {
@@ -3868,53 +3788,45 @@
         if(word) types[word] = (types[word] ?? 0) + 1;
       }
       let bookWord = Object.keys(types).sort((a, z) => types[z] - types[a])[0] ?? 'Quyển';
-      let chapters = [];
+      let drafts = [];
       let section;    // the section whose parts are being listed
       for(let { members, state, index } of clusters) {
         let first = members[0];
         let lead = members.reduce((best, m) => m.base > best.base ? m : best, first);
         let end = members.find(m => m.end);
         let numbered = members.find(m => m.n != null && m.kind != 'interlude');
-        let _ = {
-          index,
-          text: lead.text,
-          certain: true,
-          chapType: (members.find(m => m.chapType) ?? {}).chapType ?? (state.extra ? 'Phiên ngoại' : undefined),
-          title: pickTitle(members),
-        };
-        if(end) _.chapText = end.endWord;
+        let type = (members.find(m => m.chapType) ?? {}).chapType ?? (state.extra ? 'Phiên ngoại' : undefined);
+        let heading = { type, title: pickTitle(members), text: lead.text };
+        if(end) heading.number = end.endWord;
         else if(first.kind == 'half') {
-          _.chapNum = String(state.n);
-          if(first.halfNum != null) Object.assign(_, { halfNum: first.halfNum, halfType: first.halfType });
-          else Object.assign(_, { halfText: first.halfText });
+          heading.number = String(state.n);
+          heading.part = first.halfNum != null ? { text: `${first.halfType} ${first.halfNum}`, leading: true } : { text: first.halfText };
         }
         else if(numbered) {
-          _.chapNum = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);
-          if(numbered.half != null && numbered.kind == 'chap') _.halfText = numbered.halfText;
+          heading.number = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);
+          if(numbered.half != null && numbered.kind == 'chap') heading.part = { text: numbered.halfText };
         }
-        let chapter = Chapter(_, { chapters, filename, text });
         // a part whose heading leaves out its section stays in the one before it
-        let type = _.chapType;
         let inherited = section && !lead.outer && state.book == 0 && type == section.type ? section.name : undefined;
         if(lead.outer) section = { name: lead.outer, type };
         else if(!inherited) section = undefined;
-        chapter.group = lead.outer ?? inherited ?? (state.book > 0 ? `${bookWord} ${state.book}` : undefined);
-        chapters.push(chapter);
+        let group = lead.outer ?? inherited ?? (state.book > 0 ? `${bookWord} ${state.book}` : undefined);
+        drafts.push({ offset: index, group, heading });
       }
       // a book that opens with no heading of its own, ahead of a `Bộ 2`, is the first
-      let named = chapters.findIndex(c => c.group);
+      let named = drafts.findIndex(d => d.group);
       if(named > 0) {
-        let [type, number] = chapters[named].group.split(' ');
+        let [type, number] = drafts[named].group.split(' ');
         if(Number(number) == 2) {
-          for(let c of chapters.slice(0, named)) c.group = `${type} 1`;
+          for(let d of drafts.slice(0, named)) d.group = `${type} 1`;
         }
       }
-      return chapters;
+      return drafts;
     }
 
     // headings that carry no number but all begin with the same words and a dash, in
     // order: `Quy tắc quái đàm — sân vận động...`, `Quy tắc quái đàm — dâm mỹ ký túc xá...`
-    function seriesChapters(text, { filename, name }) {
+    function seriesChapters(text, { name }) {
       let lines = [];
       let start = 0;
       for(let line of text.split('\n')) {
@@ -3929,24 +3841,20 @@
       let own = name.toLowerCase().normalize();
       let [key, count] = [...counts].filter(([words]) => own.startsWith(words)).sort((a, z) => z[1] - a[1])[0] ?? [];
       if(!key || count < 8) return [];
-      let chapters = [];
+      let drafts = [];
       for(let { key: lineKey, index, line, length } of lines) {
         if(lineKey != key) continue;
         // what follows the repeated words, less the number that sometimes closes it
         let title = cleanTitle(line.slice(length)).replace(/\s*\(\s*\S{1,12}\s*\)\s*$/, '');
-        chapters.push(Chapter({ index, text: line, certain: true, chapNum: String(chapters.length + 1), title }, { chapters, filename, text }));
+        drafts.push({ offset: index, heading: { number: String(drafts.length + 1), title, text: line } });
       }
-      return chapters;
+      return drafts;
     }
 
     // a book with no headings to find is read in pages of this many paragraphs
-    function pagesOf(text, { filename }, paragraphsPerPage = 60) {
+    function pagesOf(text, paragraphsPerPage = 60) {
       let pattern = '(.*\n){1,' + paragraphsPerPage + '}';
-      let chapters = [];
-      for(let m of text.matchAll(new RegExp(pattern, 'gimu'))) {
-        chapters.push(Chapter({ index: m.index, text: m[0] }, { chapters, filename, text }));
-      }
-      return chapters;
+      return [...text.matchAll(new RegExp(pattern, 'gimu'))].map(m => ({ offset: m.index, heading: { text: m[0] } }));
     }
 
     function extractChapters(filename, text, { name }) {
@@ -3956,26 +3864,21 @@
       let credit = shapeCredit(nodes, first);
       let path = chooseHeadings(nodes, credit, true, tinySections(nodes, first));
       path = fillGaps(nodes, path, credit);
-      let chapters = buildChapters(nodes, path, { filename, text });
+      let drafts = buildChapters(nodes, path);
       // no numbers to follow, but the same words begin every heading
-      let series = seriesChapters(text, { filename, name });
-      if(series.length >= 8 && series.length > chapters.length * 1.2) chapters = series;
-      if(chapters.length < 2) chapters = pagesOf(text, { filename });
-      addPrologue(chapters, { filename, text });
-      return chapters;
+      let series = seriesChapters(text, { name });
+      if(series.length >= 8 && series.length > drafts.length * 1.2) drafts = series;
+      if(drafts.length < 2) drafts = pagesOf(text);
+      return finishChapters(withPrologue(drafts, filename, text), text);
     }
 
     // no heading stands in front of the first one, so the title page, the author and
     // the blurb fell outside every chapter and were never read. they open the book as
     // an entry of their own
-    function addPrologue(chapters, { filename, text }) {
-      let prologue = text.slice(0, chapters[0]?.startIndex ?? text.length).trim();
-      if(!prologue) return;
-      chapters.unshift(Chapter({
-        title: filename,
-        text: filename,
-        index: 0,
-      }, { chapters, filename, text }));
+    function withPrologue(drafts, filename, text) {
+      let front = text.slice(0, drafts[0]?.offset ?? text.length).trim();
+      if(!front) return drafts;
+      return [{ offset: 0, heading: { title: filename, text: filename } }, ...drafts];
     }
 
     function slug(s) {

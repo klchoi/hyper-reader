@@ -120,7 +120,6 @@
       --body-font-color: rgb(27, 27, 27);
       --body-background-color: rgb(230, 230, 230);
       --paper-background-color: rgb(255, 255, 255);
-      /*--paper-shadow-color: rgba(0, 0, 0, .2); */
       --link-color: rgb(65, 110, 210);
       --horizontal-line-color: rgb(220, 220, 220);
     }
@@ -129,7 +128,6 @@
         --body-font-color: rgb(27, 27, 27);
         --body-background-color: rgb(230, 230, 230);
         --paper-background-color: rgb(255, 255, 255);
-        /*--paper-shadow-color: rgba(0, 0, 0, .2); */
         --link-color: rgb(65, 110, 210);
         --horizontal-line-color: rgb(220, 220, 220);
       }
@@ -139,7 +137,6 @@
         --body-font-color: rgb(27, 27, 27);
         --body-background-color: rgb(230, 230, 230);
         --paper-background-color: rgb(255, 255, 255);
-        /*--paper-shadow-color: rgba(0, 0, 0, .2); */
         --link-color: rgb(65, 110, 210);
         --horizontal-line-color: rgb(220, 220, 220);
       }
@@ -148,7 +145,6 @@
       --body-font-color: rgb(79, 50, 28);
       --body-background-color: rgb(225, 216, 200);
       --paper-background-color: rgb(248, 241, 227);
-      /*--paper-shadow-color: rgba(0, 0, 0, .2); */
       --link-color: rgb(209, 150, 0);
       --horizontal-line-color: rgb(230, 218, 201);
     }
@@ -157,7 +153,6 @@
         --body-font-color: rgb(79, 50, 28);
         --body-background-color: rgb(225, 216, 200);
         --paper-background-color: rgb(248, 241, 227);
-        /*--paper-shadow-color: rgba(0, 0, 0, .2); */
         --link-color: rgb(209, 150, 0);
         --horizontal-line-color: rgb(230, 218, 201);
       }
@@ -167,7 +162,6 @@
         --body-font-color: rgb(79, 50, 28);
         --body-background-color: rgb(225, 216, 200);
         --paper-background-color: rgb(248, 241, 227);
-        /*--paper-shadow-color: rgba(0, 0, 0, .2); */
         --link-color: rgb(209, 150, 0);
         --horizontal-line-color: rgb(230, 218, 201);
       }
@@ -176,7 +170,6 @@
       --body-font-color: rgba(255, 255, 255, 0.78);
       --body-background-color: rgb(50, 50, 51);
       --paper-background-color: rgb(74, 74, 77);
-      /*--paper-shadow-color: rgba(0, 0, 0, .24); */
       --link-color: rgb(90, 200, 250);
       --horizontal-line-color: rgb(111, 111, 111);
       --body-font-smoothing: antialiased;
@@ -186,7 +179,6 @@
         --body-font-color: rgba(255, 255, 255, 0.78);
         --body-background-color: rgb(50, 50, 51);
         --paper-background-color: rgb(74, 74, 77);
-        /*--paper-shadow-color: rgba(0, 0, 0, .24); */
         --link-color: rgb(90, 200, 250);
         --horizontal-line-color: rgb(111, 111, 111);
         --body-font-smoothing: antialiased;
@@ -197,7 +189,6 @@
         --body-font-color: rgba(255, 255, 255, 0.78);
         --body-background-color: rgb(50, 50, 51);
         --paper-background-color: rgb(74, 74, 77);
-        /*--paper-shadow-color: rgba(0, 0, 0, .24); */
         --link-color: rgb(90, 200, 250);
         --horizontal-line-color: rgb(111, 111, 111);
         --body-font-smoothing: antialiased;
@@ -493,14 +484,12 @@
         gap: 0.5em;
         align-items: start;
         li {
-          /**/
           max-width: 100%;
           &:not(.active) {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          /**/
           padding-top: 0.1ex;
           padding-bottom: 0.1ex;
           padding-left: calc(var(--gap) * 0.25);
@@ -651,10 +640,6 @@
 
     /** main **/
     main {
-      /**
-      padding-top: var(--gap);
-      padding-bottom: var(--gap);
-      /**/
       display: flex;
       background: var(--paper-background-color);
       padding: 1rem 3rem;
@@ -730,19 +715,6 @@
     .table .desc { display: block; }
     .table .delete { color: inherit; }
     .table .delete:hover { color: var(--link-color); }
-
-    /** disable scroll when mouse is not over **/
-    /**
-    nav,
-    main {
-      height: 100%;
-      overflow-y: hidden;
-    }
-    nav:hover,
-    main:hover {
-      overflow-y: auto;
-    }
-    /**/
 
     /** zen mode **/
     [data-zen=true] nav {
@@ -850,13 +822,6 @@
         button {
           appearance: none;
           background: transparent;
-          /**
-          &:hover,
-          &:focus,
-          &:active {
-            background: var(--paper-background-color);
-          }
-          /**/
           color: var(--body-font-color);
           width: 100%;
           min-width: 25px;
@@ -1036,7 +1001,6 @@
       text = text.replace(/([:—]{2,})/gm, c => c.slice(0, 1));
       text = text.replace(/(:)[^\s\w]+\s*/gm, '$1 ');
       text = text.replace(/^\s*"\s+|\s+"\s*$/gm, '"');
-      // text = text.replace(/(?<=[.,:] *)"\n/g, '\n"');
       //"QQ Group 712797052"
       text = text.replace(/\s?"?QQ Group \d+"?/gu, '');
       //tìm sách a "Cuộc đời này không phụ diên đuôi tình" cá nhân cải biên
@@ -1764,7 +1728,7 @@
           begin(TUNING.path.startAlone, reached(node, { book: extra ? 0 : b, extra, n: null }), books.length > 0);
         },
         // `Thứ 0 chương phiên ngoại`: a piece set between two chapters, outside their numbers
-        interlude(i, { go }) {
+        interlude(_i, { go }) {
           if(top >= 0) go(top, TUNING.reward.interlude, { ...state[top] });
         },
         // the nearest heading before it that has a number gives the half its chapter
@@ -2149,7 +2113,6 @@
   <script type="module">
     import { h, text, app } from 'https://cdn.jsdelivr.net/npm/hyperapp/+esm';
     import { openDB } from 'https://cdn.jsdelivr.net/npm/idb/+esm';
-    // import { generateColor as stc } from 'https://cdn.jsdelivr.net/npm/@marko19907/string-to-color/+esm';
     import _ from 'https://cdn.jsdelivr.net/npm/lodash-es/+esm';
     import chromaJs from 'https://cdn.jsdelivr.net/npm/chroma-js@2.4/+esm';
 
@@ -2164,7 +2127,7 @@
         return this.parse(location.hash.slice(1));
       }
       route(route) {
-        let hash = new URLSearchParams(Object.entries(route).filter(([k, v]) => v !== '' && v != null)).toString();
+        let hash = new URLSearchParams(Object.entries(route).filter(([, v]) => v !== '' && v != null)).toString();
         if (hash) hash = `#${hash}`;
         return hash;
       }
@@ -2224,12 +2187,6 @@
                 db.createObjectStore(store, keyOptions);
               }
             }
-            //for(let store of db.objectStoreNames) {
-            //  if (!(store in schemas)) {
-            //    console.warn('Delete store', store);
-            //    db.deleteObjectStore(store);
-            //  }
-            //}
           },
           blocked: console.log,
           blocking: console.log,
@@ -2252,7 +2209,6 @@
       state,
       (dispatch) => {
         addEventListener('hashchange', (event) => {
-          let from = state.router.parse(new URL(event.oldURL).hash.slice(1));
           let to = state.router.parse(new URL(event.newURL).hash.slice(1));
           if (!to.book) {
             dispatch(ShowRecentBooks);
@@ -2347,7 +2303,6 @@
       },
     });
 
-    let ExecuteSelectedCommand = state => state;
     let HighlightMatches = (state) => [
       state,
       async () => {
@@ -2600,7 +2555,7 @@
     );
     let OpenBookDone = (state, { book, chapter, offset }) => [
       { ...state, book, chapter },
-      (dispatch) => {
+      () => {
         let route = bookRoute({ bookId: book.id, offset: offset ?? chapter.offset, chapterId: chapter.id });
         if (state.book?.id == book.id) state.router.replace(route);
         else state.router.push(route);
@@ -2683,7 +2638,7 @@
 
     let ToggleNamesEditor = (state, { open }) => ({ ...state, namesEditor: { ...state.namesEditor, open } });
     let SetNames = (state, names) => ({ ...state, namesEditor: { ...state.namesEditor, names } });
-    let SaveNames = (state, { bookId, names }) => [state, async (dispatch) => {
+    let SaveNames = (state, { bookId, names }) => [state, async () => {
       names = names.trim() + '\n';
       await state.db.put('names', names, bookId);
     }];
@@ -3187,7 +3142,6 @@
         });
       });
       names = names.map(tier => tier.sort((a, z) => z.length - a.length));
-      //console.log({names})
       // an empty alternation below would match the empty string everywhere
       if(!names.some(tier => tier.length)) return;
 
@@ -3197,7 +3151,6 @@
       ], {
         'wb': /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/,
       }, 'gui'));
-      //console.log('nameRegexes:', nameRegexes);
       let ranges = {};
       document.querySelectorAll(selector).forEach(el => {
         el.childNodes.forEach(el => {
@@ -3232,19 +3185,12 @@
               if(!detectedNames[prefix].has(el)) detectedNames[prefix].set(el, []);
               detectedNames[prefix].get(el).push(found);
             }
-            //console.debug('HighlightNames', 'found', {
-            //  name,
-            //  excerp: el.textContent.slice(Math.max(0, start - 50), end + 50),
-            //  nameId,
-            //  range,
-            //});
           }
         });
       });
 
       // merge sub ranges
       let nameIds = Object.keys(ranges).sort((a, z) => z.length - a.length);
-      //console.debug(Object.keys(ranges));
       let aliases = {};
       for(let nameId in ranges) {
         // an explicit alias already says who this is, don't guess from the suffix
@@ -3257,8 +3203,6 @@
           delete ranges[nameId];
         }
       }
-      //console.debug(Object.keys(ranges));
-      //console.debug((ranges));
 
       // one group per person: names the editor lists on the same line share a key,
       // which is also the key their hue is remembered under
@@ -3269,7 +3213,6 @@
         groups[groupId].ids.push(...(aliases[nameId] || [nameId]));
         groups[groupId].ranges.push(...ranges[nameId]);
       }
-      //console.debug(Object.keys(groups));
 
       for(let groupId in groups) {
         // reuse the hue of any id this character is already known by, including the
@@ -3295,12 +3238,6 @@
           let highlight = new Highlight();
           for(let { range } of found) {
             highlight.add(range);
-            //console.debug('HighlightNames', 'highlight', range.toString(), {
-            //  groupId,
-            //  range,
-            //  color,
-            //  styleId,
-            //});
           }
           CSS.highlights.set(styleId + suffix, highlight);
           setHighlightStyle(styleId + suffix, [
@@ -3477,7 +3414,7 @@
         }
       }
     ];
-    let StoreFiles = (state, { files: localFiles, fileContents }) => [
+    let StoreFiles = (state, { files: localFiles }) => [
       state,
       async (dispatch) =>  {
         let readFile = (localFile) => new Promise(resolve => {
@@ -3499,41 +3436,6 @@
         }
 
         dispatch(StoreBooks, { files, onSuccess: [StoreFilesDone, { files }] });
-        /**
-        for (let i = 0; i < localFiles.length; i++) {
-          let reader = new FileReader();
-          reader.addEventListener('load', async event => {
-            fileContents[i] = event.target.result;
-            files[i] = {
-              name: localFiles[i].name,
-              size: localFiles[i].size,
-            };
-
-            let book = Book(files[i]);
-            let existingFile = await state.db.get('files', book.id);
-            if (existingFile?.size != files[i].size) {
-              book = Book(files[i], fileContents[i]);
-              dispatch(SaveProgress, { book, chapter: book.chapters[0] });
-              updated[i] = true;
-            }
-
-            let tx = state.db.transaction(['files', 'fileContents'], 'readwrite');
-            await Promise.all([
-              tx.objectStore('files').put(files[i], book.id),
-              tx.objectStore('fileContents').put(fileContents[i], book.id),
-              tx.done,
-            ]);
-
-            dispatch(StoreBook, { bookId: book.id });
-            storedCount++;
-
-            if (storedCount == localFiles.length) {
-
-            }
-          });
-          reader.readAsText(localFiles[i]);
-        }
-        /**/
       },
     ];
 
@@ -3689,13 +3591,12 @@
           if (typeof action === 'function' && action.name.match(/^[A-Z]/)) {
             let log = [action.name];
             if (payload !== undefined) log.push(payload);
-            //console.warn(...log);
           }
 
           dispatch(action, payload);
         };
       },
-      subscriptions: (state) => [
+      subscriptions: () => [
         [InitKeyboardNavigator],
         [InitCommandPalette],
         [InitFontPicker],
@@ -3705,15 +3606,15 @@
       node: document.body,
       view: ({ router, files, book, chapter, progress, settings, commandPalette, namesEditor, fontPicker }) => {
         let fixNames = text => correctNames(text, namesEditor.names);
-        let cachedCommands = window.cachedCommands = (window.cachedCommands || new Map());
-        let commands = [], selectedCommand, commandKey;
+        let commands = [];
+        let selectedCommand;
         if(!book) {
           commands = simpleCache({
             key: 'commands/books',
             fallbackValue: [],
             getHash() { return files.length; },
             getValue() {
-              return files.map((file, index) => {
+              return files.map(file => {
                 let book = Book(file);
                 let { offset, chapterId } = (progress[book.id] || {});
                 return {
@@ -3906,7 +3807,6 @@
                       line = line.slice(m.index + m[0].length);
                     }
                     if (line) content.push(text(line));
-                    // if (/^"/.test(line)) return h('p', {}, h('em', {}, text(line)));
                     return h('p', { 'data-offset': offset }, content);
                   })
                 ])
@@ -4239,61 +4139,6 @@
       return book;
     }
     // @worker:end
-
-
-    function titleizeHumanName(s, minOccurence = 10, occurenceThreshold = 0.8) {
-      let debug = false;
-      let pattern = /(?:(?<pre>\p{Ll}+)[ ]+)?(?<name>[\p{Lu}A-Z]\p{Ll}+(?:[ ]+\p{Lu}\p{Ll}+)?)(?:[ ]+(?<post>\p{Ll}+))?/gu;
-      let counts = {};
-      let match;
-      let titleize = s => s.replace(/(?<=^|[^\p{L}])\p{L}/gu, s => s.toUpperCase());
-      let c = 0;
-      while ((match = pattern.exec(s))) {
-        if (++c < 10) debug && console.log({ match });
-        let { pre, name, post } = match.groups;
-        if (!counts[name]) counts[name] = { total: 0, pre: {}, post: {} };
-        counts[name].total += 1;
-        if (pre) {
-          if (!counts[name].pre[pre]) counts[name].pre[pre] = 0;
-          counts[name].pre[pre] += 1;
-        }
-        if (post) {
-          if (!counts[name].post[post]) counts[name].post[post] = 0;
-          counts[name].post[post] += 1;
-        }
-      }
-      debug && console.dir(counts);
-      analyze: for (let [name, { total, pre, post }] of Object.entries(counts)) {
-        if (total < minOccurence) {
-          debug && console.debug(name, 'is too few .. IGNORE', { total });
-          continue analyze;
-        }
-        for (let [prefix, prefixCount] of Object.entries(pre)) {
-          if (prefixCount / total >= occurenceThreshold) {
-            debug && console.warn(name, '->', titleize(prefix), name, { total, prefixCount });
-            s = s.replace(new RegExp(prefix + '\\s+' + name, 'gu'), titleize);
-            continue analyze;
-          }
-        }
-        for (let [postfix, postfixCount] of Object.entries(post)) {
-          if (postfixCount / total >= occurenceThreshold) {
-            debug && console.warn(name, '->', titleize(postfix), name, { total, postfixCount });
-            s = s.replace(new RegExp(name + '\\s+' + postfix, 'gu'), titleize);
-            continue analyze;
-          }
-        }
-      }
-      return s;
-    }
-
-    function debug(...args) {
-      // return;
-      if (args.length === 1) {
-        console.table(Object.values(args[0])[0]);
-      } else {
-        console.info(...args);
-      }
-    }
 
     function getColorScheme() {
       if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';

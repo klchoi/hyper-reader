@@ -34,6 +34,14 @@ if(!isMainThread) {
   main();
 }
 
+// the groups of a book in the order they come, each once in a row
+function groupsOf(chapters) {
+  let groups = [];
+  for(let [, group] of chapters) if(group != null && group != groups.at(-1)) groups.push(group);
+  return groups;
+}
+const show = (groups) => groups.length <= 4 ? `[${groups.join(', ')}]` : `[${groups.slice(0, 2).join(', ')}, ... ${groups.at(-2)}, ${groups.at(-1)}] (${groups.length})`;
+
 async function main() {
   let args = process.argv.slice(2);
   let valueOf = (flag) => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined;
@@ -72,9 +80,17 @@ async function main() {
     if(!was) { console.log(`new      ${file}`); continue; }
     if(chapters.error) { console.log(`error    ${file}: ${chapters.error}`); continue; }
     let titles = new Set(was.map(c => c[0]));
-    let gone = was.filter(c => !chapters.some(d => d[0] == c[0])).length;
+    let now = new Set(chapters.map(c => c[0]));
+    let gone = was.filter(c => !now.has(c[0])).length;
     let added = chapters.filter(c => !titles.has(c[0])).length;
-    console.log(`changed  ${file}: ${was.length} -> ${chapters.length} chapters, ${gone} titles gone, ${added} new`);
+    let moved = was.length == chapters.length ? was.filter((c, i) => c[2] != chapters[i][2]).length : null;
+    let regrouped = was.length == chapters.length ? was.filter((c, i) => c[1] != chapters[i][1]).length : null;
+    let notes = [`${was.length} -> ${chapters.length} chapters`, `${gone} titles gone`, `${added} new`];
+    if(moved) notes.push(`${moved} moved`);
+    if(regrouped) notes.push(`${regrouped} regrouped`);
+    console.log(`changed  ${file}: ${notes.join(', ')}`);
+    let [groupsWas, groupsNow] = [groupsOf(was), groupsOf(chapters)];
+    if(groupsWas.join() != groupsNow.join()) console.log(`           groups ${show(groupsWas)} -> ${show(groupsNow)}`);
   }
   for(let file of Object.keys(before)) if(!(file in books)) console.log(`missing  ${file}`);
   console.log(changed ? `${changed} of ${Object.keys(books).length} books changed` : `all ${Object.keys(books).length} books unchanged`);

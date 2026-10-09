@@ -212,6 +212,12 @@ describe('books', () => {
     let chapters = real(parse(book(front, first)));
     assert.deepEqual(titles(chapters).slice(0, 3), ['Chương 1: Nhân vật', 'Chương 2: Thế lực', 'Chương 1']);
   });
+  it('reads the book a chapter names in brackets after it', () => {
+    let part = (b, name) => [`Thứ 1 chương (bộ 0${b}) chi ${name}\n\n${story(6, b)}`, ...[2, 3].map(n => `Thứ ${n} chương\n\n${story(6, n)}`)];
+    let chapters = real(parse(book(part(1, 'kỳ nghỉ'), part(2, 'du thuyền'))));
+    assert.deepEqual(chapters.map(c => c.group), ['Bộ 1', 'Bộ 1', 'Bộ 1', 'Bộ 2', 'Bộ 2', 'Bộ 2']);
+    assert.deepEqual(titles(chapters).slice(0, 4), ['Chương 1: Kỳ nghỉ', 'Chương 2', 'Chương 3', 'Chương 1: Du thuyền']);
+  });
   it('groups the books a file holds under the names their title lines give', () => {
     let titled = (title) => [`Tên sách: ${title}`, 'Tác giả: ai đó', ...[1, 2, 3].map(n => `Thứ ${n} chương\n\n${story(6, n)}`)];
     let chapters = real(parse(book(titled('Ngoại truyện: Ba cô gái'), titled('Tiền truyện: Vịnh Văn'))));

@@ -1337,9 +1337,12 @@
     const DECOR = '[LS]*';
     const NAME_PART = '(?:nR?S?)?';
     const BOOK_PART = '(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?';
+    // the book after the chapter, in brackets: `Thứ 1 chương (bộ 02) chi du thuyền xuân sắc`
+    const BOOK_AFTER = '(?:L(?<bm4>b)t?(?<bn4>N)R)?';
     const HEADING_RULES = [
       // Chương 5 | Chương kết | Thứ 5 chương | Ba mươi tám chương | Quyển 2 Chương 7 | 【NAME】 Chương 5
-      { kind: 'chap', base: 9, re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))` },
+      // | Thứ 1 chương (bộ 02)
+      { kind: 'chap', base: 9, re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))${BOOK_AFTER}` },
       // Phiên ngoại: 【1】 title
       { kind: 'chap', base: 9, re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?` },
       // Thứ 7-10 chương: several chapters under one heading
@@ -1417,10 +1420,10 @@
         }
       }
       if(at('cn3')) roles.span = at('cn3').value;
-      let bookNumber = at('bn') ?? at('bn2') ?? at('bn3');
+      let bookNumber = at('bn') ?? at('bn2') ?? at('bn3') ?? at('bn4');
       if(bookNumber) {
         roles.bookNum = bookNumber.value;
-        roles.bookType = (at('bm') ?? at('bm2') ?? at('bm3')).word;
+        roles.bookType = (at('bm') ?? at('bm2') ?? at('bm3') ?? at('bm4')).word;
       }
       if(rule.kind === 'extrahead') roles.extra = true;
       if(rule.kind === 'half') {
@@ -1521,6 +1524,8 @@
         // `Thứ 6 chương Chương 6: Cao trào...` and `Thứ 8 chương thật · Chương 8:: Đại tỷ...`
         // say the chapter twice; the title is what follows the second
         let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);
+        // `(bộ 02) chi du thuyền xuân sắc`: `chi` (of) ties the book to its name
+        if(at('bn4')) title = title.replace(/^chi\s+/iu, '');
         if(read.roles.n != null) {
           title = title.replace(new RegExp(`^(?:\\S+\\s+){0,3}?(?:chương|hồi)\\s+${read.roles.n}\\s*[:：.]*\\s*`, 'iu'), '');
         }
@@ -1938,13 +1943,15 @@
         clusters.push({ members: [node], state, index: Math.min(opening ?? Infinity, node.index) });
         opening = undefined;
       }
-      // a book is `Quyển` or `Bộ` throughout, whichever the headings say most often
-      let types = {};
-      for(let { i } of path) {
-        let word = nodes[i].kind === 'book' ? nodes[i].bookType : null;
-        if(word) types[word] = (types[word] ?? 0) + 1;
-      }
-      let bookWord = Object.keys(types).sort((a, z) => types[z] - types[a])[0] ?? 'Quyển';
+      // a book is `Quyển` or `Bộ` throughout, whichever the books' headings say most often, or
+      // else the chapters that name their book (`Thứ 1 chương (bộ 02)`)
+      let mostSaid = (words) => {
+        let types = {};
+        for(let word of words) if(word) types[word] = (types[word] ?? 0) + 1;
+        return Object.keys(types).sort((a, z) => types[z] - types[a])[0];
+      };
+      let bookWord = mostSaid(path.map(({ i }) => nodes[i].kind === 'book' ? nodes[i].bookType : null))
+        ?? mostSaid(path.map(({ i }) => nodes[i].bookNum != null ? nodes[i].bookType : null)) ?? 'Quyển';
       let drafts = [];
       let section;    // the section whose parts are being listed
       for(let { members, state, index } of clusters) {
@@ -4127,7 +4134,7 @@
     // @book:begin - what the tests load of the page: a book, and what is stored of it
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 7;
+    const PARSER_VERSION = 8;
 
     // a book: where it came from, and its chapters once the text has been read (see readBook)
     function Book(file) {

@@ -1655,57 +1655,84 @@
       };
       let apart = (i, j) => nodes[i].ord - nodes[j].ord;
 
+      // the ways into a heading that has a number, one step each: going on from an earlier
+      // number, from a book's heading, into a new book, off the numbers altogether, or
+      // starting a path
+      let goingOn = (i, { go }) => {
+        let node = nodes[i];
+        let { n, bookNum: book } = node;
+        for(let d = 0; d <= TUNING.path.gapMax; d++) {
+          for(let j of byNumber.get(n - d) ?? []) {
+            let s = state[j];
+            if(s.ended || (node.extra && !s.extra)) continue;
+            if(book != null && s.book !== 0 && book !== s.book) continue;
+            if(d === 0) {
+              // the next part of the same chapter, or the same heading again
+              if(node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, { ...s, half: node.half });
+              else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
+            } else {
+              go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, word: node.bookType ?? s.word, extra: s.extra || !!node.extra, half: node.half ?? null });
+            }
+          }
+        }
+      };
+
+      // a book or an extra begins, and the numbers may start over
+      let afterBookHeading = (i, { go }) => {
+        let node = nodes[i];
+        let { n, bookNum: book } = node;
+        for(let j of books) {
+          let s = state[j];
+          // a bare number straight after `Kỳ Bạch Tuyết phiên ngoại` is the first of its extras
+          let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;
+          if(s.extra !== !!node.extra && !opensExtra) continue;
+          if(book != null && book !== s.book) continue;
+          let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : (n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap));
+          go(j, value, { ...s, n: node.span ?? n, half: node.half ?? null });
+        }
+      };
+
+      // a book that names itself in the heading, or extras, with the numbers starting over
+      let intoNewBook = (i, { go }) => {
+        let node = nodes[i];
+        let { n, bookNum: book } = node;
+        if(n > TUNING.path.smallNumber || (book == null && !node.extra)) return;
+        for(let j of bestByKey.values()) {
+          let s = state[j];
+          if(s.extra === !!node.extra && (book == null || book === s.book)) continue;
+          go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, word: node.bookType ?? s.word, kind: s.kind, carry: s.n }));
+        }
+      };
+
+      // the numbers may break anywhere (a series that carries on from 101 after 47), at
+      // a price that only a heading worth the price will pay
+      let breakingOff = (i, { go }) => {
+        let node = nodes[i];
+        let { n, bookNum: book } = node;
+        if(top < 0 || state[top].ended || node.base < TUNING.path.breakMinBase) return;
+        let s = state[top];
+        // the numbers start over inside a book that has been told apart from the others:
+        // the next one began, whether or not it was named
+        let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && s.n >= TUNING.path.unnamedFrom;
+        go(top, TUNING.reward.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), word: node.bookType ?? s.word, extra: !!node.extra, half: node.half ?? null, carry: s.n });
+      };
+
+      let startingHere = (i, { begin }) => {
+        let node = nodes[i];
+        let start = node.n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;
+        if(start > 0) begin(start, reached(node));
+        else begin(start, reached(node), true);
+      };
+
       // the ways into node i. Each calls `go(from, value, reached, joins)` for a way it
       // sees, and `begin(value, reached)` for a path that could start at the node itself
       let into = {
-        chap(i, { go, begin }) {
-          let node = nodes[i];
-          let { n, bookNum: book } = node;
-          // carrying on from an earlier number
-          for(let d = 0; d <= TUNING.path.gapMax; d++) {
-            for(let j of byNumber.get(n - d) ?? []) {
-              let s = state[j];
-              if(s.ended || (node.extra && !s.extra)) continue;
-              if(book != null && s.book !== 0 && book !== s.book) continue;
-              if(d === 0) {
-                // the next part of the same chapter, or the same heading again
-                if(node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, { ...s, half: node.half });
-                else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
-              } else {
-                go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, word: node.bookType ?? s.word, extra: s.extra || !!node.extra, half: node.half ?? null });
-              }
-            }
-          }
-          // a book or an extra begins, and the numbers may start over
-          for(let j of books) {
-            let s = state[j];
-            // a bare number straight after `Kỳ Bạch Tuyết phiên ngoại` is the first of its extras
-            let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;
-            if(s.extra !== !!node.extra && !opensExtra) continue;
-            if(book != null && book !== s.book) continue;
-            let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : (n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap));
-            go(j, value, { ...s, n: node.span ?? n, half: node.half ?? null });
-          }
-          // a book that names itself in the heading, or extras, with the numbers starting over
-          if(n <= TUNING.path.smallNumber && (book != null || node.extra)) {
-            for(let j of bestByKey.values()) {
-              let s = state[j];
-              if(s.extra === !!node.extra && (book == null || book === s.book)) continue;
-              go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, word: node.bookType ?? s.word, kind: s.kind, carry: s.n }));
-            }
-          }
-          // the numbers may break anywhere (a series that carries on from 101 after 47), at
-          // a price that only a heading worth the price will pay
-          if(top >= 0 && !state[top].ended && node.base >= TUNING.path.breakMinBase) {
-            let s = state[top];
-            // the numbers start over inside a book that has been told apart from the others:
-            // the next one began, whether or not it was named
-            let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && s.n >= TUNING.path.unnamedFrom;
-            go(top, TUNING.reward.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), word: node.bookType ?? s.word, extra: !!node.extra, half: node.half ?? null, carry: s.n });
-          }
-          let start = n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;
-          if(start > 0) begin(start, reached(node));
-          else begin(start, reached(node), true);
+        chap(i, ways) {
+          goingOn(i, ways);
+          afterBookHeading(i, ways);
+          intoNewBook(i, ways);
+          breakingOff(i, ways);
+          startingHere(i, ways);
         },
         // the last chapter: a repeat of the heading just before it, or the one after it
         end(i, { go }) {

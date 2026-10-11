@@ -6,7 +6,7 @@
 //   saveProgress(id, record)
 //   names(id)                   the names corrected in a book, as text (or undefined)
 //   saveNames(id, text)
-//   files()                     the books kept, as the files they came from: [{ name, size }]
+//   books()                     the books kept: [{ id, name, description, size, deletable }]
 //   addBooks(files)             read and keep [{ name, size, text }]; their records
 //   book(id)                    the record of a book (bookRecord), read again first if an
 //                               older parser read it; null for a book not kept
@@ -21,6 +21,9 @@ import { openDB } from 'idb';
 import type { Chapter, Listed } from './places.ts';
 
 export type FileInfo = { name: string; size: number };
+// a book as the library lists it. `library` and `path` say where it is, for a book of a library
+// the server reads where it is, which is not deleted from the page
+export type BookSummary = { id: string; name: string; description?: string; size: number; library?: string; path?: string; deletable: boolean };
 export type BookRecord = { id: string; name: string; description?: string; parser: number; chapters: Listed[] };
 export type Progress = { offset?: number; chapterId?: string; chapterIndex?: number; chapterCount?: number; updatedAt?: string };
 
@@ -31,7 +34,7 @@ export interface Backend {
   saveProgress(id: string, record: Progress): Promise<unknown>;
   names(id: string): Promise<string | undefined>;
   saveNames(id: string, text: string): Promise<unknown>;
-  files(): Promise<FileInfo[]>;
+  books(): Promise<BookSummary[]>;
   addBooks(files: (FileInfo & { text: string })[]): Promise<BookRecord[]>;
   book(id: string): Promise<BookRecord | null>;
   chapter(id: string, listed: Listed): Promise<Chapter | null>;
@@ -42,6 +45,7 @@ export interface Backend {
 // what the browser's backend needs of the page: the reader of books, and what is kept of one
 export type Reading = {
   readBook(file: FileInfo, text: string): Promise<{ id: string; chapters: Chapter[] }>;
+  Book(file: { name: string }): { id: string; name: string; description?: string };
   bookRecord(book: { id: string; chapters: Chapter[] }): BookRecord;
   PARSER_VERSION: number;
 };
@@ -86,7 +90,7 @@ function serverBackend(): Backend {
     saveProgress: (bookId, record) => call('PUT', `progress/${id(bookId)}`, record),
     names: (bookId) => call('GET', `names/${id(bookId)}`),
     saveNames: (bookId, text) => call('PUT', `names/${id(bookId)}`, text),
-    files: () => call('GET', 'files'),
+    books: () => call('GET', 'books'),
     addBooks: (files) => Promise.all(files.map(file => call('POST', 'books', file))),
     book: (bookId) => call('GET', `books/${id(bookId)}`),
     chapter: (bookId, listed) => call('GET', `books/${id(bookId)}/chapters/${id(listed.id)}`),
@@ -96,7 +100,7 @@ function serverBackend(): Backend {
 }
 
 // the browser's: IndexedDB, and the parser in a worker (see reading.js)
-async function browserBackend({ readBook, bookRecord, PARSER_VERSION }: Reading): Promise<Backend> {
+async function browserBackend({ readBook, Book, bookRecord, PARSER_VERSION }: Reading): Promise<Backend> {
   let db = await openDB('text-reader', 23, {
     upgrade(db, oldVersion, newVersion, transaction, events) {
       console.log('upgrade db', { oldVersion, newVersion, transaction, events });
@@ -127,7 +131,8 @@ async function browserBackend({ readBook, bookRecord, PARSER_VERSION }: Reading)
     saveProgress: (id, record) => db.put('progress', record, id),
     names: (id) => db.get('names', id),
     saveNames: (id, text) => db.put('names', text, id),
-    files: () => db.getAll('files'),
+    // the books as the files they came from, which say what each is
+    books: async () => ((await db.getAll('files')) as FileInfo[]).map(file => ({ ...Book(file), size: file.size, deletable: true })),
     async addBooks(files) {
       let chapterKeys = (await db.getAllKeys('chapters')) as string[];
       // the books are read before the transaction opens: it would not wait for them

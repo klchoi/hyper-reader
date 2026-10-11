@@ -3,6 +3,7 @@
 // from the list underlined, to be added with a click.
 import chromaJs from 'chroma-js';
 import { nextTick } from './places.ts';
+import { buildRegex, nameRegexes, namePatterns, standaloneRelationships } from './name-patterns.js';
 
 // ---- words and their case -----------------------------------------------------------
 export function titleCase(s: string) {
@@ -53,19 +54,6 @@ export function hashCode(str: string) {
 
 const escapeRegExp = (s: string) => s.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 
-// patterns with named holes in them: `{Word}` is filled from `placeholders`, each fill a group
-// of its own name, so the holes can be filled within each other
-function buildRegex(patterns: (RegExp | string)[], placeholders: Record<string, RegExp>, flags: string) {
-  let source = patterns.filter(Boolean).map((p, i) => `(?<Case${i + 1}>${typeof p === 'string' ? p : p.source})`).join('|');
-  let counts = Object.fromEntries(Object.keys(placeholders).map(k => [k, 0]));
-  for (let i = 1; i <= 10; i++) {
-    for (let [p, r] of Object.entries(placeholders)) {
-      source = source.replaceAll(`{${p}}`, () => `(?<${p}${++counts[p]}>${r.source})`);
-    }
-  }
-  return new RegExp(source, flags);
-}
-
 // ---- the list of names ----------------------------------------------------------------
 // a translation often leaves the plain Vietnamese word where the name wants the
 // Sino-Vietnamese one: `Công Tôn ngày` for `Công Tôn Thiên`. First word of each
@@ -104,14 +92,6 @@ function splitRelationship(entry: string): { name: string; relationship?: string
   if (relationship === undefined) return { name: entry.trim() };
   return { name, relationship: relationship.trim() };
 }
-// how a reader is likely to have somebody addressed. The doubled and compound
-// ones stand on their own in the text, so they are worth detecting; a bare
-// `nương` is the everyday word far more often, and is only ever added by hand
-const standaloneRelationships = [
-  'cô cô', 'thúc thúc', 'bá bá', 'thẩm thẩm', 'nhạc phụ', 'nhạc mẫu', 'bá phụ',
-  'bá mẫu', 'tiểu di', 'ca ca', 'tỷ tỷ', 'muội muội', 'lão bà', 'lão công',
-  'phụ thân', 'mẫu thân',
-];
 const relationshipWords = new Set([...standaloneRelationships, 'nương']);
 export const isRelationship = (name: string) => relationshipWords.has(name.trim().toLowerCase());
 // whichever side of a `from -> to` entry the text ends up reading
@@ -432,30 +412,10 @@ export async function highlightNames(names: string, { selector, prefix }: Scope 
 
   let knowNameIds = new Set(knowNames.map(name => name.toLowerCase()));
 
-  // collect names, by descending confidence: what the editor says, then the
-  // general patterns, then the ones that hang on a lowercase prefix like `a Tô`.
-  // the tiers are scanned apart on purpose - in one regex `a Tô` would consume
-  // the start of `Tô Diễm` and the real name would never even be collected
-  let namePlaceholders = {
-    wb: /$|(?<=[^\p{L}])|(?=[^\p{L}])/u,
-    Upper: /\p{Lu}/u,
-    Lower: /\p{Ll}/u,
-    Word: /{wb}{Upper}{Lower}*{wb}/,
-    NameBegin: /(?<!^|[.:"'!?()[\]] ?|{Word} )/,
-  };
-  let namePatterns = [
-    [
-      /{NameBegin}{Word}(\s{Word}){1,3}/,
-      /{NameBegin}({Word} )?{Word} (ba( ba)?|mụ mụ|mẹ|thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá( bá)?|bá phụ|bá mẫu|đại tỷ|đại ca|lão bà){wb}/,
-      new RegExp(standaloneRelationships.join('|')),
-    ],
-    [
-      /{wb}a {Word}(?!{Word})/,
-      /(tiểu|lão) {Word}(?!{wb}{Word})( tử)?/,
-    ],
-  ];
+  // collect names, by descending confidence: what the editor says, then the patterns
+  // (see name-patterns.js), each tier scanned apart
   // the editor's own names need no collecting, they are already the whole tier
-  let tiers: string[][] = [knowNames, ...namePatterns.map(() => [])];
+  let tiers: string[][] = [knowNames, ...namePatterns.map(() => [] as string[])];
   let seen = new Set(knowNameIds);
   let collect = (tier: number, name: string) => {
     let nameId = name.toLowerCase();
@@ -465,7 +425,7 @@ export async function highlightNames(names: string, { selector, prefix }: Scope 
     tiers[tier].push(name);
   };
   let textNodes = [...document.querySelectorAll(selector)].flatMap(el => [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE));
-  let collectRegexes = namePatterns.map(patterns => buildRegex(patterns, namePlaceholders, 'gu'));
+  let collectRegexes = nameRegexes();
   for (let node of textNodes) {
     collectRegexes.forEach((nameRegex, index) => {
       for (let match of node.textContent!.matchAll(nameRegex)) {
@@ -480,13 +440,13 @@ export async function highlightNames(names: string, { selector, prefix }: Scope 
   if (!tiers.some(tier => tier.length)) return;
 
   // create ranges;
-  let nameRegexes = tiers.map(tier => tier.length > 0 && buildRegex([
+  let tierRegexes = tiers.map(tier => tier.length > 0 && buildRegex([
     `{wb}(${tier.map(escapeRegExp).join('|')}){wb}`,
   ], { wb: /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/u }, 'gui'));
   let ranges: Record<string, Found[]> = {};
   for (let node of textNodes) {
     let matches: { tier: number; name: string; start: number; end: number }[] = [];
-    nameRegexes.forEach((nameRegex, tier) => {
+    tierRegexes.forEach((nameRegex, tier) => {
       if (!nameRegex) return;
       for (let match of node.textContent!.matchAll(nameRegex)) {
         matches.push({ tier, name: match[0], start: match.index, end: match.index + match[0].length });

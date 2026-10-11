@@ -12,11 +12,26 @@ In the browser alone: open `hyper-reader.html` from the file. The browser keeps 
 console says which way each book was read (`Chapters of "...": read in a worker`, or `... read
 in the page (why)` when no worker could be had).
 
-With the server: `npm start` (or `node server/server.js [--port 8080] [--data <folder>]`), then
-`http://127.0.0.1:8080/`. The server serves the page, reads the books with the page's own parser
-and keeps them as files in `data/` (or the folder given). It needs nothing but Node, answers on
-this computer only, and loads the parser again when the page changes. Listing the fonts
-installed on the machine works here and not from the file.
+With the server: `npm start -- [--port 8080] [--data <folder>] [--library [name=]<folder>]...`,
+then `http://127.0.0.1:8080/`. The server serves the page, and keeps the books in a SQLite
+database, `<data>/library.db` (`data/` by default):
+
+- the books of each library, a folder of `.txt` files (sub-folders too), read where they are and
+  never written to or deleted. A library is known by its name, the folder's own if none is given,
+  so a book keeps its id (and where it was left) wherever the folder is mounted. The libraries are
+  scanned when the server starts and when asked (`POST /api/library/scan`): only what came,
+  changed or went since the last scan is read again, so a scan of a library already read takes
+  a moment;
+- the books dropped on the page, kept in `<data>/uploads`, a library of their own, the only
+  books that can be deleted from the page.
+
+A book's id is its name and where it is (`tien-lo-xanh-biec-do-3fa9c21b`). The books are read on
+threads of their own, and their full text indexed behind them for search (`/api/search?q=`,
+`&book=` for every place in one book), a book opened first; the characters a book names most
+are kept with it (`/api/characters?q=`). Where a book was left and its names outlive it, so a
+file that goes and comes back finds them again. It needs nothing but Node (24, for `node:sqlite`),
+answers on this computer only, and reads the parser when it starts. Listing the fonts installed
+on the machine works here and not from the file.
 
 The two keep their books apart: a book dropped on the page opened as a file is not on the
 server, and the other way round.
@@ -52,6 +67,8 @@ The built page holds everything it needs, its libraries too, so it needs no netw
     pointer over a name.
   - `places.ts` the url, a place in a book, a chapter as its lines. `names.ts` the names list,
     the text corrected by it, the names coloured on the page.
+- `name-patterns.js` how a name is told in the text: the patterns the page colours names by, and
+  the faster reading of them the server keeps a book's characters by.
 - `backends.ts` what the app asks of whatever keeps the books: the browser's backend
   (IndexedDB, and `reading.js`, which hands a book to a worker) and the server's (calls to
   `server/server.js`).

@@ -2,8 +2,8 @@
   "name": "hyper-reader",
   "private": true,
   "scripts": {
-    "start": "node server/server.js",
-    "test": "node --test",
+    "start": "node --disable-warning=ExperimentalWarning server/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test",
     "check:books": "node tools/check-books.js",
     "lint": "oxlint --deny-warnings src lib server test tools vite.config.mjs",
     "build": "vite build && node -e \"require('node:fs').copyFileSync('dist/hyper-reader.html', 'hyper-reader.html')\"",

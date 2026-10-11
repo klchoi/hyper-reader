@@ -8,17 +8,17 @@ export function Library() @{
   const rows = track(() => {
     let progress = store.progress.value;
     let { field, direction } = store.settings.value.sort;
-    let books = store.files.value.map(file => ({ file, book: store.parser.Book(file), kept: progress[store.parser.Book(file).id] || {} }));
+    let books = store.books.value.map(book => ({ book, kept: progress[book.id] || {} }));
     let compare = (a: (typeof books)[number], z: (typeof books)[number]) => {
       if (field === 'name') return a.book.name.localeCompare(z.book.name, 'vi-VN', { sensitivity: 'accent' });
-      if (field === 'size') return a.file.size - z.file.size;
+      if (field === 'size') return a.book.size - z.book.size;
       if (field === 'updatedAt') return new Date(a.kept.updatedAt || 0).getTime() - new Date(z.kept.updatedAt || 0).getTime();
       if (field === 'chapterCount') return (a.kept.chapterCount || 1) - (z.kept.chapterCount || 1);
       return 0;
     };
     return books
       .sort((a, z) => (direction === 'desc' ? -compare(a, z) || 0 : compare(a, z)))
-      .map(({ file, book, kept }) => {
+      .map(({ book, kept }) => {
         let place = { bookId: book.id, offset: kept.offset, chapterId: kept.chapterId };
         return {
           id: book.id,
@@ -26,7 +26,8 @@ export function Library() @{
           description: book.description,
           place,
           href: store.router.route(bookRoute(place)),
-          size: formatSize(file.size),
+          size: formatSize(book.size),
+          deletable: book.deletable,
           chapters: !kept.chapterCount ? '-' : `${kept.chapterIndex}/${kept.chapterCount}`,
           date: formatDate(kept.updatedAt) || '-',
         };
@@ -57,7 +58,9 @@ export function Library() @{
         <div class="td text-right"><small>{row.chapters}</small></div>
         <div class="td text-right"><small>{row.date}</small></div>
         <div class="td">
-          <a class="delete" onClick={() => store.deleteBook(row.id)}><small>delete</small></a>
+          @if (row.deletable) {
+            <a class="delete" onClick={() => store.deleteBook(row.id)}><small>delete</small></a>
+          }
         </div>
       </>
     }

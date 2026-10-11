@@ -5,7 +5,7 @@
 import { Context, tick, track } from 'ripple';
 import type { Tracked } from 'ripple';
 import { chooseBackend } from './backends.ts';
-import type { Backend, BookRecord, FileInfo, Progress } from './backends.ts';
+import type { Backend, BookRecord, BookSummary, FileInfo, Progress } from './backends.ts';
 import { articleNames, commandPaletteNames, highlightNames, nameFixer, namesWith, offerFor } from './names.ts';
 import type { AddNameAt, AddNameOffer } from './names.ts';
 import { HashRouter, bookRoute, chapterAt, getColorScheme, nextTick, toOffset } from './places.ts';
@@ -56,7 +56,7 @@ export function createStore({ parser, reader }: Page) {
   const router = new HashRouter();
   let backend: Backend;
 
-  const files = track<FileInfo[]>([]);
+  const books = track<BookSummary[]>([]);
   const book = track<BookRecord | null>(null);
   const chapter = track<Chapter | null>(null);
   const progress = track<Record<string, Progress>>({});
@@ -71,8 +71,7 @@ export function createStore({ parser, reader }: Page) {
 
   // what the command palette offers: the books, or the chapters of the one open, searchable
   // under both spellings of a corrected title
-  const bookCommands = track(() => files.value.map(file => {
-    let { id, name } = parser.Book(file);
+  const bookCommands = track(() => books.value.map(({ id, name }) => {
     let { offset, chapterId } = progress.value[id] || {};
     return { key: `book:${id}`, label: name, open: { bookId: id, offset, chapterId }, term: parser.latinize(name).toLowerCase() };
   }));
@@ -142,10 +141,10 @@ export function createStore({ parser, reader }: Page) {
   const chooseFont = (font: string) => saveSettings({ [fontSettings[fontPicker.value.target].family]: font });
 
   // ---- the library
-  async function loadFiles() {
-    let kept = await backend.files();
+  async function loadBooks() {
+    let kept = await backend.books();
     kept.sort((a, z) => a.name.localeCompare(z.name, 'vi-VN', { sensitivity: 'accent' }));
-    files.value = kept;
+    books.value = kept;
   }
   async function loadProgress() {
     progress.value = await backend.progress();
@@ -273,24 +272,23 @@ export function createStore({ parser, reader }: Page) {
     });
     let read = [];
     for (let file of dropped) read.push(await readFile(file));
-    await backend.addBooks(read);
-    loadFiles();
+    let added = await backend.addBooks(read);
+    loadBooks();
 
-    let books = read.map(file => parser.Book(file));
-    let inNewTabs = books;
-    let here: (typeof books)[number] | undefined;
+    let inNewTabs = added;
+    let here: BookRecord | undefined;
     if (book.value) {
       // the book already open opens again here, the others in tabs of their own
-      here = books.find(b => b.id === book.value!.id);
-      inNewTabs = books.filter(b => b !== here);
+      here = added.find(b => b.id === book.value!.id);
+      inNewTabs = added.filter(b => b !== here);
     } else {
       // with no book open, the first opens here
-      [here, ...inNewTabs] = books;
+      [here, ...inNewTabs] = added;
     }
     // every place is resolved up front: an await between two window.open calls loses the
     // drop's user activation, so every tab after the first gets blocked by the popup blocker
     let kept = await backend.progress();
-    let places = new Map(books.map(b => {
+    let places = new Map(added.map(b => {
       let { offset, chapterId } = kept[b.id] || {};
       return [b.id, { bookId: b.id, offset, chapterId }];
     }));
@@ -311,7 +309,7 @@ export function createStore({ parser, reader }: Page) {
   }
   async function deleteBook(bookId: string) {
     await backend.deleteBook(bookId);
-    files.value = files.value.filter(file => parser.Book(file).id !== bookId);
+    books.value = books.value.filter(b => b.id !== bookId);
   }
 
   // ---- names
@@ -407,10 +405,10 @@ export function createStore({ parser, reader }: Page) {
   // into a book opens it
   async function start() {
     applySettings({ 'color:dark': 'night', 'color:light': 'white' });
-    backend = await chooseBackend({ readBook: reader.readBook, bookRecord: parser.bookRecord, PARSER_VERSION: parser.PARSER_VERSION });
+    backend = await chooseBackend({ readBook: reader.readBook, Book: parser.Book, bookRecord: parser.bookRecord, PARSER_VERSION: parser.PARSER_VERSION });
     applySettings(await backend.settings());
     loadProgress();
-    loadFiles();
+    loadBooks();
     let bookId = router.get('book');
     if (bookId) openBook({ bookId, offset: router.get('offset'), chapterId: router.get('chapter') });
   }
@@ -423,7 +421,7 @@ export function createStore({ parser, reader }: Page) {
 
   return {
     router, parser,
-    files, book, chapter, progress, settings, palette, fontPicker, names, namesEditorOpen, addName,
+    books, book, chapter, progress, settings, palette, fontPicker, names, namesEditorOpen, addName,
     fixNames, commands, selectedCommand,
     start, followUrl,
     applySettings, saveSettings, chooseColor, sortBy,

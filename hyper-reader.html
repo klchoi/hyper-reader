@@ -4614,7 +4614,7 @@ function serverBackend() {
 		saveProgress: (bookId, record) => call("PUT", `progress/${id(bookId)}`, record),
 		names: (bookId) => call("GET", `names/${id(bookId)}`),
 		saveNames: (bookId, text) => call("PUT", `names/${id(bookId)}`, text),
-		files: () => call("GET", "files"),
+		books: () => call("GET", "books"),
 		addBooks: (files) => Promise.all(files.map((file) => call("POST", "books", file))),
 		book: (bookId) => call("GET", `books/${id(bookId)}`),
 		chapter: (bookId, listed) => call("GET", `books/${id(bookId)}/chapters/${id(listed.id)}`),
@@ -4622,7 +4622,7 @@ function serverBackend() {
 		deleteBook: (bookId) => call("DELETE", `books/${id(bookId)}`)
 	};
 }
-async function browserBackend({ readBook, bookRecord, PARSER_VERSION }) {
+async function browserBackend({ readBook, Book, bookRecord, PARSER_VERSION }) {
 	let db = await openDB("text-reader", 23, {
 		upgrade(db, oldVersion, newVersion, transaction, events) {
 			console.log("upgrade db", {
@@ -4660,7 +4660,11 @@ async function browserBackend({ readBook, bookRecord, PARSER_VERSION }) {
 		saveProgress: (id, record) => db.put("progress", record, id),
 		names: (id) => db.get("names", id),
 		saveNames: (id, text) => db.put("names", text, id),
-		files: () => db.getAll("files"),
+		books: async () => (await db.getAll("files")).map((file) => ({
+			...Book(file),
+			size: file.size,
+			deletable: true
+		})),
 		async addBooks(files) {
 			let chapterKeys = await db.getAllKeys("chapters");
 			let read = await Promise.all(files.map(async ({ name, size, text }) => ({
@@ -7644,6 +7648,45 @@ function getColorScheme() {
 	return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 //#endregion
+//#region src/name-patterns.js
+var standaloneRelationships = [
+	"cô cô",
+	"thúc thúc",
+	"bá bá",
+	"thẩm thẩm",
+	"nhạc phụ",
+	"nhạc mẫu",
+	"bá phụ",
+	"bá mẫu",
+	"tiểu di",
+	"ca ca",
+	"tỷ tỷ",
+	"muội muội",
+	"lão bà",
+	"lão công",
+	"phụ thân",
+	"mẫu thân"
+];
+function buildRegex(patterns, placeholders, flags) {
+	let source = patterns.filter(Boolean).map((p, i) => `(?<Case${i + 1}>${typeof p === "string" ? p : p.source})`).join("|");
+	let counts = Object.fromEntries(Object.keys(placeholders).map((k) => [k, 0]));
+	for (let i = 1; i <= 10; i++) for (let [p, r] of Object.entries(placeholders)) source = source.replaceAll(`{${p}}`, () => `(?<${p}${++counts[p]}>${r.source})`);
+	return new RegExp(source, flags);
+}
+var namePlaceholders = {
+	wb: /$|(?<=[^\p{L}])|(?=[^\p{L}])/u,
+	Upper: /\p{Lu}/u,
+	Lower: /\p{Ll}/u,
+	Word: /{wb}{Upper}{Lower}*{wb}/,
+	NameBegin: /(?<!^|[.:"'!?()[\]] ?|{Word} )/
+};
+var namePatterns = [[
+	/{NameBegin}{Word}(\s{Word}){1,3}/,
+	/{NameBegin}({Word} )?{Word} (ba( ba)?|mụ mụ|mẹ|thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá( bá)?|bá phụ|bá mẫu|đại tỷ|đại ca|lão bà){wb}/,
+	new RegExp(standaloneRelationships.join("|"))
+], [/{wb}a {Word}(?!{Word})/, /(tiểu|lão) {Word}(?!{wb}{Word})( tử)?/]];
+var nameRegexes = () => namePatterns.map((patterns) => buildRegex(patterns, namePlaceholders, "gu"));
+//#endregion
 //#region src/names.ts
 function titleCase(s) {
 	return s.toLowerCase().replace(/(?<=^|[^\p{L}])./gu, (c) => c.toUpperCase());
@@ -7685,12 +7728,6 @@ function hashCode(str) {
 	return hash;
 }
 var escapeRegExp = (s) => s.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
-function buildRegex(patterns, placeholders, flags) {
-	let source = patterns.filter(Boolean).map((p, i) => `(?<Case${i + 1}>${typeof p === "string" ? p : p.source})`).join("|");
-	let counts = Object.fromEntries(Object.keys(placeholders).map((k) => [k, 0]));
-	for (let i = 1; i <= 10; i++) for (let [p, r] of Object.entries(placeholders)) source = source.replaceAll(`{${p}}`, () => `(?<${p}${++counts[p]}>${r.source})`);
-	return new RegExp(source, flags);
-}
 var nameWordGroups = [
 	["vũ", "mưa"],
 	["khinh", "nhẹ"],
@@ -7716,24 +7753,6 @@ function splitRelationship(entry) {
 		relationship: relationship.trim()
 	};
 }
-var standaloneRelationships = [
-	"cô cô",
-	"thúc thúc",
-	"bá bá",
-	"thẩm thẩm",
-	"nhạc phụ",
-	"nhạc mẫu",
-	"bá phụ",
-	"bá mẫu",
-	"tiểu di",
-	"ca ca",
-	"tỷ tỷ",
-	"muội muội",
-	"lão bà",
-	"lão công",
-	"phụ thân",
-	"mẫu thân"
-];
 var relationshipWords = /* @__PURE__ */ new Set([...standaloneRelationships, "nương"]);
 var isRelationship = (name) => relationshipWords.has(name.trim().toLowerCase());
 var entryTarget = (entry) => entry.split(/->|→/).at(-1).trim();
@@ -7985,18 +8004,6 @@ async function highlightNames(names, { selector, prefix } = articleNames) {
 		for (let aliasId of aliasIds) if (aliasId !== canonicalId && !aliasOf.has(aliasId)) aliasOf.set(aliasId, canonicalId);
 	}
 	let knowNameIds = new Set(knowNames.map((name) => name.toLowerCase()));
-	let namePlaceholders = {
-		wb: /$|(?<=[^\p{L}])|(?=[^\p{L}])/u,
-		Upper: /\p{Lu}/u,
-		Lower: /\p{Ll}/u,
-		Word: /{wb}{Upper}{Lower}*{wb}/,
-		NameBegin: /(?<!^|[.:"'!?()[\]] ?|{Word} )/
-	};
-	let namePatterns = [[
-		/{NameBegin}{Word}(\s{Word}){1,3}/,
-		/{NameBegin}({Word} )?{Word} (ba( ba)?|mụ mụ|mẹ|thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá( bá)?|bá phụ|bá mẫu|đại tỷ|đại ca|lão bà){wb}/,
-		new RegExp(standaloneRelationships.join("|"))
-	], [/{wb}a {Word}(?!{Word})/, /(tiểu|lão) {Word}(?!{wb}{Word})( tử)?/]];
 	let tiers = [knowNames, ...namePatterns.map(() => [])];
 	let seen = new Set(knowNameIds);
 	let collect = (tier, name) => {
@@ -8006,7 +8013,7 @@ async function highlightNames(names, { selector, prefix } = articleNames) {
 		tiers[tier].push(name);
 	};
 	let textNodes = [...document.querySelectorAll(selector)].flatMap((el) => [...el.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE));
-	let collectRegexes = namePatterns.map((patterns) => buildRegex(patterns, namePlaceholders, "gu"));
+	let collectRegexes = nameRegexes();
 	for (let node of textNodes) collectRegexes.forEach((nameRegex, index) => {
 		for (let match of node.textContent.matchAll(nameRegex)) {
 			collect(index + 1, match[0]);
@@ -8016,11 +8023,11 @@ async function highlightNames(names, { selector, prefix } = articleNames) {
 	});
 	tiers = tiers.map((tier) => tier.sort((a, z) => z.length - a.length));
 	if (!tiers.some((tier) => tier.length)) return;
-	let nameRegexes = tiers.map((tier) => tier.length > 0 && buildRegex([`{wb}(${tier.map(escapeRegExp).join("|")}){wb}`], { wb: /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/u }, "gui"));
+	let tierRegexes = tiers.map((tier) => tier.length > 0 && buildRegex([`{wb}(${tier.map(escapeRegExp).join("|")}){wb}`], { wb: /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/u }, "gui"));
 	let ranges = {};
 	for (let node of textNodes) {
 		let matches = [];
-		nameRegexes.forEach((nameRegex, tier) => {
+		tierRegexes.forEach((nameRegex, tier) => {
 			if (!nameRegex) return;
 			for (let match of node.textContent.matchAll(nameRegex)) matches.push({
 				tier,
@@ -8190,7 +8197,7 @@ function applyDataset(key, value) {
 function createStore({ parser, reader }) {
 	const router = new HashRouter();
 	let backend;
-	const files = track([]);
+	const books = track([]);
 	const book = track(null);
 	const chapter = track(null);
 	const progress = track({});
@@ -8212,8 +8219,7 @@ function createStore({ parser, reader }) {
 	const namesEditorOpen = track(false);
 	const addName = track(null);
 	const fixNames = track(() => nameFixer(names.value));
-	const bookCommands = track(() => files.value.map((file) => {
-		let { id, name } = parser.Book(file);
+	const bookCommands = track(() => books.value.map(({ id, name }) => {
 		let { offset, chapterId } = progress.value[id] || {};
 		return {
 			key: `book:${id}`,
@@ -8306,10 +8312,10 @@ function createStore({ parser, reader }) {
 		};
 	};
 	const chooseFont = (font) => saveSettings({ [fontSettings[fontPicker.value.target].family]: font });
-	async function loadFiles() {
-		let kept = await backend.files();
+	async function loadBooks() {
+		let kept = await backend.books();
 		kept.sort((a, z) => a.name.localeCompare(z.name, "vi-VN", { sensitivity: "accent" }));
-		files.value = kept;
+		books.value = kept;
 	}
 	async function loadProgress() {
 		progress.value = await backend.progress();
@@ -8437,17 +8443,16 @@ function createStore({ parser, reader }) {
 		});
 		let read = [];
 		for (let file of dropped) read.push(await readFile(file));
-		await backend.addBooks(read);
-		loadFiles();
-		let books = read.map((file) => parser.Book(file));
-		let inNewTabs = books;
+		let added = await backend.addBooks(read);
+		loadBooks();
+		let inNewTabs = added;
 		let here;
 		if (book.value) {
-			here = books.find((b) => b.id === book.value.id);
-			inNewTabs = books.filter((b) => b !== here);
-		} else [here, ...inNewTabs] = books;
+			here = added.find((b) => b.id === book.value.id);
+			inNewTabs = added.filter((b) => b !== here);
+		} else [here, ...inNewTabs] = added;
 		let kept = await backend.progress();
-		let places = new Map(books.map((b) => {
+		let places = new Map(added.map((b) => {
 			let { offset, chapterId } = kept[b.id] || {};
 			return [b.id, {
 				bookId: b.id,
@@ -8475,7 +8480,7 @@ function createStore({ parser, reader }) {
 	}
 	async function deleteBook(bookId) {
 		await backend.deleteBook(bookId);
-		files.value = files.value.filter((file) => parser.Book(file).id !== bookId);
+		books.value = books.value.filter((b) => b.id !== bookId);
 	}
 	function highlight() {
 		highlightNames(names.value, articleNames);
@@ -8587,12 +8592,13 @@ function createStore({ parser, reader }) {
 		});
 		backend = await chooseBackend({
 			readBook: reader.readBook,
+			Book: parser.Book,
 			bookRecord: parser.bookRecord,
 			PARSER_VERSION: parser.PARSER_VERSION
 		});
 		applySettings(await backend.settings());
 		loadProgress();
-		loadFiles();
+		loadBooks();
 		let bookId = router.get("book");
 		if (bookId) openBook({
 			bookId,
@@ -8612,7 +8618,7 @@ function createStore({ parser, reader }) {
 	return {
 		router,
 		parser,
-		files,
+		books,
 		book,
 		chapter,
 		progress,
@@ -8755,7 +8761,7 @@ function render$8(__prev) {
 		__prev.a = __a;
 	}
 }
-var root_3$3 = template_el("li", null, [["a"]]);
+var root_3$4 = template_el("li", null, [["a"]]);
 function render_1$6(__prev) {
 	var __pattern = get(__prev._a);
 	var __a = __pattern.label;
@@ -8783,7 +8789,7 @@ function consequent$7(__anchor, { a: pattern, b: open, c: selector }) {
 	append(__anchor, li);
 }
 function alternate$2(__anchor, { a: pattern, b: open, c: selector }) {
-	var li_1 = root_3$3();
+	var li_1 = root_3$4();
 	var a = hydrating ? hydrate_first_child() : li_1.firstChild;
 	a.__click = (event) => open(event, get(pattern).offset);
 	render$9(render_1$6, {
@@ -8811,7 +8817,7 @@ function render_2$4(__prev) {
 	if (__prev.a !== __a) if_update(__prev._d, __prev.a = __a);
 }
 var root_1$7 = template_el("ol", ["start", "0"]);
-function consequent_1$3(__anchor, { a: rows, b: activeId, c: open }) {
+function consequent_1$4(__anchor, { a: rows, b: activeId, c: open }) {
 	var ol = root_1$7();
 	{
 		const selector$4 = selector(() => activeId.value);
@@ -8832,12 +8838,12 @@ function consequent_1$3(__anchor, { a: rows, b: activeId, c: open }) {
 	}
 	append(__anchor, ol);
 }
-function if_2$3({ a: rows, b: activeId, c: open }) {
-	if (rows.value.length > 0) return consequent_1$3;
+function if_2$4({ a: rows, b: activeId, c: open }) {
+	if (rows.value.length > 0) return consequent_1$4;
 }
 var root$7 = template_el("nav", null, [null]);
 function render_3$3(__prev) {
-	var __a = if_2$3({
+	var __a = if_2$4({
 		a: __prev._a,
 		b: __prev._b,
 		c: __prev._c
@@ -8893,7 +8899,7 @@ function ChapterList_render(__anchor, __block) {
 		_a: rows,
 		_b: activeId,
 		_c: open,
-		_d: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_2$3, 0, {
+		_d: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_2$4, 0, {
 			a: rows,
 			b: activeId,
 			c: open
@@ -8917,12 +8923,31 @@ function consequent$6(__anchor, pattern) {
 function if_1$6(pattern) {
 	if (get(pattern).description) return consequent$6;
 }
-var root_1$6 = template(`<div class=td><a class=name> </a></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class=td><a class=delete><small>delete`, 1, 5);
+var root_3$3 = template_el("a", ["class", "delete"], [[
+	"small",
+	null,
+	"delete"
+]]);
+function consequent_1$3(__anchor, { a: pattern, b: __block, c: store }) {
+	var a_6 = root_3$3();
+	a_6.__click = () => with_scope(__block, () => store.deleteBook(get(pattern).id));
+	append(__anchor, a_6);
+}
+function if_2$3({ a: pattern, b: __block, c: store }) {
+	if (get(pattern).deletable) return consequent_1$3;
+}
+var root_1$6 = template(`<div class=td><a class=name> </a></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class=td><!>`, 1, 5);
 function render$7(__prev) {
 	var __a = get(__prev._a).href;
 	if (__prev.a !== __a) set_attribute(__prev._b, "href", __prev.a = __a);
 	var __b = if_1$6(__prev._a);
 	if (__prev.b !== __b) if_update(__prev._c, __prev.b = __b);
+	var __c = if_2$3({
+		a: __prev._a,
+		b: __prev._d,
+		c: __prev._e
+	});
+	if (__prev.c !== __c) if_update(__prev._f, __prev.c = __c);
 }
 var root$6 = template(`<div class=table><a href=# class="th text-left"><span>File</span></a><a href=# class="th text-right"><span>Size</span></a><a href=# class="th text-right"><span>Chapters</span></a><a href=# class="th text-right"><span>Date</span></a><span class=th><span>`);
 function render_1$5(__prev) {
@@ -8940,19 +8965,18 @@ function Library_render(__anchor, __block) {
 	const rows = track(() => {
 		let progress = store.progress.value;
 		let { field, direction } = store.settings.value.sort;
-		let books = with_scope(__block, () => store.files.value.map((file) => ({
-			file,
-			book: with_scope(__block, () => store.parser.Book(file)),
-			kept: progress[with_scope(__block, () => store.parser.Book(file)).id] || {}
+		let books = with_scope(__block, () => store.books.value.map((book) => ({
+			book,
+			kept: progress[book.id] || {}
 		})));
 		let compare = (a, z) => {
 			if (field === "name") return with_scope(__block, () => a.book.name.localeCompare(z.book.name, "vi-VN", { sensitivity: "accent" }));
-			if (field === "size") return a.file.size - z.file.size;
+			if (field === "size") return a.book.size - z.book.size;
 			if (field === "updatedAt") return with_scope(__block, () => new Date(a.kept.updatedAt || 0).getTime()) - with_scope(__block, () => new Date(z.kept.updatedAt || 0).getTime());
 			if (field === "chapterCount") return (a.kept.chapterCount || 1) - (z.kept.chapterCount || 1);
 			return 0;
 		};
-		return with_scope(__block, () => books.sort((a, z) => direction === "desc" ? -compare(a, z) || 0 : compare(a, z)).map(({ file, book, kept }) => {
+		return with_scope(__block, () => books.sort((a, z) => direction === "desc" ? -compare(a, z) || 0 : compare(a, z)).map(({ book, kept }) => {
 			let place = {
 				bookId: book.id,
 				offset: kept.offset,
@@ -8964,7 +8988,8 @@ function Library_render(__anchor, __block) {
 				description: book.description,
 				place,
 				href: with_scope(__block, () => store.router.route(bookRoute(place))),
-				size: with_scope(__block, () => formatSize(file.size)),
+				size: with_scope(__block, () => formatSize(book.size)),
+				deletable: book.deletable,
 				chapters: !kept.chapterCount ? "-" : `${kept.chapterIndex}/${kept.chapterCount}`,
 				date: with_scope(__block, () => formatDate(kept.updatedAt)) || "-"
 			};
@@ -9005,14 +9030,21 @@ function Library_render(__anchor, __block) {
 		var small_3 = hydrating ? hydrate_first_child() : div_4.firstChild;
 		expression(hydrating ? hydrate_first_child() : small_3.firstChild, () => get(pattern).date);
 		var div_5 = hydrating ? hydrate_next_sibling() : div_4.nextSibling;
-		var a_6 = hydrating ? hydrate_first_child() : div_5.firstChild;
-		a_6.__click = () => with_scope(__block, () => store.deleteBook(get(pattern).id));
+		var ifs_1 = if_static(hydrating ? hydrate_first_child() : div_5.firstChild, if_2$3, 2, {
+			a: pattern,
+			b: __block,
+			c: store
+		});
 		item({
 			a: void 0,
 			b: UNINITIALIZED,
+			c: UNINITIALIZED,
 			_a: pattern,
 			_b: a_5,
-			_c: ifs
+			_c: ifs,
+			_d: __block,
+			_e: store,
+			_f: ifs_1
 		});
 		append(__anchor, fragment);
 	}, 0, (pattern) => pattern.id, void 0, void 0, render$7);

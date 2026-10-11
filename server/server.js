@@ -1,132 +1,28 @@
 #!/usr/bin/env node
-// The page's other backend (see Backends in src/main.js). It serves the page as built
-// (hyper-reader.html), reads books with the page's own parser (src/parser.js), and keeps them,
-// where each was left, the settings and the names as files in a folder of its own:
+// The page's other backend (see backends.ts in src/). It serves the page as built
+// (hyper-reader.html), and keeps the books in a SQLite database in a folder of its own (see
+// store.js): those of the libraries it is given, folders of .txt files read where they are, and
+// those dropped on the page, kept in <data>/uploads. The books are read by the page's own parser
+// (src/parser.js), on threads of their own (readers.js), and their full text indexed for search
+// behind them (indexer.js):
 //
-//   node server/server.js [--port 8080] [--data <folder>]
+//   node server/server.js [--port 8080] [--data <folder>] [--library [name=]<folder>]...
 //
-//   <data>/library.json       the books kept, as the files they came from: { id: { name, size } }
-//   <data>/books/<id>.txt     a book's text, as it came: what it is read again from
-//   <data>/books/<id>.read    the text as the parser read it, which the offsets count in
-//   <data>/books/<id>.json    what the parser made of it: the book's record (bookRecord)
-//   <data>/progress.json      where each book was left: { id: record }
-//   <data>/settings.json      { key: value }
-//   <data>/names/<id>.txt     the names corrected in a book
+// A library is known by its name (the folder's own name if none is given), so a book keeps its
+// id, and where it was left, wherever the folder is mounted. The libraries are scanned when the
+// server starts, and again when asked (POST /api/library/scan).
 //
-// A chapter's text is not kept apart: it is cut from the text as read, at the offsets the
-// record gives. It answers on this computer only (127.0.0.1): it has no logins, and what it keeps
-// is a private library. So it answers only what is asked of it by this computer's name, and
-// changes nothing for a page of another site (see `foreign`).
+// It answers on this computer only (127.0.0.1): it has no logins, and what it keeps is a private
+// library. So it answers only what is asked of it by this computer's name, and changes nothing
+// for a page of another site (see `foreign`).
 const http = require('node:http');
 const fs = require('node:fs/promises');
-const { statSync } = require('node:fs');
 const path = require('node:path');
-const { loadParser, SOURCES, PAGE } = require('../lib/parser.js');
+const { PAGE } = require('../lib/parser.js');
+const { createLibrary } = require('./library.js');
 
-// the parser as it is now: loaded again when its source changes
-let loaded = { at: '', parser: null };
-function parser() {
-  let at = SOURCES.map(source => statSync(source).mtimeMs).join('/');
-  if(at !== loaded.at) loaded = { at, parser: loadParser() };
-  return loaded.parser;
-}
-
-// a book's id is a slug (see `slug` in the page): nothing that could walk out of the folder
+// a book's id, a chapter's: nothing that could walk out of a folder
 const ID = /^[\w-]+$/;
-
-function createLibrary(data) {
-  let file = (...parts) => path.join(data, ...parts);
-  let readJSON = async (name, fallback) => {
-    try { return JSON.parse(await fs.readFile(file(name), 'utf8')); }
-    catch(error) { if(error.code === 'ENOENT') return fallback; throw error; }
-  };
-  // written whole or not at all: a file half written is never read
-  let writes = 0;
-  let writeFile = async (name, content) => {
-    await fs.mkdir(path.dirname(file(name)), { recursive: true });
-    let temporary = `${file(name)}.${process.pid}-${++writes}.tmp`;
-    await fs.writeFile(temporary, content);
-    await fs.rename(temporary, file(name));
-  };
-  // a file read, changed and written back by one change at a time
-  let queues = new Map();
-  let update = (name, change) => {
-    let done = (queues.get(name) ?? Promise.resolve()).then(async () => {
-      await writeFile(name, JSON.stringify(await change(await readJSON(name, {})), null, 1));
-    });
-    queues.set(name, done.catch(() => {}));
-    return done;
-  };
-
-  // the text a book's offsets count in, kept in memory for the books read last
-  let texts = new Map();
-  let readText = async (id) => {
-    if(!texts.has(id)) {
-      texts.set(id, await fs.readFile(file('books', `${id}.read`), 'utf8'));
-      if(texts.size > 4) texts.delete(texts.keys().next().value);
-    }
-    return texts.get(id);
-  };
-
-  let library = {
-    settings: () => readJSON('settings.json', {}),
-    saveSettings: (settings) => update('settings.json', (all) => ({ ...all, ...settings })),
-    progress: () => readJSON('progress.json', {}),
-    saveProgress: (id, record) => update('progress.json', (all) => ({ ...all, [id]: record })),
-    async names(id) {
-      try { return await fs.readFile(file('names', `${id}.txt`), 'utf8'); }
-      catch(error) { if(error.code === 'ENOENT') return undefined; throw error; }
-    },
-    saveNames: (id, text) => writeFile(path.join('names', `${id}.txt`), text),
-    files: async () => Object.values(await readJSON('library.json', {})),
-    async addBook({ name, size, text }) {
-      let read = parser();
-      let book = /\.txt$/i.test(name ?? '') && typeof text === 'string' ? read.Book({ name }) : {};
-      if(!book.id || !ID.test(book.id)) throw Object.assign(new Error(`not a book: ${name}`), { status: 400 });
-      let normalized = read.normalizeFileContent(text);
-      book.chapters = read.extractChapters(book.name, normalized, { name: book.name });
-      let record = read.bookRecord(book);
-      texts.delete(book.id);
-      await writeFile(path.join('books', `${book.id}.txt`), text);
-      await writeFile(path.join('books', `${book.id}.read`), normalized);
-      await writeFile(path.join('books', `${book.id}.json`), JSON.stringify(record));
-      await update('library.json', (all) => ({ ...all, [book.id]: { name, size } }));
-      return record;
-    },
-    async book(id) {
-      let record = await readJSON(path.join('books', `${id}.json`), null);
-      // a book read by an older parser is read again, as the browser's backend does
-      let stale = !record || record.parser !== parser().PARSER_VERSION || !record.chapters.some(c => c.offset != null);
-      return stale ? library.rereadBook(id) : record;
-    },
-    async chapter(id, chapterId) {
-      let record = await library.book(id);
-      let at = record?.chapters.findIndex(c => c.id === chapterId) ?? -1;
-      if(at < 0) return null;
-      let text = await readText(id);
-      let listed = record.chapters[at];
-      let end = record.chapters[at + 1]?.offset ?? text.length;
-      return { ...listed, content: text.slice(listed.offset, end).trim() };
-    },
-    async rereadBook(id) {
-      let kept = (await readJSON('library.json', {}))[id];
-      if(!kept) return null;
-      let text;
-      try { text = await fs.readFile(file('books', `${id}.txt`), 'utf8'); }
-      catch(error) { if(error.code === 'ENOENT') return null; throw error; }
-      return library.addBook({ ...kept, text });
-    },
-    async deleteBook(id) {
-      texts.delete(id);
-      await update('library.json', (all) => {
-        delete all[id];
-        return all;
-      });
-      await Promise.all(['.txt', '.read', '.json'].map(end => fs.rm(file('books', `${id}${end}`), { force: true })));
-    },
-  };
-  return library;
-}
 
 // What a page of another site could make a browser here ask, and is turned away:
 // - a name of its own pointed at 127.0.0.1 (DNS rebinding) makes its page this server's, by
@@ -145,7 +41,7 @@ function foreign(request) {
 // what the page's server backend asks, by method and path; the body each takes is JSON, or text
 function routes(library) {
   return [
-    ['GET', /^\/api\/hello$/, () => ({ backend: 'server', parser: parser().PARSER_VERSION })],
+    ['GET', /^\/api\/hello$/, () => ({ backend: 'server' })],
     ['GET', /^\/api\/settings$/, () => library.settings()],
     ['PATCH', /^\/api\/settings$/, (_, body) => library.saveSettings(body)],
     ['GET', /^\/api\/progress$/, () => library.progress()],
@@ -153,12 +49,21 @@ function routes(library) {
     // a book with no names corrected yet has nothing to send, which is no error
     ['GET', /^\/api\/names\/([^/]+)$/, ([id]) => library.names(id), 'text'],
     ['PUT', /^\/api\/names\/([^/]+)$/, ([id], body) => library.saveNames(id, body), 'text'],
-    ['GET', /^\/api\/files$/, () => library.files()],
+    ['GET', /^\/api\/books$/, () => library.books()],
     ['POST', /^\/api\/books$/, (_, body) => library.addBook(body)],
     ['GET', /^\/api\/books\/([^/]+)$/, ([id]) => library.book(id)],
     ['GET', /^\/api\/books\/([^/]+)\/chapters\/([^/]+)$/, ([id, chapterId]) => library.chapter(id, chapterId)],
     ['POST', /^\/api\/books\/([^/]+)\/reread$/, ([id]) => library.rereadBook(id)],
     ['DELETE', /^\/api\/books\/([^/]+)$/, ([id]) => library.deleteBook(id)],
+    ['GET', /^\/api\/library$/, () => library.status()],
+    ['POST', /^\/api\/library\/scan$/, () => library.scan()],
+    // ?q= what is said; &book= in one book, every place it is said
+    ['GET', /^\/api\/search$/, (_, __, query) => {
+      let book = query.get('book');
+      if(book != null && !ID.test(book)) throw Object.assign(new Error('not an id'), { status: 400 });
+      return library.search(query.get('q'), book);
+    }],
+    ['GET', /^\/api\/characters$/, (_, __, query) => library.characters(query.get('q'))],
   ];
 }
 
@@ -181,10 +86,10 @@ function readBody(request) {
   });
 }
 
-function createServer({ data }) {
-  let library = createLibrary(data);
+function createServer({ data, libraries = [] }) {
+  let library = createLibrary({ data, libraries });
   let table = routes(library);
-  return http.createServer(async (request, response) => {
+  let server = http.createServer(async (request, response) => {
     let send = (status, body, type) => {
       response.writeHead(status, body == null ? {} : { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' });
       response.end(body);
@@ -192,29 +97,31 @@ function createServer({ data }) {
     try {
       let refused = foreign(request);
       if(refused) return send(403, refused, 'text/plain');
-      let { pathname } = new URL(request.url, 'http://localhost');
-      if(request.method === 'GET' && (pathname === '/' || pathname === '/hyper-reader.html')) {
-        return send(200, await fs.readFile(PAGE, 'utf8'), 'text/html');
-      }
-      for(let [method, pattern, answer, kind = 'json'] of table) {
-        let found = pattern.exec(pathname);
-        if(!found || request.method !== method) continue;
-        let params = found.slice(1).map(decodeURIComponent);
-        if(params.some(param => !ID.test(param))) return send(400, 'not an id', 'text/plain');
-        let body;
-        if(['POST', 'PUT', 'PATCH'].includes(method)) {
-          body = await readBody(request);
-          if(kind === 'json' && body !== '') {
-            if(!request.headers['content-type']?.startsWith('application/json')) return send(415, 'JSON is sent as application/json', 'text/plain');
-            try { body = JSON.parse(body); }
-            catch { return send(400, 'not JSON', 'text/plain'); }
+      let { pathname, searchParams } = new URL(request.url, 'http://localhost');
+      if(pathname.startsWith('/api/')) {
+        for(let [method, pattern, answer, kind = 'json'] of table) {
+          let found = pattern.exec(pathname);
+          if(!found || request.method !== method) continue;
+          let params = found.slice(1).map(decodeURIComponent);
+          if(params.some(param => !ID.test(param))) return send(400, 'not an id', 'text/plain');
+          let body;
+          if(['POST', 'PUT', 'PATCH'].includes(method)) {
+            body = await readBody(request);
+            if(kind === 'json' && body !== '') {
+              if(!request.headers['content-type']?.startsWith('application/json')) return send(415, 'JSON is sent as application/json', 'text/plain');
+              try { body = JSON.parse(body); }
+              catch { return send(400, 'not JSON', 'text/plain'); }
+            }
           }
+          let result = await answer(params, body, searchParams);
+          if(result === undefined) return send(204);
+          if(result === null) return send(404, 'not found', 'text/plain');
+          return kind === 'text' ? send(200, result, 'text/plain') : send(200, JSON.stringify(result), 'application/json');
         }
-        let result = await answer(params, body);
-        if(result === undefined) return send(204);
-        if(result === null) return send(404, 'not found', 'text/plain');
-        return kind === 'text' ? send(200, result, 'text/plain') : send(200, JSON.stringify(result), 'application/json');
+        return send(404, 'not found', 'text/plain');
       }
+      // any other path is a place in the page (`/books/<id>`), which finds it itself
+      if(request.method === 'GET') return send(200, await fs.readFile(PAGE, 'utf8'), 'text/html');
       send(404, 'not found', 'text/plain');
     } catch(error) {
       // a path badly escaped is the asker's fault; anything else not foreseen is ours (a file of
@@ -224,6 +131,21 @@ function createServer({ data }) {
       send(status, status === 500 ? 'server error' : String(error.message), 'text/plain');
     }
   });
+  server.library = library;
+  server.on('close', () => library.close());
+  return server;
+}
+
+// `--library mega=/books` is a library named mega; `--library /books`, one named books
+function librariesOf(args) {
+  let libraries = [];
+  args.forEach((arg, at) => {
+    if(arg !== '--library') return;
+    let given = args[at + 1];
+    let [, name, dir] = /^(?:([\w-]+)=)?(.+)$/.exec(given);
+    libraries.push({ name: name ?? path.basename(path.resolve(dir)), dir: path.resolve(dir) });
+  });
+  return libraries;
 }
 
 module.exports = { createServer, createLibrary };
@@ -233,7 +155,16 @@ if(require.main === module) {
   let option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
   let port = Number(option('--port', 8080));
   let data = path.resolve(option('--data', path.join(__dirname, '..', 'data')));
-  createServer({ data }).listen(port, '127.0.0.1', () => {
+  let libraries = librariesOf(args);
+  let server = createServer({ data, libraries });
+  server.listen(port, '127.0.0.1', () => {
     console.log(`hyper-reader on http://127.0.0.1:${port}/, keeping books in ${data}`);
+    for(let { name, dir } of libraries) console.log(`library ${name}: ${dir}`);
+    // what came, changed or went while the server was not running
+    server.library.scan();
+    server.library.scanned().then(() => {
+      let { scan } = server.library.status();
+      console.log(`scanned: ${scan.files} files, ${scan.read} read, ${scan.removed} gone${scan.failed ? `, ${scan.failed} not read` : ''}`);
+    });
   });
 }

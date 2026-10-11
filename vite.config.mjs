@@ -4,12 +4,13 @@
 // and leaves the books to the server (`npm start`).
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
+import { ripple } from '@ripple-ts/vite-plugin';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 
 export default defineConfig({
   root: 'src',
   base: './',
-  plugins: [viteSingleFile()],
+  plugins: [ripple({ excludeRippleExternalModules: true }), viteSingleFile()],
   build: {
     outDir: '../dist',
     emptyOutDir: true,

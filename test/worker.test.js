@@ -3,14 +3,12 @@
 const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const path = require('node:path');
 const { Worker: NodeWorker } = require('node:worker_threads');
 const { SOURCES } = require('../lib/parser.js');
 const { loadParser } = require('../src/load-parser.js');
+const { createReader } = require('../src/reading.js');
 
-// the page's own code for it, marked off in src/main.js, and the texts it is handed
-const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
-const between = (a, b) => main.slice(main.indexOf(a), main.indexOf(b));
+// the texts the page hands the reader, and the parser it runs from them
 const [parserSource, bookSource] = SOURCES.map(source => fs.readFileSync(source, 'utf8'));
 
 const story = (count) => Array.from({ length: count }, (_, k) => `Nàng đi qua núi ${k % 7 ? 'rừng' : 'suối'} và nhớ chuyện cũ rất lâu trước kia.`).join('\n\n');
@@ -41,12 +39,10 @@ function page({ failing = false, missing = false } = {}) {
   }
   let said = [];
   let console = { log() {}, info: (...message) => said.push(message.join(' ')), group() {}, groupEnd() {} };
-  let code = `${between('// @source:begin', '// @source:end')}\n${between('// @worker:begin', '// @worker:end')}\nreturn { readBook, stop: () => parserWorker?.terminate() };`;
+  let parser = loadParser(parserSource, bookSource, console);
   // `Worker` left out is a browser that has none
-  let loaded = new Function('Worker', 'URL', 'Blob', 'console', 'parserSource', 'bookSource', 'loadParser', code)(
-    missing ? undefined : Worker, URL, Blob, console, parserSource, bookSource, loadParser,
-  );
-  return { ...loaded, said };
+  let reader = createReader({ parserSource, parser, Worker: missing ? undefined : Worker, URL, Blob, console });
+  return { ...reader, said };
 }
 
 describe('reading a book in a worker', () => {

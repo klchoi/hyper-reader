@@ -40,9 +40,21 @@ The built page holds everything it needs, its libraries too, so it needs no netw
   tests, the tools and the server. It touches nothing of the page.
 - `book.js` what a book is (`Book`) and what is kept of it (`bookRecord`, `PARSER_VERSION`),
   run with the parser.
-- `main.js` the app, and its backends (under `Backends`): what it asks of whatever keeps the
-  books, the browser's backend (IndexedDB, and `readBook`, which hands a book to the worker) and
-  the server's (calls to `server/server.js`).
+- `main.ts` the page started: the parser run from its text, the reader of books, and the app
+  mounted on `<body>`.
+- The app, in [Ripple](https://github.com/Ripple-TS/ripple) (TypeScript, `.tsrx`):
+  - `App.tsrx` makes the store and lays the page out: `ChapterList`, `Library` or
+    `ChapterText`, `Settings`, and the dialogs, `CommandPalette`, `FontPicker`,
+    `NamesEditor`, and the `AddName` button.
+  - `store.ts` everything the page knows, as tracked values, and the actions, the only things
+    that write them. Made by App and handed down as a context.
+  - `listening.ts` what the page listens for: the url, books dropped, the keys, the scroll, the
+    pointer over a name.
+  - `places.ts` the url, a place in a book, a chapter as its lines. `names.ts` the names list,
+    the text corrected by it, the names coloured on the page.
+- `backends.ts` what the app asks of whatever keeps the books: the browser's backend
+  (IndexedDB, and `reading.js`, which hands a book to a worker) and the server's (calls to
+  `server/server.js`).
 
 ## The chapter parser
 
@@ -66,6 +78,7 @@ npm test                 the tests: the parser, read from the page, on small inv
                          the worker, and the server's answers
 npm start                the server
 npm run lint             oxlint over all the code: src/, lib/, server/, test/, tools/
+npm run typecheck        TypeScript over src/, the .tsrx too (tsrx-tsc)
 npm run check:books -- <folder>
 ```
 

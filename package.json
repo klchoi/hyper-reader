@@ -7,16 +7,20 @@
     "check:books": "node tools/check-books.js",
     "lint": "oxlint --deny-warnings src lib server test tools vite.config.mjs",
     "build": "vite build && node -e \"require('node:fs').copyFileSync('dist/hyper-reader.html', 'hyper-reader.html')\"",
-    "dev": "vite"
+    "dev": "vite",
+    "typecheck": "tsrx-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "chroma-js": "^2.6.0",
-    "hyperapp": "^2.0.22",
     "idb": "^8.0.4",
-    "lodash-es": "^4.18.1"
+    "ripple": "^0.4.7"
   },
   "devDependencies": {
+    "@ripple-ts/vite-plugin": "^0.4.7",
+    "@tsrx/typescript-plugin": "^0.6.3",
+    "@types/chroma-js": "^2.4.5",
     "oxlint": "^1.87.0",
+    "typescript": "^5.9.3",
     "vite": "^8.3.4",
     "vite-plugin-singlefile": "^2.3.3"
   }

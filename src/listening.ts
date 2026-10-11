@@ -12,8 +12,8 @@ export function listen(store: Store) {
     stops.push(() => target.removeEventListener(type, handler, options));
   };
 
-  // the url changed under the page
-  on(window, 'hashchange', (event: HashChangeEvent) => store.followUrl(new URL(event.newURL).hash.slice(1)));
+  // the reader stepped back or on
+  stops.push(store.router.listen(to => store.follow(to)));
 
   // a book is a .txt file; some systems hand one over without a type, so the name decides
   on(window, 'dragenter', (event: DragEvent) => event.preventDefault());

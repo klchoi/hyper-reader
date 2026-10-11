@@ -4580,7 +4580,7 @@ replaceTraps((oldTraps) => ({
 //#region src/backends.ts
 async function chooseBackend(reading) {
 	if (location.protocol.startsWith("http")) try {
-		let hello = await fetch("api/hello");
+		let hello = await fetch("/api/hello");
 		if (hello.ok && (await hello.json()).backend === "server") {
 			console.info("Books kept by the server");
 			return serverBackend();
@@ -4597,13 +4597,13 @@ function serverBackend() {
 			headers: { "content-type": text ? "text/plain; charset=utf-8" : "application/json" },
 			body: text ? body : JSON.stringify(body)
 		};
-		let response = await fetch(`api/${route}`, {
+		let response = await fetch(`/api/${route}`, {
 			method,
 			...sent
 		});
 		let answer = response.headers.get("content-type")?.startsWith("application/json") ? await response.json() : await response.text();
 		if (response.status === 404) return null;
-		if (!response.ok) throw new Error(`${method} api/${route}: ${response.status} ${answer}`);
+		if (!response.ok) throw new Error(`${method} /api/${route}: ${response.status} ${answer}`);
 		return response.status === 204 ? void 0 : answer;
 	};
 	let id = encodeURIComponent;
@@ -7493,40 +7493,71 @@ Object.assign(chroma, {
 var chroma_js_default = chroma;
 //#endregion
 //#region src/places.ts
+var sameRoute = (from, to) => [
+	"book",
+	"offset",
+	"chapter"
+].every((key) => String(from[key] ?? "") === String(to[key] ?? ""));
+function fromHash(hash) {
+	let params = new URLSearchParams(hash.replace(/^#/, ""));
+	return {
+		book: params.get("book") ?? void 0,
+		offset: params.get("offset") ?? void 0,
+		chapter: params.get("chapter") ?? void 0
+	};
+}
 var HashRouter = class {
-	parse(hash) {
-		return Object.fromEntries(new URLSearchParams(hash));
-	}
-	get(key) {
-		return new URLSearchParams(location.hash.slice(1)).get(key);
-	}
 	current() {
-		return this.parse(location.hash.slice(1));
+		return fromHash(location.hash);
 	}
-	route(route) {
-		let hash = new URLSearchParams(Object.entries(route).filter(([, v]) => v !== "" && v != null).map(([k, v]) => [k, String(v)])).toString();
-		return hash ? `#${hash}` : hash;
-	}
-	changes(to) {
-		let from = this.current();
-		return Object.keys({
-			...from,
-			...to
-		}).some((key) => from[key] != to[key]);
+	route(to) {
+		let hash = new URLSearchParams(Object.entries(to).filter(([, v]) => v !== "" && v != null).map(([k, v]) => [k, String(v)])).toString();
+		return hash ? `#${hash}` : "#";
 	}
 	push(to) {
-		if (!this.changes(to)) return;
-		let url = new URL(location.href);
-		url.hash = this.route(to);
-		history.pushState(null, "", url);
+		if (!sameRoute(this.current(), to)) history.pushState(null, "", this.route(to));
 	}
 	replace(to) {
-		if (!this.changes(to)) return;
-		let url = new URL(location.href);
-		url.hash = this.route(to);
-		history.replaceState(null, "", url);
+		if (!sameRoute(this.current(), to)) history.replaceState(null, "", this.route(to));
+	}
+	listen(changed) {
+		let onHashChange = () => changed(this.current());
+		addEventListener("hashchange", onHashChange);
+		return () => removeEventListener("hashchange", onHashChange);
 	}
 };
+var PathRouter = class {
+	current() {
+		let found = /^\/books\/([^/]+)$/.exec(location.pathname);
+		if (!found) return /\bbook=/.test(location.hash) ? fromHash(location.hash) : {};
+		let params = new URLSearchParams(location.search);
+		return {
+			book: decodeURIComponent(found[1]),
+			offset: params.get("at") ?? void 0,
+			chapter: params.get("chapter") ?? void 0
+		};
+	}
+	route(to) {
+		if (!to.book) return "/";
+		let params = new URLSearchParams();
+		if (to.offset != null && to.offset !== "") params.set("at", String(to.offset));
+		else if (to.chapter) params.set("chapter", to.chapter);
+		let query = params.toString();
+		return `/books/${encodeURIComponent(to.book)}${query ? `?${query}` : ""}`;
+	}
+	push(to) {
+		if (!sameRoute(this.current(), to) || location.hash) history.pushState(null, "", this.route(to));
+	}
+	replace(to) {
+		if (!sameRoute(this.current(), to) || location.hash) history.replaceState(null, "", this.route(to));
+	}
+	listen(changed) {
+		let onPopState = () => changed(this.current());
+		addEventListener("popstate", onPopState);
+		return () => removeEventListener("popstate", onPopState);
+	}
+};
+var createRouter = () => location.protocol === "file:" ? new HashRouter() : new PathRouter();
 function toOffset(value) {
 	if (value == null || value === "") return;
 	let number = Number(value);
@@ -7591,7 +7622,7 @@ function bookRoute({ bookId, offset, chapterId }) {
 		offset
 	} : {
 		book: bookId,
-		chapter: chapterId
+		chapter: chapterId ?? void 0
 	};
 }
 var sizeFormatter = new Intl.NumberFormat(void 0, {
@@ -8195,7 +8226,7 @@ function applyDataset(key, value) {
 	document.documentElement.dataset[key] = String(value ?? "");
 }
 function createStore({ parser, reader }) {
-	const router = new HashRouter();
+	const router = createRouter();
 	let backend;
 	const books = track([]);
 	const book = track(null);
@@ -8413,7 +8444,7 @@ function createStore({ parser, reader }) {
 		let at = chapter.value;
 		if (!open || !at) return;
 		if (!(offset >= at.offset && offset <= at.offset + at.content.length)) return;
-		if (toOffset(router.get("offset")) === offset) return;
+		if (toOffset(router.current().offset) === offset) return;
 		router.replace(bookRoute({
 			bookId: open.id,
 			offset
@@ -8599,15 +8630,19 @@ function createStore({ parser, reader }) {
 		applySettings(await backend.settings());
 		loadProgress();
 		loadBooks();
-		let bookId = router.get("book");
+		let { book: bookId, offset, chapter: chapterId } = router.current();
+		router.replace({
+			book: bookId,
+			offset,
+			chapter: chapterId
+		});
 		if (bookId) openBook({
 			bookId,
-			offset: router.get("offset"),
-			chapterId: router.get("chapter")
+			offset,
+			chapterId
 		});
 	}
-	function followUrl(hash) {
-		let to = router.parse(hash);
+	function follow(to) {
 		if (!to.book) showLibrary();
 		else openBook({
 			bookId: to.book,
@@ -8632,7 +8667,7 @@ function createStore({ parser, reader }) {
 		commands,
 		selectedCommand,
 		start,
-		followUrl,
+		follow,
 		applySettings,
 		saveSettings,
 		chooseColor,
@@ -8669,7 +8704,7 @@ function listen(store) {
 		target.addEventListener(type, handler, options);
 		stops.push(() => target.removeEventListener(type, handler, options));
 	};
-	on(window, "hashchange", (event) => store.followUrl(new URL(event.newURL).hash.slice(1)));
+	stops.push(store.router.listen((to) => store.follow(to)));
 	on(window, "dragenter", (event) => event.preventDefault());
 	on(window, "dragover", (event) => event.preventDefault());
 	on(window, "drop", (event) => {

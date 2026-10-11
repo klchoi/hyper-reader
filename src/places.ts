@@ -1,41 +1,83 @@
 // Where the reader is: the url, the place in a book, a chapter as its lines, and how sizes and
 // dates are said. Nothing here keeps state.
 
-export type Route = Record<string, string | number | null | undefined>;
+// A place in the page: a book, and where in it (an offset, or for an older link the id of a
+// chapter), or nothing, the library.
+export type Route = { book?: string; offset?: number | string; chapter?: string };
 
-export class HashRouter {
-  parse(hash: string): Record<string, string> {
-    return Object.fromEntries(new URLSearchParams(hash));
-  }
-  get(key: string) {
-    return new URLSearchParams(location.hash.slice(1)).get(key);
-  }
-  current() {
-    return this.parse(location.hash.slice(1));
-  }
-  route(route: Route) {
-    let hash = new URLSearchParams(Object.entries(route).filter(([, v]) => v !== '' && v != null).map(([k, v]) => [k, String(v)])).toString();
-    return hash ? `#${hash}` : hash;
-  }
+// The url of a place, and the place of the url. The page served by the server has real paths
+// (`/books/<id>?at=<offset>`); opened as a file, it has only the part after `#` to keep a place
+// in (`#book=<id>&offset=<offset>`). Either is changed as the reader moves (push: a step back
+// returns to it; replace: it does not), and calls `listen`ers when the reader steps back or on
+export interface Router {
+  current(): Route;
+  route(to: Route): string;
+  push(to: Route): void;
+  replace(to: Route): void;
+  listen(changed: (to: Route) => void): () => void;
+}
+
+const sameRoute = (from: Route, to: Route) => (['book', 'offset', 'chapter'] as const)
   // the url holds strings and the page numbers, and an absent value is null or undefined
-  changes(to: Route) {
-    let from: Route = this.current();
-    // loose on purpose, '12' is 12 here
-    return Object.keys({ ...from, ...to }).some(key => from[key] != to[key]);
+  .every(key => String(from[key] ?? '') === String(to[key] ?? ''));
+
+function fromHash(hash: string): Route {
+  let params = new URLSearchParams(hash.replace(/^#/, ''));
+  return { book: params.get('book') ?? undefined, offset: params.get('offset') ?? undefined, chapter: params.get('chapter') ?? undefined };
+}
+
+export class HashRouter implements Router {
+  current() {
+    return fromHash(location.hash);
+  }
+  route(to: Route) {
+    let hash = new URLSearchParams(Object.entries(to).filter(([, v]) => v !== '' && v != null).map(([k, v]) => [k, String(v)])).toString();
+    return hash ? `#${hash}` : '#';
   }
   push(to: Route) {
-    if (!this.changes(to)) return;
-    let url = new URL(location.href);
-    url.hash = this.route(to);
-    history.pushState(null, '', url);
+    if (!sameRoute(this.current(), to)) history.pushState(null, '', this.route(to));
   }
   replace(to: Route) {
-    if (!this.changes(to)) return;
-    let url = new URL(location.href);
-    url.hash = this.route(to);
-    history.replaceState(null, '', url);
+    if (!sameRoute(this.current(), to)) history.replaceState(null, '', this.route(to));
+  }
+  listen(changed: (to: Route) => void) {
+    let onHashChange = () => changed(this.current());
+    addEventListener('hashchange', onHashChange);
+    return () => removeEventListener('hashchange', onHashChange);
   }
 }
+
+export class PathRouter implements Router {
+  // a link made before the page had paths (`/#book=...`) still finds its place
+  current(): Route {
+    let found = /^\/books\/([^/]+)$/.exec(location.pathname);
+    if (!found) return /\bbook=/.test(location.hash) ? fromHash(location.hash) : {};
+    let params = new URLSearchParams(location.search);
+    return { book: decodeURIComponent(found[1]), offset: params.get('at') ?? undefined, chapter: params.get('chapter') ?? undefined };
+  }
+  route(to: Route) {
+    if (!to.book) return '/';
+    let params = new URLSearchParams();
+    if (to.offset != null && to.offset !== '') params.set('at', String(to.offset));
+    else if (to.chapter) params.set('chapter', to.chapter);
+    let query = params.toString();
+    return `/books/${encodeURIComponent(to.book)}${query ? `?${query}` : ''}`;
+  }
+  push(to: Route) {
+    if (!sameRoute(this.current(), to) || location.hash) history.pushState(null, '', this.route(to));
+  }
+  replace(to: Route) {
+    if (!sameRoute(this.current(), to) || location.hash) history.replaceState(null, '', this.route(to));
+  }
+  listen(changed: (to: Route) => void) {
+    let onPopState = () => changed(this.current());
+    addEventListener('popstate', onPopState);
+    return () => removeEventListener('popstate', onPopState);
+  }
+}
+
+// the page served (by the server) has paths; the page opened as a file has only its hash
+export const createRouter = (): Router => (location.protocol === 'file:' ? new HashRouter() : new PathRouter());
 
 // an absent url param reads as null, and Number(null) is a perfectly good 0
 export function toOffset(value: unknown): number | undefined {
@@ -113,8 +155,8 @@ export function offsetAtTop() {
 
 // where in a book to reopen: its offset, or - for a bookmark or a progress record
 // written before offsets - the chapter id it still names
-export function bookRoute({ bookId, offset, chapterId }: { bookId: string; offset?: unknown; chapterId?: string }): Route {
-  return offset != null ? { book: bookId, offset: offset as number } : { book: bookId, chapter: chapterId };
+export function bookRoute({ bookId, offset, chapterId }: { bookId: string; offset?: unknown; chapterId?: string | null }): Route {
+  return offset != null ? { book: bookId, offset: offset as number } : { book: bookId, chapter: chapterId ?? undefined };
 }
 
 const sizeFormatter = new Intl.NumberFormat(undefined, { notation: 'compact', style: 'unit', unit: 'byte', unitDisplay: 'narrow' });

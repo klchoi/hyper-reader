@@ -8,8 +8,8 @@ import { chooseBackend } from './backends.ts';
 import type { Backend, BookRecord, BookSummary, FileInfo, Progress } from './backends.ts';
 import { articleNames, commandPaletteNames, highlightNames, nameFixer, namesWith, offerFor } from './names.ts';
 import type { AddNameAt, AddNameOffer } from './names.ts';
-import { HashRouter, bookRoute, chapterAt, getColorScheme, nextTick, toOffset } from './places.ts';
-import type { Chapter, Listed } from './places.ts';
+import { bookRoute, chapterAt, createRouter, getColorScheme, nextTick, toOffset } from './places.ts';
+import type { Chapter, Listed, Route } from './places.ts';
 
 // what the page is given to start with: the parser and what a book is (see load-parser.js),
 // and the reader of books (see reading.js)
@@ -53,7 +53,7 @@ function applyDataset(key: string, value: unknown) {
 }
 
 export function createStore({ parser, reader }: Page) {
-  const router = new HashRouter();
+  const router = createRouter();
   let backend: Backend;
 
   const books = track<BookSummary[]>([]);
@@ -245,7 +245,7 @@ export function createStore({ parser, reader }: Page) {
     if (!open || !at) return;
     // the page can still be showing the chapter we just left
     if (!(offset >= at.offset && offset <= at.offset + at.content.length)) return;
-    if (toOffset(router.get('offset')) === offset) return;
+    if (toOffset(router.current().offset) === offset) return;
     router.replace(bookRoute({ bookId: open.id, offset }));
     saveProgressLater(open, at, offset, 3000);
   }
@@ -409,12 +409,13 @@ export function createStore({ parser, reader }: Page) {
     applySettings(await backend.settings());
     loadProgress();
     loadBooks();
-    let bookId = router.get('book');
-    if (bookId) openBook({ bookId, offset: router.get('offset'), chapterId: router.get('chapter') });
+    // an older link (`/#book=...` on a page that has paths) is written as the page writes it now
+    let { book: bookId, offset, chapter: chapterId } = router.current();
+    router.replace({ book: bookId, offset, chapter: chapterId });
+    if (bookId) openBook({ bookId, offset, chapterId });
   }
-  // the url changed under the page: back to the library, or into a book
-  function followUrl(hash: string) {
-    let to = router.parse(hash);
+  // the reader stepped back or on: back to the library, or into a book
+  function follow(to: Route) {
     if (!to.book) showLibrary();
     else openBook({ bookId: to.book, offset: to.offset, chapterId: to.chapter });
   }
@@ -423,7 +424,7 @@ export function createStore({ parser, reader }: Page) {
     router, parser,
     books, book, chapter, progress, settings, palette, fontPicker, names, namesEditorOpen, addName,
     fixNames, commands, selectedCommand,
-    start, followUrl,
+    start, follow,
     applySettings, saveSettings, chooseColor, sortBy,
     loadFonts, toggleFontPicker, setFontTarget, setFontQuery, chooseFont,
     openBook, openNextChapter, trackReadingOffset, showLibrary,

@@ -25,7 +25,8 @@ database, `<data>/library.db` (`data/` by default):
 - the books dropped on the page, kept in `<data>/uploads`, a library of their own, the only
   books that can be deleted from the page.
 
-A book's id is its name and where it is (`tien-lo-xanh-biec-do-3fa9c21b`). The books are read on
+A book's id is its name and where it is (`tien-lo-xanh-biec-do-3fa9c21b`), and its place in the
+page a path (`/books/<id>?at=<offset>`), which the server answers with the page. The books are read on
 threads of their own, and their full text indexed behind them for search (`/api/search?q=`,
 `&book=` for every place in one book), a book opened first; the characters a book names most
 are kept with it (`/api/characters?q=`). Where a book was left and its names outlive it, so a

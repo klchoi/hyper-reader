@@ -53,7 +53,7 @@ export type Reading = {
 export async function chooseBackend(reading: Reading): Promise<Backend> {
   if (location.protocol.startsWith('http')) {
     try {
-      let hello = await fetch('api/hello');
+      let hello = await fetch('/api/hello');
       if (hello.ok && (await hello.json()).backend === 'server') {
         console.info('Books kept by the server');
         return serverBackend();
@@ -74,12 +74,12 @@ function serverBackend(): Backend {
       headers: { 'content-type': text ? 'text/plain; charset=utf-8' : 'application/json' },
       body: text ? (body as string) : JSON.stringify(body),
     };
-    let response = await fetch(`api/${route}`, { method, ...sent });
+    let response = await fetch(`/api/${route}`, { method, ...sent });
     // the answer is read whole, whatever it is: one left unread holds its connection, and
     // the next call over it is cut off
     let answer = response.headers.get('content-type')?.startsWith('application/json') ? await response.json() : await response.text();
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error(`${method} api/${route}: ${response.status} ${answer}`);
+    if (!response.ok) throw new Error(`${method} /api/${route}: ${response.status} ${answer}`);
     return response.status === 204 ? undefined : answer;
   };
   let id = encodeURIComponent;

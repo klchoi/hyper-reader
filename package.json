@@ -5,7 +5,7 @@
     "start": "node server/server.js",
     "test": "node --test",
     "check:books": "node tools/check-books.js",
-    "lint": "npx --yes @biomejs/biome@1 lint src/parser.js lib server",
+    "lint": "oxlint --deny-warnings src lib server test tools vite.config.mjs",
     "build": "vite build && node -e \"require('node:fs').copyFileSync('dist/hyper-reader.html', 'hyper-reader.html')\"",
     "dev": "vite"
   },
@@ -16,6 +16,7 @@
     "lodash-es": "^4.18.1"
   },
   "devDependencies": {
+    "oxlint": "^1.87.0",
     "vite": "^8.3.4",
     "vite-plugin-singlefile": "^2.3.3"
   }

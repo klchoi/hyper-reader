@@ -65,7 +65,7 @@ they are read again the next time they are opened.
 npm test                 the tests: the parser, read from the page, on small invented books,
                          the worker, and the server's answers
 npm start                the server
-npm run lint             Biome over the parser, lib/ and server/
+npm run lint             oxlint over all the code: src/, lib/, server/, test/, tools/
 npm run check:books -- <folder>
 ```
 
@@ -83,5 +83,6 @@ The usual round for a parser change:
 3. `npm run check:books -- <folder>`: read what moved, and be sure it should have.
 4. `npm run check:books -- <folder> --update` to keep the new state as the one to compare with.
 
-Notes on the lint rules: `biome.json` turns off `useConst` (the code uses `let` throughout) and
-`useNumberNamespace` (it writes `-Infinity`).
+Notes on the lint rules (`.oxlintrc.json`): oxlint's own set, with warnings failing the run, less
+`unicorn/no-new-array` (`new Array(n).fill(x)` always means a length here). The parser's and the
+book's functions are used from their text, so oxlint is told their names are used.

@@ -19,7 +19,7 @@ function normalizeFileContent(source) {
   text = text.replace(/\s?"?QQ Group \d+"?/gu, '');
   //tìm sách a "Cuộc đời này không phụ diên đuôi tình" cá nhân cải biên
   text = text.replaceAll('  tìm sách a "Cuộc đời này không phụ diên đuôi tình" cá nhân cải biên', '');
-  text = text.replace(/\b(?<protocol>https?:)(?:\/\/)? (?<path>(?:\w+)(?:\. \w+)+(?:\/(?:(?:\. )?[\w\/])+)?)/gm, (...args) => {
+  text = text.replace(/\b(?<protocol>https?:)(?:\/\/)? (?<path>(?:\w+)(?:\. \w+)+(?:\/(?:(?:\. )?[\w/])+)?)/gm, (...args) => {
     let { protocol, path } = args.pop();
     path = path.replace(/\s/g, '');
     if (protocol) return `${protocol}//${path}`;
@@ -48,7 +48,7 @@ function normalizeFileContent(source) {
 
 function chapterTitle({ type = 'Chương', number, part, title, text }, ordinal) {
   // a lone `/` or `|` after the chapter word was a separator with nothing behind it
-  title = title?.replace(/^[\s\/|\\]+/, '') ?? '';
+  title = title?.replace(/^[\s/|\\]+/, '') ?? '';
   let isExtra = (s) => /phiên ngoại/iu.test(s ?? '');
   let extra = isExtra(text) && !isExtra(title) && !isExtra(type) ? 'Phiên ngoại' : undefined;
   let label = [extra, number != null && `${type} ${number}`].filter(Boolean).join(' ');
@@ -488,7 +488,7 @@ const HEADING_RULES = [
 function cleanTitle(rest) {
   let title = rest.replace(/^[\s:：.,\-—–/|)\]】”"»*#!]+/u, '').trimEnd();
   // a closing bracket with nothing opened before it goes; one that closes a tag stays
-  while(/[】\]”"»]$/u.test(title) && (title.match(/[】\]”"»]/gu) || []).length > (title.match(/[【\[“«]/gu) || []).length) {
+  while(/[】\]”"»]$/u.test(title) && (title.match(/[】\]”"»]/gu) || []).length > (title.match(/[【[“«]/gu) || []).length) {
     title = title.slice(0, -1).trimEnd();
   }
   return title;
@@ -654,9 +654,9 @@ function readHeading(line, lower, names) {
     // `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`: the heading of a section, then the one
     // of the part that begins here. The part is the chapter, the section its group
     let inner = rule.kind === 'chap' && read.roles.n != null
-      && (/^(.*?)\s*[|｜]\s*(\S.*)$/u.exec(rest) ?? /^(.*?)\s*[【\[]?\s*(thứ\s+\S+\s+hồi\b.*)$/iu.exec(rest));
+      && (/^(.*?)\s*[|｜]\s*(\S.*)$/u.exec(rest) ?? /^(.*?)\s*[【[]?\s*(thứ\s+\S+\s+hồi\b.*)$/iu.exec(rest));
     if(inner) {
-      let held = readHeading(inner[2].replace(/^[【\[]\s*/, ''), inner[2].replace(/^[【\[]\s*/, '').toLowerCase(), names);
+      let held = readHeading(inner[2].replace(/^[【[]\s*/, ''), inner[2].replace(/^[【[]\s*/, '').toLowerCase(), names);
       if(held && held.kind === 'chap' && held.n != null && !held.outer) {
         let outer = `${read.marker?.word ?? 'Chương'} ${read.roles.n}`;
         return heading({ ...held, outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(': '), start: tokens[0].s, text: line.slice(tokens[0].s) });

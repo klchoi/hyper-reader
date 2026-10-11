@@ -10,7 +10,7 @@ import { loadParser } from './load-parser.js';
 // that reads books (see readBook)
 // @source:begin
 const PARSER_SOURCE = parserSource;
-const { normalizeFileContent, extractChapters, slug, latinize, Book, bookRecord, PARSER_VERSION } = loadParser(PARSER_SOURCE, bookSource, console);
+const { normalizeFileContent, extractChapters, latinize, Book, bookRecord, PARSER_VERSION } = loadParser(PARSER_SOURCE, bookSource, console);
 // @source:end
 
 class HashRouter extends EventTarget {
@@ -32,7 +32,6 @@ class HashRouter extends EventTarget {
     let from = this.current();
     let allKeys = Object.keys({ ...from, ...to });
     // the url holds strings and the page numbers, and an absent value is null or undefined
-    // biome-ignore lint/suspicious/noDoubleEquals: loose on purpose, '12' is 12 here
     let changed = allKeys.some(key => from[key] != to[key]);
     if (changed) {
       let url = new URL(location.href);
@@ -44,7 +43,6 @@ class HashRouter extends EventTarget {
     let from = this.current();
     let allKeys = Object.keys({ ...from, ...to });
     // the url holds strings and the page numbers, and an absent value is null or undefined
-    // biome-ignore lint/suspicious/noDoubleEquals: loose on purpose, '12' is 12 here
     let changed = allKeys.some(key => from[key] != to[key]);
     if (changed) {
       let url = new URL(location.href);
@@ -907,7 +905,8 @@ let commandPaletteNames = { selector: '#command-palette a', prefix: 'cp' };
 let HighlightNames = (state, { selector, prefix } = articleNames) => [state, async () => {
   await nextTick();
 
-  for(let styleId of [...CSS.highlights.keys()]) {
+  // a copy of the names: the loop deletes from what it walks
+  for(let styleId of Array.from(CSS.highlights.keys())) {
     if(styleId.startsWith(prefix + '-')) CSS.highlights.delete(styleId);
   }
   detectedNames[prefix] = new Map();
@@ -1468,8 +1467,7 @@ app({
         typography && h('style', {}, text(`:root { ${typography} }`)),
         h('nav', {}, [
           (book?.chapters?.length > 0) && (
-            h('ol', { start: 0 }, [
-              ...book.chapters.flatMap((c, i) => {
+            h('ol', { start: 0 }, book.chapters.flatMap((c, i) => {
                 let link = (label, tip) => h('a', {
                   href: router.route(bookRoute({ bookId: book.id, offset: c.offset })),
                   onclick: (_, event) => {
@@ -1488,8 +1486,7 @@ app({
                   c.part && c.part.of != book.chapters[i - 1]?.part?.of && h('li', {}, [link(c.part.of, c.part.of)]),
                   h('li', { class: { active: c.id == chapter.id, part: !!c.part } }, [link(c.part ? c.part.text : c.title, c.title)]),
                 ].filter(Boolean);
-              })
-            ])
+              }))
           )
         ]),
         !book && (
@@ -1595,8 +1592,7 @@ app({
         ),
         chapter && (
           h('main', {}, [
-            h('article', {}, [
-              ...chapterLines(chapter, fixNames).map(({ text: line, offset }) => {
+            h('article', {}, chapterLines(chapter, fixNames).map(({ text: line, offset }) => {
                 if (/^[-]+$/.test(line)) return h('hr', { 'data-offset': offset });
                 if (/^[^\p{L}\p{N}"]+$/u.test(line)) return h('p', { 'data-offset': offset, class: 'text-center indent-none' }, text(line));
                 let content = [], m;
@@ -1607,8 +1603,7 @@ app({
                 }
                 if (line) content.push(text(line));
                 return h('p', { 'data-offset': offset }, content);
-              })
-            ])
+              }))
           ])
         ),
         h('aside', { class: 'settings' }, [
@@ -1690,8 +1685,7 @@ app({
             h('input', { type: 'submit', hidden: true }),
           ]),
           //commandPalette.q && h('style', {}, text(`#command-palette [data-term]:not([data-term*="${commandPalette.q}"]) { display: none; }`)),
-          commands.length > 0 && h('ul', {}, [
-            ...commands.map((command, index) => (
+          commands.length > 0 && h('ul', {}, commands.map((command, index) => (
               h('li', {
                 'data-term': command.term,
                 class: { selected: command == selectedCommand }
@@ -1711,12 +1705,10 @@ app({
                   text(command.label),
                 ])
               )
-            ))
-          ])
+            )))
         ]),
         h('dialog', { id: 'font-picker', open: fontPicker.open }, [
-          h('div', { class: 'target' }, [
-            ...['reading', 'ui'].map(target => (
+          h('div', { class: 'target' }, ['reading', 'ui'].map(target => (
               h('button', {
                 class: { selected: fontPicker.target == target },
                 onclick: [SetFontTarget, target],
@@ -1724,8 +1716,7 @@ app({
                   ? 'The font the paragraphs are set in'
                   : 'The font everything else is set in',
               }, text(target === 'reading' ? 'Reading' : 'Interface'))
-            ))
-          ]),
+            ))),
           h('input', {
             placeholder: 'Font',
             value: fontPicker.q,
@@ -1957,11 +1948,11 @@ function serverBackend() {
   // a body is sent as JSON, or as text when it is text; an answer of 404 is null
   let call = async (method, route, body) => {
     let text = typeof body === 'string';
-    let response = await fetch(`api/${route}`, {
-      method,
-      headers: body === undefined ? {} : { 'content-type': text ? 'text/plain; charset=utf-8' : 'application/json' },
-      body: body === undefined || text ? body : JSON.stringify(body),
-    });
+    let sent = body !== undefined && {
+      headers: { 'content-type': text ? 'text/plain; charset=utf-8' : 'application/json' },
+      body: text ? body : JSON.stringify(body),
+    };
+    let response = await fetch(`api/${route}`, { method, ...sent });
     // the answer is read whole, whatever it is: one left unread holds its connection, and
     // the next call over it is cut off
     let answer = response.headers.get('content-type')?.startsWith('application/json') ? await response.json() : await response.text();

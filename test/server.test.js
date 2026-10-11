@@ -21,11 +21,11 @@ describe('the server', () => {
   let base;
   // the answer as the page reads it: JSON, text, or the status alone
   let call = async (method, route, body) => {
-    let response = await fetch(`${base}/api/${route}`, {
-      method,
-      headers: typeof body === 'string' ? { 'content-type': 'text/plain' } : { 'content-type': 'application/json' },
-      body: body === undefined || typeof body === 'string' ? body : JSON.stringify(body),
-    });
+    let sent = body !== undefined && {
+      headers: { 'content-type': typeof body === 'string' ? 'text/plain' : 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    };
+    let response = await fetch(`${base}/api/${route}`, { method, ...sent });
     let type = response.headers.get('content-type') ?? '';
     let answer = type.startsWith('application/json') ? await response.json() : await response.text();
     return { status: response.status, answer };

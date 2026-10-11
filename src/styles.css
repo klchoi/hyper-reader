@@ -1000,3 +1000,84 @@ main {
 .text-right { text-align: right; }
 .text-center { text-align: center; }
 .indent-none { text-indent: 0; }
+
+/** the library searched, and its libraries **/
+.table .bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding-top: var(--gap);
+
+  input {
+    flex: 1;
+    font: inherit;
+    font-size: 0.9em;
+    padding: 0.6ex 1.2ex;
+    color: var(--body-font-color);
+    background: var(--body-background-color);
+    border: 1px solid var(--paper-outline-color);
+    border-radius: 0.8ex;
+  }
+  small {
+    white-space: nowrap;
+  }
+  button {
+    font: inherit;
+    font-size: 0.8em;
+    padding: 0.4ex 1.2ex;
+    color: var(--body-font-color);
+    background: var(--body-background-color);
+    border: 1px solid var(--paper-outline-color);
+    border-radius: 0.8ex;
+    cursor: pointer;
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
+}
+.table .found {
+  grid-column: 1 / -1;
+  h3 {
+    font-size: 0.8em;
+    font-weight: normal;
+    opacity: 0.6;
+    margin: var(--gap) 0 calc(var(--gap) / 2);
+  }
+  p {
+    margin: 0 0 calc(var(--gap) / 2);
+  }
+  .person {
+    margin-bottom: calc(var(--gap) / 2);
+    ul {
+      list-style: none;
+      margin: 0.3ex 0 0 1.5em;
+    }
+  }
+  a.name {
+    font-weight: bold;
+  }
+}
+
+/** the places a book says what was searched for **/
+#command-palette[open] {
+  .mentions {
+    padding: 0.7ex 1.3ex 0;
+    opacity: 0.6;
+  }
+  li.mention a {
+    small {
+      display: block;
+      opacity: 0.6;
+    }
+    mark {
+      background: none;
+      color: inherit;
+      font-weight: bold;
+    }
+  }
+}
+::highlight(found) {
+  background: color-mix(in srgb, var(--link-color) 30%, transparent);
+}

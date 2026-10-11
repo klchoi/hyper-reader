@@ -151,12 +151,27 @@ describe('the server', () => {
     let { answer: inBook } = await call('GET', `search?q=${encodeURIComponent('Hoàng dung')}&book=${id}`);
     assert.ok(inBook.indexed);
     assert.equal(inBook.mentions.length, 24);
+    assert.equal(inBook.total, 24);
     let [first] = inBook.mentions;
     assert.equal(first.match, 'Hoàng Dung');
     assert.ok(first.before.endsWith('gặp '));
     let text = normalizeFileContent(bookText('Hoàng Dung'));
     assert.equal(text.slice(first.offset, first.offset + first.match.length), 'Hoàng Dung');
     assert.deepEqual((await call('GET', `search?q=dai+ca&book=${id}`)).answer.mentions, []);
+  });
+  it('holds what is found to the accents it was asked with', async () => {
+    let both = `${bookText('Hoàng Dung')}\n\nNàng hoảng dùng tay che mặt.\n\nRồi hoảng dùng chân chạy.`;
+    let { answer: record } = await call('POST', 'books', { name: 'Hai cách (1-3 chương).txt', size: 0, text: both });
+    await settled();
+    let plain = (await call('GET', `search?q=${encodeURIComponent('hoang dung')}&book=${record.id}`)).answer;
+    let accented = (await call('GET', `search?q=${encodeURIComponent('Hoàng Dung')}&book=${record.id}`)).answer;
+    assert.equal(plain.total, 26);
+    assert.equal(accented.total, 24);
+    assert.ok(accented.mentions.every(m => m.match === 'Hoàng Dung'));
+    let [person] = (await call('GET', `characters?q=${encodeURIComponent('Hoàng')}`)).answer;
+    assert.equal(person.name, 'Hoàng Dung');
+    assert.deepEqual((await call('GET', `characters?q=${encodeURIComponent('Hoảng')}`)).answer, []);
+    await call('DELETE', `books/${record.id}`);
   });
   it('keeps the settings, merged', async () => {
     await call('PATCH', 'settings', { zen: true, sort: { field: 'name' } });

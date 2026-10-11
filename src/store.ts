@@ -5,10 +5,10 @@
 import { Context, tick, track } from 'ripple';
 import type { Tracked } from 'ripple';
 import { chooseBackend } from './backends.ts';
-import type { Backend, BookRecord, BookSummary, FileInfo, Progress } from './backends.ts';
+import type { Backend, BookRecord, BookSaying, BookSummary, FileInfo, LibraryStatus, Mention, Person, Progress } from './backends.ts';
 import { articleNames, commandPaletteNames, highlightNames, nameFixer, namesWith, offerFor } from './names.ts';
 import type { AddNameAt, AddNameOffer } from './names.ts';
-import { bookRoute, chapterAt, createRouter, getColorScheme, nextTick, toOffset } from './places.ts';
+import { bookRoute, chapterAt, createRouter, getColorScheme, markFound, nextTick, toOffset } from './places.ts';
 import type { Chapter, Listed, Route } from './places.ts';
 
 // what the page is given to start with: the parser and what a book is (see load-parser.js),
@@ -24,7 +24,8 @@ export type Page = {
 };
 
 export type Settings = Record<string, any>;
-export type Command = { key: string; label: string; term: string; open: { bookId: string; offset?: number; chapterId?: string } };
+// what the palette offers: a book, a chapter, or a place in the book that says what was typed
+export type Command = { key: string; label: string; term: string; open: { bookId: string; offset?: number; chapterId?: string }; mention?: Mention };
 
 // a font name reaches css as a quoted family, so a name is only ever read as
 // a name - and Reader stays behind it for whatever the chosen face is missing
@@ -61,7 +62,16 @@ export function createStore({ parser, reader }: Page) {
   const chapter = track<Chapter | null>(null);
   const progress = track<Record<string, Progress>>({});
   const settings = track<Settings>({ sort: { field: 'updatedAt', direction: 'desc' } });
-  const palette = track({ open: false, q: '', selectedIndex: 0 });
+  // `text` as typed, `q` as searched for
+  const palette = track({ open: false, text: '', q: '', selectedIndex: 0 });
+  // the places in the book open that say what the palette was given, and whether the whole book
+  // was indexed when asked
+  const mentions = track<{ q: string; indexed: boolean; total: number; found: Mention[] }>({ q: '', indexed: true, total: 0, found: [] });
+  // what the backend can do beside keeping books: search, and the libraries on its disk
+  const searching = track(false);
+  const status = track<LibraryStatus | null>(null);
+  // the library searched: the characters, and the books that say it
+  const found = track<{ q: string; characters: Person[]; books: BookSaying[] }>({ q: '', characters: [], books: [] });
   const fontPicker = track<{ open: boolean; q: string; target: FontTarget }>({ open: false, q: '', target: 'reading' });
   const names = track('');
   const namesEditorOpen = track(false);
@@ -84,7 +94,15 @@ export function createStore({ parser, reader }: Page) {
       return { key: `chapter:${listed.offset}`, label, open: { bookId: open.id, offset: listed.offset }, term: parser.latinize(`${label} | ${listed.title}`).toLowerCase() };
     });
   });
-  const commands = track<Command[]>(() => (book.value ? chapterCommands.value : bookCommands.value).filter(c => c.term.includes(palette.value.q)));
+  const mentionCommands = track<Command[]>(() => {
+    let open = book.value;
+    if (!open || mentions.value.q !== palette.value.q) return [];
+    return mentions.value.found.map(m => ({ key: `at:${m.offset}`, label: `${m.before}${m.match}${m.after}`, term: '', open: { bookId: open.id, offset: m.offset }, mention: m }));
+  });
+  const commands = track<Command[]>(() => [
+    ...(book.value ? chapterCommands.value : bookCommands.value).filter(c => c.term.includes(palette.value.q)),
+    ...mentionCommands.value,
+  ]);
   const selectedCommand = track(() => {
     let found = commands.value;
     return found[(palette.value.selectedIndex + found.length) % found.length];
@@ -274,6 +292,7 @@ export function createStore({ parser, reader }: Page) {
     for (let file of dropped) read.push(await readFile(file));
     let added = await backend.addBooks(read);
     loadBooks();
+    watchStatus();
 
     let inNewTabs = added;
     let here: BookRecord | undefined;
@@ -348,11 +367,12 @@ export function createStore({ parser, reader }: Page) {
   }
 
   // ---- the command palette
-  async function togglePalette(open?: boolean) {
+  async function togglePalette(open?: boolean, text?: string) {
     let opened = open ?? !palette.value.open;
-    if (opened === palette.value.open) return;
+    if (opened === palette.value.open && text === undefined) return;
     palette.value = { ...palette.value, open: opened };
     if (!opened) return;
+    if (text !== undefined) searchCommands(text);
     await nextTick();
     document.querySelector<HTMLInputElement>('#command-palette input')?.select();
     highlightMatches();
@@ -370,16 +390,36 @@ export function createStore({ parser, reader }: Page) {
       list.scroll({ behavior: 'instant', top: item.offsetTop + item.clientHeight - list.clientHeight });
     }
   }
-  async function searchCommands(q: string) {
-    palette.value = { ...palette.value, q: q.trim().toLowerCase(), selectedIndex: 0 };
+  // the palette given `text`: the chapters (or books) named so, and in a book every place that
+  // says it, asked of the backend a moment after the typing stops
+  let mentionsTimer: ReturnType<typeof setTimeout> | undefined;
+  async function searchCommands(text: string) {
+    let q = text.trim().toLowerCase();
+    palette.value = { ...palette.value, text, q, selectedIndex: 0 };
+    clearTimeout(mentionsTimer);
+    let open = book.value;
+    if (open && backend.searchBook && q.length >= 2) {
+      mentionsTimer = setTimeout(async () => {
+        let { indexed, total, mentions: places } = await backend.searchBook!(text.trim(), open.id);
+        if (palette.value.q !== q || book.value?.id !== open.id) return;
+        mentions.value = { q, indexed, total, found: places.slice(0, 200) };
+        highlightMatches();
+        highlightNames(names.value, commandPaletteNames);
+      }, 250);
+    } else {
+      mentions.value = { q, indexed: true, total: 0, found: [] };
+    }
     selectCommand(0);
     highlightMatches();
     highlightNames(names.value, commandPaletteNames);
   }
   async function runCommand(command: Command | undefined) {
     if (!command) return;
+    let phrase = command.mention?.match;
     togglePalette(false);
     await openBook(command.open);
+    // a place in the text: what was searched for is marked there
+    markFound(phrase ?? '');
   }
   // what was searched for, marked in each command it was found in
   async function highlightMatches() {
@@ -400,6 +440,46 @@ export function createStore({ parser, reader }: Page) {
     CSS.highlights.set('match', new Highlight(...ranges));
   }
 
+  // ---- the libraries on the server's disk
+  // the status asked again every second or so while a scan goes or the index is behind; the
+  // books listed again when a scan ends
+  let statusTimer: ReturnType<typeof setTimeout> | undefined;
+  async function watchStatus() {
+    clearTimeout(statusTimer);
+    if (!backend.status) return;
+    let was = status.value;
+    let now = await backend.status();
+    status.value = now;
+    if (was?.scan.running && !now.scan.running) loadBooks();
+    if (now.scan.running || now.index.done < now.index.total) statusTimer = setTimeout(watchStatus, 1500);
+  }
+  async function rescan() {
+    if (!backend.scan) return;
+    status.value = await backend.scan();
+    watchStatus();
+  }
+  // the library searched for `text`: the characters named so, and the books that say it
+  let foundTimer: ReturnType<typeof setTimeout> | undefined;
+  function searchLibrary(text: string) {
+    clearTimeout(foundTimer);
+    let q = text.trim();
+    if (!q || !backend.search || !backend.characters) {
+      found.value = { q: '', characters: [], books: [] };
+      return;
+    }
+    found.value = { ...found.value, q };
+    foundTimer = setTimeout(async () => {
+      let [characters, books] = await Promise.all([backend.characters!(q), backend.search!(q)]);
+      if (found.value.q === q) found.value = { q, characters, books };
+    }, 250);
+  }
+  // a book found by a search, opened where it was left, with the places that say it listed
+  async function openFound(bookId: string, q: string) {
+    let { offset, chapterId } = progress.value[bookId] || {};
+    await openBook({ bookId, offset, chapterId });
+    togglePalette(true, q);
+  }
+
   // ---- starting
   // the settings, the library and where each book was left are asked of the backend; a link
   // into a book opens it
@@ -407,8 +487,10 @@ export function createStore({ parser, reader }: Page) {
     applySettings({ 'color:dark': 'night', 'color:light': 'white' });
     backend = await chooseBackend({ readBook: reader.readBook, Book: parser.Book, bookRecord: parser.bookRecord, PARSER_VERSION: parser.PARSER_VERSION });
     applySettings(await backend.settings());
+    searching.value = !!backend.searchBook;
     loadProgress();
     loadBooks();
+    watchStatus();
     // an older link (`/#book=...` on a page that has paths) is written as the page writes it now
     let { book: bookId, offset, chapter: chapterId } = router.current();
     router.replace({ book: bookId, offset, chapter: chapterId });
@@ -423,7 +505,7 @@ export function createStore({ parser, reader }: Page) {
   return {
     router, parser,
     books, book, chapter, progress, settings, palette, fontPicker, names, namesEditorOpen, addName,
-    fixNames, commands, selectedCommand,
+    fixNames, commands, selectedCommand, mentions, searching, status, found,
     start, follow,
     applySettings, saveSettings, chooseColor, sortBy,
     loadFonts, toggleFontPicker, setFontTarget, setFontQuery, chooseFont,
@@ -431,6 +513,7 @@ export function createStore({ parser, reader }: Page) {
     storeFiles, refreshBook, deleteBook,
     setNames, toggleNamesEditor, saveNames, showAddName, addToNames,
     togglePalette, selectCommand, searchCommands, runCommand,
+    rescan, searchLibrary, openFound,
   };
 }
 

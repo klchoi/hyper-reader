@@ -42,6 +42,10 @@ function plainKeepingPlaces(text) {
   return out;
 }
 const isLetter = (ch) => ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+// what was asked with its accents is found with them: `Hoàng Dung` is not `hoảng dùng`. The
+// index finds both, so what it finds is held to the accents where they can be read
+const accented = (q) => plain(q) !== q.toLowerCase().normalize();
+const asked = (q) => q.trim().replace(/\s+/g, ' ').toLowerCase().normalize();
 
 // `libraries`: [{ name, dir }]
 function createLibrary({ data, libraries = [] }) {
@@ -216,12 +220,14 @@ function createLibrary({ data, libraries = [] }) {
     }),
 
     // ---- search
-    // the characters named `q` (or a name beginning so), each with the books they are in
+    // the characters named `q` (or a name beginning so), each with the books they are in: one
+    // character to a name, however it is cased, but not however it is accented
     characters(q) {
       if(!plain(q ?? '').trim()) return [];
       let people = new Map();
       for(let { name, mentions, bookId, bookName } of store.characters(q)) {
-        let key = plain(name);
+        if(accented(q) && !name.toLowerCase().normalize().startsWith(asked(q))) continue;
+        let key = name.toLowerCase();
         let person = people.get(key) ?? people.set(key, { name, mentions: 0, books: [] }).get(key);
         person.mentions += mentions;
         person.books.push({ id: bookId, name: bookName, mentions });
@@ -241,19 +247,27 @@ function createLibrary({ data, libraries = [] }) {
       if(!indexed) indexer.first(bookId);
       let chapters = store.chaptersSaying(phrase, bookId);
       let text = chapters.length ? await textOf(row) : '';
+      let exact = accented(q) ? asked(q) : null;
+      // every place counted, the first 500 told with the words around them: a little before,
+      // so the place itself is in sight, and more after
       let mentions = [];
+      let total = 0;
       for(let chapter of chapters) {
         let said = text.slice(chapter.offset, chapter.end);
         let plainSaid = plainKeepingPlaces(said);
-        for(let at = plainSaid.indexOf(words); at >= 0 && mentions.length < 500; at = plainSaid.indexOf(words, at + 1)) {
+        for(let at = plainSaid.indexOf(words); at >= 0; at = plainSaid.indexOf(words, at + 1)) {
           let end = at + words.length;
           if(isLetter(plainSaid[at - 1]) || isLetter(plainSaid[end])) continue;
-          let before = said.slice(Math.max(0, at - 80), at).replace(/^\S*\s/, '').replace(/\s+/g, ' ');
-          let after = said.slice(end, end + 80).replace(/\s\S*$/, '').replace(/\s+/g, ' ');
-          mentions.push({ chapterId: chapter.id, title: chapter.title, offset: chapter.offset + at, before, match: said.slice(at, end), after });
+          let match = said.slice(at, end);
+          if(exact && match.toLowerCase().normalize() !== exact) continue;
+          total++;
+          if(mentions.length >= 500) continue;
+          let before = said.slice(Math.max(0, at - 40), at).replace(/^\S*\s/, '').replace(/\s+/g, ' ');
+          let after = said.slice(end, end + 100).replace(/\s\S*$/, '').replace(/\s+/g, ' ');
+          mentions.push({ chapterId: chapter.id, title: chapter.title, offset: chapter.offset + at, before, match, after });
         }
       }
-      return { indexed, mentions };
+      return { indexed, total, mentions };
     },
 
     // once, however often asked

@@ -177,6 +177,44 @@ export function formatDate(iso?: string) {
   }
 }
 
+// The text folded as search folds it (no accents, no case, `đ` as `d`), one character for one,
+// so a place found in the one is the same place in the other
+let folds = new Map<string, string>();
+export function plainKeepingPlaces(text: string) {
+  let out = '';
+  for (let ch of text) {
+    let f = folds.get(ch);
+    if (f === undefined) {
+      f = ch.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace('đ', 'd');
+      if (f.length !== ch.length) f = ch.toLowerCase().length === ch.length ? ch.toLowerCase() : ch;
+      folds.set(ch, f);
+    }
+    out += f;
+  }
+  return out;
+}
+
+// what was searched for, marked wherever the chapter on the page says it, however accented
+export function markFound(phrase: string) {
+  let words = plainKeepingPlaces(phrase.trim().replace(/\s+/g, ' '));
+  let ranges: Range[] = [];
+  if (words) {
+    for (let paragraph of document.querySelectorAll('article p')) {
+      for (let node of paragraph.childNodes) {
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        let said = plainKeepingPlaces(node.textContent || '');
+        for (let at = said.indexOf(words); at >= 0; at = said.indexOf(words, at + words.length)) {
+          let range = new Range();
+          range.setStart(node, at);
+          range.setEnd(node, at + words.length);
+          ranges.push(range);
+        }
+      }
+    }
+  }
+  CSS.highlights.set('found', new Highlight(...ranges));
+}
+
 // two frames: the page has drawn what was asked of it
 export async function nextTick() {
   await new Promise(resolve => requestAnimationFrame(resolve));

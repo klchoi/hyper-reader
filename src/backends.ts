@@ -13,6 +13,11 @@
 //   chapter(id, listed)         a chapter of the record, with its text; null if it is gone
 //   rereadBook(id)              read a kept book again; its record, or null
 //   deleteBook(id)
+// and only the server's, which reads libraries on its disk and indexes the books for search:
+//   status()                    the libraries, the scan going or last, and how much is indexed
+//   scan()                      a scan of the libraries, if none is going; the status
+//   search(q, id?)              the books that say `q`; in book `id`, every place it says it
+//   characters(q)               the characters named `q`, with the books they are in
 //
 // Served by the server (`node server/server.js`), the page leaves its books to the server;
 // opened as a file, or served by anything else, it keeps them in the browser. The two keep
@@ -40,7 +45,22 @@ export interface Backend {
   chapter(id: string, listed: Listed): Promise<Chapter | null>;
   rereadBook(id: string): Promise<BookRecord | null>;
   deleteBook(id: string): Promise<void>;
+  status?(): Promise<LibraryStatus>;
+  scan?(): Promise<LibraryStatus>;
+  search?(q: string): Promise<BookSaying[]>;
+  searchBook?(q: string, id: string): Promise<{ indexed: boolean; total: number; mentions: Mention[] }>;
+  characters?(q: string): Promise<Person[]>;
 }
+
+export type LibraryStatus = {
+  libraries: string[];
+  books: number;
+  scan: { running: boolean; files?: number; toRead?: number; read?: number; failed?: number; removed?: number; finishedAt?: string };
+  index: { done: number; total: number };
+};
+export type BookSaying = { id: string; name: string; chapters: number };
+export type Mention = { chapterId: string; title: string; offset: number; before: string; match: string; after: string };
+export type Person = { name: string; mentions: number; books: { id: string; name: string; mentions: number }[] };
 
 // what the browser's backend needs of the page: the reader of books, and what is kept of one
 export type Reading = {
@@ -96,6 +116,11 @@ function serverBackend(): Backend {
     chapter: (bookId, listed) => call('GET', `books/${id(bookId)}/chapters/${id(listed.id)}`),
     rereadBook: (bookId) => call('POST', `books/${id(bookId)}/reread`),
     deleteBook: (bookId) => call('DELETE', `books/${id(bookId)}`),
+    status: () => call('GET', 'library'),
+    scan: () => call('POST', 'library/scan'),
+    search: (q) => call('GET', `search?q=${id(q)}`),
+    searchBook: (q, bookId) => call('GET', `search?q=${id(q)}&book=${id(bookId)}`),
+    characters: (q) => call('GET', `characters?q=${id(q)}`),
   };
 }
 

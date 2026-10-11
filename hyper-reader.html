@@ -1047,8 +1047,7 @@
     // where it starts in the text, what the list calls it, the group (a book, a section)
     // the list puts it under, and its text. `part` is set on a chapter that is one of the parts
     // of a longer one, `{ of, text }`: the list shows `of` once over the parts, and each part
-    // as `text` (`(thượng)`, `(2/5)`); or `{ of, head: true }` on one that opens the parts
-    // without being one, which the list shows as `of`. The extraction below describes each chapter as a draft -
+    // as `text` (`(thượng)`, `(2/5)`). The extraction below describes each chapter as a draft -
     // `{ offset, group, heading }` - and finishChapters turns the drafts into these.
     //
     // heading: { type, number, part, title, text }
@@ -1104,8 +1103,12 @@
     // and the part, as written or, when the parts are numbers, as `2/5`, in the brackets it was
     // written in: `(thượng)`, `(2/5)`. A chapter just before the parts with their title and no
     // part of its own is their first part when the next is the second (`Na Trát`, then `Na Trát
-    // (2)`), and opens them when the next is the first: it is given `{ of, head: true }`
-    function partsOf(drafts) {
+    // (2)`), and their heading when the next is the first and it holds nothing but its heading
+    // (`Thứ 13 chương tam đối`): it is given `{ of, head: true }`, and parts that left the title
+    // out are given the one it says as `title`. One with a text of its own stays a chapter
+    function partsOf(drafts, text) {
+      let headingOnly = (i) => text.slice(drafts[i].offset, drafts[i + 1]?.offset ?? text.length)
+        .split('\n').filter(line => line.trim()).length <= TUNING.drafts.headingLines;
       let marks = drafts.map(({ heading }) => heading && partMark(heading));
       // `Thứ 55 chương` and a bare `56` are both chapters
       let together = (a, b) => drafts[a].group === drafts[b].group
@@ -1124,9 +1127,9 @@
         let second = next.number != null ? next.number === 2 : next.order > 1;
         let first = next.number != null ? next.number === 1 : next.order === 1;
         if(second) marks[i] = { stem: title, word: next.number != null ? '1' : 'thượng', number: next.number != null ? 1 : null, order: 1, bracketed: next.bracketed };
-        else if(first) marks[i] = { stem: title, head: true, order: 0 };
+        else if(first && headingOnly(i)) marks[i] = { stem: title, head: true, order: 0 };
         else return;
-        for(let j = i + 1; untitled && marks[j]?.stem === '' && step(i, j) === 0; j++) marks[j] = { ...marks[j], stem: title };
+        for(let j = i + 1; untitled && marks[j]?.stem === '' && step(i, j) === 0; j++) marks[j] = { ...marks[j], stem: title, given: title };
       });
       let follows = (a, b) => {
         if(!marks[a] || !marks[b] || marks[b].head || !together(a, b)) return false;
@@ -1152,19 +1155,32 @@
         let total = Math.max(new Set(shown.map(m => m.order)).size, ...shown.map(m => m.number ?? 0));
         run.forEach((m, k) => {
           let said = numbered ? `${m.number}/${total}` : m.word;
-          parts[start + k] = m.head ? { of, head: true } : { of, text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(' ') };
+          parts[start + k] = m.head ? { of, head: true } : { of, text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(' '), title: m.given };
         });
       }
       return parts;
     }
 
-    // the drafts, in order, as chapters: each one runs to where the next begins
+    // the drafts, in order, as chapters: each one runs to where the next begins. The heading of
+    // a chapter's parts holds nothing but itself, so it begins the first part, which opens with
+    // the chapter's title, and the parts that left the title out take it
     function finishChapters(drafts, text) {
-      let parts = partsOf(drafts);
-      return drafts.map(({ offset, group, heading }, i) => {
+      let parts = partsOf(drafts, text);
+      let kept = [];
+      drafts.forEach((draft, i) => {
+        if(parts[i]?.head) return;
+        let { of, text: shown, title } = parts[i] ?? {};
+        kept.push({
+          ...draft,
+          offset: parts[i - 1]?.head ? drafts[i - 1].offset : draft.offset,
+          heading: title ? { ...draft.heading, title } : draft.heading,
+          part: parts[i] && { of, text: shown },
+        });
+      });
+      return kept.map(({ offset, group, heading, part }, i) => {
         let title = chapterTitle(heading, i);
-        let end = drafts[i + 1]?.offset ?? text.length;
-        return { id: `${slug(title)}-${i}`, title, offset, group, part: parts[i], content: text.slice(offset, end).trim() };
+        let end = kept[i + 1]?.offset ?? text.length;
+        return { id: `${slug(title)}-${i}`, title, offset, group, part, content: text.slice(offset, end).trim() };
       });
     }
 
@@ -1238,6 +1254,7 @@
         seriesMin: 8,        // headings that begin alike, to be a series
         seriesOver: 1.2,     // ...and more than the numbered headings by this factor
         pageParagraphs: 60,  // paragraphs to a page, when a book has no headings
+        headingLines: 2,     // lines of a chapter that holds nothing but its heading (of its parts)
       },
     };
 
@@ -3878,12 +3895,9 @@
                       // only the chapter that names its book opens a group: the ones after it
                       // belong to it until another book is named
                       c.group && c.group != currentGroup && h('li', { class: 'book' }, text(currentGroup = c.group)),
-                      // a chapter in parts is named once, over its parts: by the chapter that opens
-                      // them, or a name of its own that opens the first
-                      c.part && !c.part.head && c.part.of != book.chapters[i - 1]?.part?.of && h('li', {}, [link(c.part.of, c.part.of)]),
-                      h('li', { class: { active: c.id == chapter.id, part: c.part && !c.part.head } }, [
-                        link(c.part ? (c.part.head ? c.part.of : c.part.text) : c.title, c.title),
-                      ]),
+                      // a chapter in parts is named once, over its parts; the name opens the first
+                      c.part && c.part.of != book.chapters[i - 1]?.part?.of && h('li', {}, [link(c.part.of, c.part.of)]),
+                      h('li', { class: { active: c.id == chapter.id, part: !!c.part } }, [link(c.part ? c.part.text : c.title, c.title)]),
                     ].filter(Boolean);
                   })
                 ])
@@ -4251,7 +4265,7 @@
     // @book:begin - what the tests load of the page: a book, and what is stored of it
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 11;
+    const PARSER_VERSION = 12;
 
     // a book: where it came from, and its chapters once the text has been read (see readBook)
     function Book(file) {

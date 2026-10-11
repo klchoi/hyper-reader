@@ -120,7 +120,7 @@ describe('the last chapter', () => {
 });
 
 describe('parts, ranges and extras', () => {
-  const parts = (chapters) => chapters.map(c => c.part && (c.part.head ? `${c.part.of} >` : `${c.part.of} > ${c.part.text}`));
+  const parts = (chapters) => chapters.map(c => c.part && `${c.part.of} > ${c.part.text}`);
   it('shows the parts of a chapter one by one, under the chapter named once', () => {
     let text = book([1, 2].map(n => `Chương ${n}\n\n${story(6, n)}`), ['thượng', 'trung', 'hạ'].map(p => `Chương 3: (${p})\n\n${story(6)}`), `Chương 4\n\n${story(6)}`);
     let chapters = real(parse(text));
@@ -141,11 +141,12 @@ describe('parts, ranges and extras', () => {
     let text = book([`Chương 88: Na Trát\n\n${story(6)}`, `Chương 89: Na Trát (2)\n\n${story(6, 1)}`, `Chương 90: Na Trát (3)\n\n${story(6, 2)}`, `Chương 91: Đi\n\n${story(6, 3)}`]);
     assert.deepEqual(parts(real(parse(text))), ['Chương 88-90: Na Trát > (1/3)', 'Chương 88-90: Na Trát > (2/3)', 'Chương 88-90: Na Trát > (3/3)', undefined]);
   });
-  it('lets the chapter that names the parts after it open them', () => {
+  it('begins the first part with the heading that names the parts', () => {
     let text = book(`Chương 12: Trước\n\n${story(6)}`, 'Thứ 13 chương tam đối', ['thượng', 'trung', 'hạ'].map(p => `Chương 13: (${p})\n\n${story(6)}`), `Chương 14: Sau\n\n${story(6)}`);
     let chapters = real(parse(text));
-    assert.deepEqual(parts(chapters), [undefined, 'Chương 13: Tam đối >', 'Chương 13: Tam đối > (thượng)', 'Chương 13: Tam đối > (trung)', 'Chương 13: Tam đối > (hạ)', undefined]);
-    assert.equal(chapters[1].title, 'Chương 13: Tam đối');
+    assert.deepEqual(parts(chapters), [undefined, 'Chương 13: Tam đối > (thượng)', 'Chương 13: Tam đối > (trung)', 'Chương 13: Tam đối > (hạ)', undefined]);
+    assert.deepEqual(titles(chapters).slice(1, 3), ['Chương 13: Tam đối (thượng)', 'Chương 13: Tam đối (trung)']);
+    assert.ok(chapters[1].content.startsWith('Thứ 13 chương tam đối'));
   });
   it('keeps a part the book repeats among the others', () => {
     let drafts = [['119', 'Hành động (1)'], ['119', 'Hành động (1)'], ['120', 'Hành động (2)']]

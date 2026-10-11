@@ -29,7 +29,8 @@ like a heading (`Một giờ sau...`) fits nowhere in the sequence and is left o
 The parser's own comments say the rest; start with the contents at the head of its script, and
 `TUNING`, where every number it was tuned with is named.
 
-A chapter is `{ id, title, offset, group, content }`; what is stored of a book is
+A chapter is `{ id, title, offset, group, part, content }`, `part` being set on the parts of a
+chapter written in several (`{ of, text }`: the chapter named once, and the part); what is stored of a book is
 `bookRecord(book)`. Raise `PARSER_VERSION` when a change should reach the books already stored:
 they are read again the next time they are opened.
 

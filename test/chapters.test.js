@@ -120,9 +120,26 @@ describe('the last chapter', () => {
 });
 
 describe('parts, ranges and extras', () => {
-  it('shows the parts of a chapter one by one', () => {
+  const parts = (chapters) => chapters.map(c => c.part && `${c.part.of} > ${c.part.text}`);
+  it('shows the parts of a chapter one by one, under the chapter named once', () => {
     let text = book([1, 2].map(n => `Chương ${n}\n\n${story(6, n)}`), ['thượng', 'trung', 'hạ'].map(p => `Chương 3: (${p})\n\n${story(6)}`), `Chương 4\n\n${story(6)}`);
-    assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Chương 3 (thượng)', 'Chương 3 (trung)', 'Chương 3 (hạ)', 'Chương 4']);
+    let chapters = real(parse(text));
+    assert.deepEqual(titles(chapters), ['Chương 1', 'Chương 2', 'Chương 3 (thượng)', 'Chương 3 (trung)', 'Chương 3 (hạ)', 'Chương 4']);
+    assert.deepEqual(parts(chapters), [undefined, undefined, 'Chương 3 > thượng', 'Chương 3 > trung', 'Chương 3 > hạ', undefined]);
+  });
+  it('names a chapter written over several numbers once, over its parts', () => {
+    let text = book([`Chương 8: Quà\n\n${story(6)}`, `Chương 9: Yoga (thượng)\n\n${story(6, 1)}`, `Chương 10: Yoga (hạ)\n\n${story(6, 2)}`, `Chương 11: Học bù\n\n${story(6, 3)}`]);
+    let chapters = real(parse(text));
+    assert.deepEqual(titles(chapters), ['Chương 8: Quà', 'Chương 9: Yoga (thượng)', 'Chương 10: Yoga (hạ)', 'Chương 11: Học bù']);
+    assert.deepEqual(parts(chapters), [undefined, 'Chương 9-10: Yoga > thượng', 'Chương 9-10: Yoga > hạ', undefined]);
+  });
+  it('counts the parts written as numbers out of all of them', () => {
+    let text = book(['nhất', 'nhị', 'tam'].map((p, k) => `Chương ${5 + k}: Dạ tập (${p})\n\n${story(6, k)}`), `Chương 8: Sáng\n\n${story(6)}`);
+    assert.deepEqual(parts(real(parse(text))), ['Chương 5-7: Dạ tập > 1/3', 'Chương 5-7: Dạ tập > 2/3', 'Chương 5-7: Dạ tập > 3/3', undefined]);
+  });
+  it('starts the parts over with the next chapter, and takes a note in brackets for none', () => {
+    let text = book(['27', '28'].flatMap(n => ['thượng', 'hạ'].map(p => `Chương ${n}: (${p})\n\n${story(6)}`)), `Chương 29: Thu hoạch\n\n${story(6)}`, `Chương 30: Thu hoạch (tu)\n\n${story(6)}`);
+    assert.deepEqual(parts(real(parse(text))), ['Chương 27 > thượng', 'Chương 27 > hạ', 'Chương 28 > thượng', 'Chương 28 > hạ', undefined, undefined]);
   });
   it('reads one heading over a run of chapters', () => {
     let text = book(['Thứ 1-6 chương', 'Thứ 7-10 chương', 'Thứ 11-14 chương'].map((h, k) => `${h}\n\n${story(8, k)}`));
@@ -162,7 +179,9 @@ describe('headings of other shapes', () => {
   });
   it('shows the parts a chapter is written in by number', () => {
     let text = book(['nhất', 'nhị', 'tam', 'tứ', 'ngũ'].map((p, k) => `Chương 44: (${p})\n\n${story(8, k)}`));
-    assert.deepEqual(titles(real(parse(text))), ['Chương 44 (nhất)', 'Chương 44 (nhị)', 'Chương 44 (tam)', 'Chương 44 (tứ)', 'Chương 44 (ngũ)']);
+    let chapters = real(parse(text));
+    assert.deepEqual(titles(chapters), ['Chương 44 (nhất)', 'Chương 44 (nhị)', 'Chương 44 (tam)', 'Chương 44 (tứ)', 'Chương 44 (ngũ)']);
+    assert.deepEqual(chapters.map(c => c.part.text), ['1/5', '2/5', '3/5', '4/5', '5/5']);
   });
   it('keeps a piece set between two chapters outside their numbers', () => {
     let text = book([`Chương 1\n\n${story(8)}`, `Chương 2\n\n${story(8)}`, `Thứ 0 chương phiên ngoại: Cảnh riêng\n\n${story(8)}`, `Chương 3\n\n${story(8)}`, `Chương 4\n\n${story(8)}`]);
@@ -245,7 +264,7 @@ describe('a book with no headings', () => {
 describe('the model', () => {
   it('is plain data', () => {
     let [chapter] = parse(book('Chương 1\n\nx', story(4), 'Chương 2\n\ny', story(4)));
-    assert.deepEqual(Object.keys(chapter).sort(), ['content', 'group', 'id', 'offset', 'title']);
+    assert.deepEqual(Object.keys(chapter).sort(), ['content', 'group', 'id', 'offset', 'part', 'title']);
   });
   it('stores a book without the text of its chapters', () => {
     let record = bookRecord({ id: 'a', name: 'A', description: undefined, chapters: parse(book('Chương 1', story(4), 'Chương 2', story(4))) });

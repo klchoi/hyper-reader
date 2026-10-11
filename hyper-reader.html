@@ -519,6 +519,11 @@
           &:first-child a {
             font-weight: bold;
           }
+          /* one part of the chapter named above it */
+          &.part {
+            margin-left: 1em;
+            max-width: calc(100% - 1em);
+          }
           /* a heading for the chapters below it, not a link */
           &.book {
             font-size: 0.75em;
@@ -1025,10 +1030,12 @@
 
     // ---- chapters -----------------------------------------------------------------------
     // A chapter, as the rest of the app knows it:
-    //   { id, title, offset, group, content }
+    //   { id, title, offset, group, part, content }
     // where it starts in the text, what the list calls it, the group (a book, a section)
-    // the list puts it under, and its text. The extraction below describes each chapter as a
-    // draft - `{ offset, group, heading }` - and finishChapters turns the drafts into these.
+    // the list puts it under, and its text. `part` is set on a chapter that is one of the parts
+    // of a longer one, `{ of, text }`: the list shows `of` once over the parts, and each part
+    // as `text` (`thượng`, `2/5`). The extraction below describes each chapter as a draft -
+    // `{ offset, group, heading }` - and finishChapters turns the drafts into these.
     //
     // heading: { type, number, part, title, text }
     //   type    the word before the number: `Chương`, `Hồi`, `Phiên ngoại`
@@ -1049,12 +1056,66 @@
       return full || `${type} ${ordinal + 1}`;
     }
 
+    // the part a heading names after its title: `Yoga (thượng)`, `Dạ tập (nhị)`, `Chỉ nhiên (3)`,
+    // `Khánh công yến (hạ 6)【động đồ】`, or before it (`tiết 2`), as { stem, word, number, order,
+    // tag }: the title without the part, the part as written, its number if it is written as
+    // one (`nhị` is 2, `thượng` is none), where it comes among the parts, and a tag after it.
+    // A note in brackets (`(tu)`, `(nhuận)`) is no part
+    const PART_MARK = /\s*[(（]\s*([^()（）]{1,16}?)\s*[)）]\s*(【[^】]*】)?\s*$/u;
+    function partMark({ title = '', part }) {
+      let marked = PART_MARK.exec(title);
+      let word = (part?.text ?? marked?.[1])?.toLowerCase();
+      if(!word) return null;
+      let number = part?.leading ? Number(/\d+$/.exec(word)?.[0] ?? NaN)
+        : /^\d+$/.test(word) ? Number(word)
+        : word in HALF_WORDS ? null : valueOfPart(word);
+      if(Number.isNaN(number)) number = null;
+      let half = /^(thượng|trung|hạ)(?:\s+(\d+))?$/u.exec(word);
+      if(number == null && !half) return null;
+      // `hạ 1`, `hạ 2` come after `hạ` and before each other
+      let order = number ?? HALF_WORDS[half[1]] + (half[2] ?? 0) / 1000;
+      let ours = marked?.[1].toLowerCase() === word;
+      return { stem: (ours ? title.slice(0, marked.index) : title).trim(), word, number, order, tag: ours ? marked[2] : undefined };
+    }
+
+    // A chapter written in parts: the parts follow one another, in one book, with the one title
+    // and a part after it (`Yoga (thượng)`, `Yoga (hạ)`), under the one number or numbers that
+    // follow on. Each part is given `{ of, text }`: the title of the whole (`Chương 9-10: Yoga`),
+    // and the part, as written or, when the parts are numbers, as `2/5`
+    function partsOf(drafts) {
+      let marks = drafts.map(({ heading }) => heading && partMark(heading));
+      let follows = (a, b) => {
+        let [x, y] = [drafts[a].heading, drafts[b].heading];
+        if(!marks[a] || !marks[b] || drafts[a].group !== drafts[b].group || x.type !== y.type) return false;
+        if(marks[a].stem.toLowerCase() !== marks[b].stem.toLowerCase()) return false;
+        // the parts go forward: `27 (hạ)` then `28 (thượng)` is the next chapter's first part
+        if(marks[b].order <= marks[a].order) return false;
+        return x.number === y.number || Number(y.number) === Number(x.number) + 1;
+      };
+      let parts = new Array(drafts.length);
+      for(let start = 0, end; start < drafts.length; start = end) {
+        for(end = start + 1; end < drafts.length && follows(end - 1, end); end++);
+        if(end - start < 2) continue;
+        let [first, last] = [drafts[start].heading, drafts[end - 1].heading];
+        let number = first.number === last.number ? first.number : `${first.number}-${last.number}`;
+        let of = chapterTitle({ ...first, number, part: undefined, title: marks[start].stem }, start);
+        let run = marks.slice(start, end);
+        let numbered = run.every(m => m.number != null);
+        let total = Math.max(run.length, ...run.map(m => m.number ?? 0));
+        run.forEach((m, k) => {
+          parts[start + k] = { of, text: [numbered ? `${m.number}/${total}` : m.word, m.tag].filter(Boolean).join(' ') };
+        });
+      }
+      return parts;
+    }
+
     // the drafts, in order, as chapters: each one runs to where the next begins
     function finishChapters(drafts, text) {
+      let parts = partsOf(drafts);
       return drafts.map(({ offset, group, heading }, i) => {
         let title = chapterTitle(heading, i);
         let end = drafts[i + 1]?.offset ?? text.length;
-        return { id: `${slug(title)}-${i}`, title, offset, group, content: text.slice(offset, end).trim() };
+        return { id: `${slug(title)}-${i}`, title, offset, group, part: parts[i], content: text.slice(offset, end).trim() };
       });
     }
 
@@ -3752,23 +3813,26 @@
             h('nav', {}, [
               (book?.chapters?.length > 0) && (
                 h('ol', { start: 0 }, [
-                  ...book.chapters.flatMap(c => [
-                    // only the chapter that names its book opens a group: the ones after it
-                    // belong to it until another book is named
-                    c.group && c.group != currentGroup && h('li', { class: 'book' }, text(currentGroup = c.group)),
-                    h('li', { class: { active: c.id == chapter.id } }, [
-                      h('a', {
-                        href: router.route(bookRoute({ bookId: book.id, offset: c.offset })),
-                        onclick: (_, event) => {
-                          event.preventDefault();
-                          return [OpenBook, { bookId: book.id, offset: c.offset }];
-                        },
-                        title: fixNames(c.title),
-                      }, [
-                        text(fixNames(c.title))
-                      ])
-                    ]),
-                  ].filter(Boolean))
+                  ...book.chapters.flatMap((c, i) => {
+                    let link = (label, tip) => h('a', {
+                      href: router.route(bookRoute({ bookId: book.id, offset: c.offset })),
+                      onclick: (_, event) => {
+                        event.preventDefault();
+                        return [OpenBook, { bookId: book.id, offset: c.offset }];
+                      },
+                      title: fixNames(tip),
+                    }, [
+                      text(fixNames(label))
+                    ]);
+                    return [
+                      // only the chapter that names its book opens a group: the ones after it
+                      // belong to it until another book is named
+                      c.group && c.group != currentGroup && h('li', { class: 'book' }, text(currentGroup = c.group)),
+                      // a chapter in parts is named once, over its parts; the name opens the first
+                      c.part && c.part.of != book.chapters[i - 1]?.part?.of && h('li', {}, [link(c.part.of, c.part.of)]),
+                      h('li', { class: { active: c.id == chapter.id, part: !!c.part } }, [link(c.part ? c.part.text : c.title, c.title)]),
+                    ].filter(Boolean);
+                  })
                 ])
               )
             ]),
@@ -4134,7 +4198,7 @@
     // @book:begin - what the tests load of the page: a book, and what is stored of it
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 8;
+    const PARSER_VERSION = 9;
 
     // a book: where it came from, and its chapters once the text has been read (see readBook)
     function Book(file) {

@@ -3,6 +3,7 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { createServer } = require('../server/server.js');
@@ -92,9 +93,55 @@ describe('the server', () => {
   });
   it('turns away what is no book, and an id that is no id', async () => {
     assert.equal((await call('POST', 'books', { name: 'notes.md', size: 1, text: 'x' })).status, 400);
-    assert.equal((await call('POST', 'books', '{ not json')).status, 400);
+    assert.equal((await call('POST', 'books', '{ not json')).status, 415);
+    let broken = await fetch(`${base}/api/books`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{ not json' });
+    assert.equal(broken.status, 400);
     assert.equal((await call('GET', `names/${encodeURIComponent('../settings')}`)).status, 400);
     assert.equal((await call('GET', 'books/no-such-book')).status, 404);
+  });
+  // a request with the headers a browser would not let a page set: the name it is asked by, and
+  // the origin of the page asking
+  let raw = (method, route, headers, body) => new Promise((resolve, reject) => {
+    let request = http.request(`${base}${route}`, { method, headers }, (response) => {
+      let chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, answer: Buffer.concat(chunks).toString() }));
+    });
+    request.on('error', reject);
+    request.end(body);
+  });
+  it('answers only what is asked by this computer\'s name', async () => {
+    assert.equal((await raw('GET', '/api/progress', { host: 'rebound.example:8080' })).status, 403);
+    assert.equal((await raw('GET', '/', { host: 'rebound.example' })).status, 403);
+    assert.equal((await raw('GET', '/api/progress', { host: `localhost:${server.address().port}` })).status, 200);
+  });
+  it('changes nothing for a page of another site', async () => {
+    let book = JSON.stringify(file);
+    let asked = (origin) => raw('POST', '/api/books', { 'content-type': 'application/json', ...(origin && { origin }) }, book);
+    assert.equal((await asked('https://another.example')).status, 403);
+    assert.equal((await asked('null')).status, 403);
+    assert.equal((await raw('DELETE', '/api/books/sach-thu', { origin: 'https://another.example' })).status, 403);
+    assert.equal((await asked(base)).status, 200);
+    // a form of another site can only send text, and a book is sent as JSON
+    assert.equal((await raw('POST', '/api/books', { 'content-type': 'text/plain' }, book)).status, 415);
+  });
+  it('turns away a path badly escaped, and says nothing of what failed on its side', async () => {
+    assert.equal((await raw('GET', '/api/names/%E0%A4%A', {})).status, 400);
+    let lost = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-test-'));
+    fs.writeFileSync(path.join(lost, 'settings.json'), '{ broken');
+    let other = createServer({ data: lost });
+    await new Promise(resolve => other.listen(0, '127.0.0.1', resolve));
+    let errors = console.error;
+    console.error = () => {};
+    try {
+      let answer = await fetch(`http://127.0.0.1:${other.address().port}/api/settings`);
+      assert.equal(answer.status, 500);
+      assert.equal(await answer.text(), 'server error');
+    } finally {
+      console.error = errors;
+      other.close();
+      fs.rmSync(lost, { recursive: true, force: true });
+    }
   });
   it('deletes a book', async () => {
     assert.equal((await call('DELETE', 'books/sach-thu')).status, 204);

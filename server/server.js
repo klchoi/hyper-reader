@@ -14,8 +14,9 @@
 //   <data>/names/<id>.txt     the names corrected in a book
 //
 // A chapter's text is not kept apart: it is cut from the text as read, at the offsets the
-// record gives. It answers on this computer only (127.0.0.1): it has no logins, and what it keeps is a
-// private library.
+// record gives. It answers on this computer only (127.0.0.1): it has no logins, and what it keeps
+// is a private library. So it answers only what is asked of it by this computer's name, and
+// changes nothing for a page of another site (see `foreign`).
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const { statSync } = require('node:fs');
@@ -127,19 +128,33 @@ function createLibrary(data) {
   return library;
 }
 
-// what the page's server backend asks, by method and path
+// What a page of another site could make a browser here ask, and is turned away:
+// - a name of its own pointed at 127.0.0.1 (DNS rebinding) makes its page this server's, by
+//   that name: only this computer's names for the server are answered
+// - a form or a script of its page can send a change: one sent from another origin is refused,
+//   and a body that is JSON must say so, which a browser will not send across sites unasked
+const LOCAL_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
+function foreign(request) {
+  let host = request.headers.host ?? '';
+  if(!LOCAL_HOST.test(host)) return 'not asked by this computer\'s name';
+  let origin = request.headers.origin;
+  if(request.method !== 'GET' && origin != null && origin !== `http://${host}`) return 'not asked by this page';
+  return null;
+}
+
+// what the page's server backend asks, by method and path; the body each takes is JSON, or text
 function routes(library) {
   return [
     ['GET', /^\/api\/hello$/, () => ({ backend: 'server', parser: parser().PARSER_VERSION })],
     ['GET', /^\/api\/settings$/, () => library.settings()],
-    ['PATCH', /^\/api\/settings$/, (_, body) => library.saveSettings(JSON.parse(body))],
+    ['PATCH', /^\/api\/settings$/, (_, body) => library.saveSettings(body)],
     ['GET', /^\/api\/progress$/, () => library.progress()],
-    ['PUT', /^\/api\/progress\/([^/]+)$/, ([id], body) => library.saveProgress(id, JSON.parse(body))],
+    ['PUT', /^\/api\/progress\/([^/]+)$/, ([id], body) => library.saveProgress(id, body)],
     // a book with no names corrected yet has nothing to send, which is no error
     ['GET', /^\/api\/names\/([^/]+)$/, ([id]) => library.names(id), 'text'],
-    ['PUT', /^\/api\/names\/([^/]+)$/, ([id], body) => library.saveNames(id, body)],
+    ['PUT', /^\/api\/names\/([^/]+)$/, ([id], body) => library.saveNames(id, body), 'text'],
     ['GET', /^\/api\/files$/, () => library.files()],
-    ['POST', /^\/api\/books$/, (_, body) => library.addBook(JSON.parse(body))],
+    ['POST', /^\/api\/books$/, (_, body) => library.addBook(body)],
     ['GET', /^\/api\/books\/([^/]+)$/, ([id]) => library.book(id)],
     ['GET', /^\/api\/books\/([^/]+)\/chapters\/([^/]+)$/, ([id, chapterId]) => library.chapter(id, chapterId)],
     ['POST', /^\/api\/books\/([^/]+)\/reread$/, ([id]) => library.rereadBook(id)],
@@ -175,6 +190,8 @@ function createServer({ data }) {
       response.end(body);
     };
     try {
+      let refused = foreign(request);
+      if(refused) return send(403, refused, 'text/plain');
       let { pathname } = new URL(request.url, 'http://localhost');
       if(request.method === 'GET' && (pathname === '/' || pathname === '/hyper-reader.html')) {
         return send(200, await fs.readFile(PAGE, 'utf8'), 'text/html');
@@ -184,7 +201,15 @@ function createServer({ data }) {
         if(!found || request.method !== method) continue;
         let params = found.slice(1).map(decodeURIComponent);
         if(params.some(param => !ID.test(param))) return send(400, 'not an id', 'text/plain');
-        let body = ['POST', 'PUT', 'PATCH'].includes(method) ? await readBody(request) : undefined;
+        let body;
+        if(['POST', 'PUT', 'PATCH'].includes(method)) {
+          body = await readBody(request);
+          if(kind === 'json' && body !== '') {
+            if(!request.headers['content-type']?.startsWith('application/json')) return send(415, 'JSON is sent as application/json', 'text/plain');
+            try { body = JSON.parse(body); }
+            catch { return send(400, 'not JSON', 'text/plain'); }
+          }
+        }
         let result = await answer(params, body);
         if(result === undefined) return send(204);
         if(result === null) return send(404, 'not found', 'text/plain');
@@ -192,10 +217,11 @@ function createServer({ data }) {
       }
       send(404, 'not found', 'text/plain');
     } catch(error) {
-      // a body that is not JSON is the asker's fault; anything else not foreseen is ours
-      let status = error.status ?? (error instanceof SyntaxError ? 400 : 500);
+      // a path badly escaped is the asker's fault; anything else not foreseen is ours (a file of
+      // ours that is not JSON too), and what went wrong (a path on this disk) stays here
+      let status = error.status ?? (error instanceof URIError ? 400 : 500);
       if(status === 500) console.error(request.method, request.url, error);
-      send(status, String(error.message), 'text/plain');
+      send(status, status === 500 ? 'server error' : String(error.message), 'text/plain');
     }
   });
 }

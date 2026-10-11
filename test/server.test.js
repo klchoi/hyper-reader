@@ -44,7 +44,7 @@ describe('the server', () => {
 
   it('serves the page, and says it keeps the books', async () => {
     let page = await fetch(`${base}/`);
-    assert.match(await page.text(), /<script id="chapter-parser">/);
+    assert.ok((await page.text()).includes('<title>Text Reader</title>'));
     assert.deepEqual((await call('GET', 'hello')).answer, { backend: 'server', parser: PARSER_VERSION });
   });
   it('reads a book with the page\'s parser, and keeps it', async () => {

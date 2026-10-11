@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// The page's other backend (see Backends in hyper-reader.html). It serves the page, reads books
-// with the page's own parser, and keeps them, where each was left, the settings and the names
-// as files in a folder of its own:
+// The page's other backend (see Backends in src/main.js). It serves the page as built
+// (hyper-reader.html), reads books with the page's own parser (src/parser.js), and keeps them,
+// where each was left, the settings and the names as files in a folder of its own:
 //
 //   node server/server.js [--port 8080] [--data <folder>]
 //
@@ -21,12 +21,12 @@ const http = require('node:http');
 const fs = require('node:fs/promises');
 const { statSync } = require('node:fs');
 const path = require('node:path');
-const { loadParser, PAGE } = require('../lib/parser.js');
+const { loadParser, SOURCES, PAGE } = require('../lib/parser.js');
 
-// the parser as the page has it now: loaded again when the page changes
-let loaded = { at: 0, parser: null };
+// the parser as it is now: loaded again when its source changes
+let loaded = { at: '', parser: null };
 function parser() {
-  let at = statSync(PAGE).mtimeMs;
+  let at = SOURCES.map(source => statSync(source).mtimeMs).join('/');
   if(at !== loaded.at) loaded = { at, parser: loadParser() };
   return loaded.parser;
 }

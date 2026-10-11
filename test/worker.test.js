@@ -5,10 +5,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Worker: NodeWorker } = require('node:worker_threads');
-const { parserScript } = require('../lib/parser.js');
+const { SOURCES } = require('../lib/parser.js');
+const { loadParser } = require('../src/load-parser.js');
 
-const html = fs.readFileSync(path.join(__dirname, '..', 'hyper-reader.html'), 'utf8');
-const between = (a, b) => html.slice(html.indexOf(a), html.indexOf(b));
+// the page's own code for it, marked off in src/main.js, and the texts it is handed
+const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+const between = (a, b) => main.slice(main.indexOf(a), main.indexOf(b));
+const [parserSource, bookSource] = SOURCES.map(source => fs.readFileSync(source, 'utf8'));
 
 const story = (count) => Array.from({ length: count }, (_, k) => `Nàng đi qua núi ${k % 7 ? 'rừng' : 'suối'} và nhớ chuyện cũ rất lâu trước kia.`).join('\n\n');
 const text = ['Sách thử tác giả: ai đó', ...[1, 2, 3].map(n => `Chương ${n}: Tiêu đề ${n}\n\n${story(8)}`)].join('\n\n');
@@ -36,15 +39,13 @@ function page({ failing = false, missing = false } = {}) {
     postMessage(message) { this.thread?.postMessage(message); }
     terminate() { this.thread?.terminate(); }
   }
-  // the app mounts on <body>, and the parser's script element is gone after the first look
-  let mounted = false;
-  let document = { getElementById: (id) => (mounted || id !== 'chapter-parser' ? null : { textContent: parserScript() }) };
   let said = [];
   let console = { log() {}, info: (...message) => said.push(message.join(' ')), group() {}, groupEnd() {} };
-  let code = `${parserScript()}\n${between('// @source:begin', '// @source:end')}\nmount();\n${between('// @book:begin', '// @book:end')}\n${between('// @worker:begin', '// @worker:end')}\nreturn { readBook, stop: () => parserWorker?.terminate() };`;
+  let code = `${between('// @source:begin', '// @source:end')}\n${between('// @worker:begin', '// @worker:end')}\nreturn { readBook, stop: () => parserWorker?.terminate() };`;
   // `Worker` left out is a browser that has none
-  let mount = () => { mounted = true; };
-  let loaded = new Function('document', 'Worker', 'URL', 'Blob', 'console', 'mount', code)(document, missing ? undefined : Worker, URL, Blob, console, mount);
+  let loaded = new Function('Worker', 'URL', 'Blob', 'console', 'parserSource', 'bookSource', 'loadParser', code)(
+    missing ? undefined : Worker, URL, Blob, console, parserSource, bookSource, loadParser,
+  );
   return { ...loaded, said };
 }
 

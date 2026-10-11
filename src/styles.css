@@ -1,0 +1,1002 @@
+@font-face {
+  font-family: Reader;
+  font-weight: 400;
+  src: local('SourceSerif4Roman-Regular');
+}
+@font-face {
+  font-family: Reader;
+  font-weight: 500;
+  src: local('SourceSerif4Roman-Medium');
+}
+
+/** reset **/
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: 0;
+  transform-origin: 50% 50%;
+}
+p {
+  margin: 1em 0;
+}
+hr {
+  border: 0;
+  height: 1px;
+  background: rgba(0, 0, 0, .2);
+}
+a,
+a:any-link {
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+small {
+  font-size: 0.875em;
+}
+
+/** rose pine **/
+:root {
+  --rp-main-base: #191724;
+  --rp-main-surface: #1f1d2e;
+  --rp-main-overlay: #26233a;
+  --rp-main-muted: #6e6a86;
+  --rp-main-subtle: #908caa;
+  --rp-main-text: #e0def4;
+  --rp-main-love: #eb6f92;
+  --rp-main-gold: #f6c177;
+  --rp-main-rose: #ebbcba;
+  --rp-main-pine: #31748f;
+  --rp-main-foam: #9ccfd8;
+  --rp-main-iris: #c4a7e7;
+  --rp-main-highlight-low: #21202e;
+  --rp-main-highlight-low-alpha: #6e6a861a;
+  --rp-main-highlight-med: #403d52;
+  --rp-main-highlight-med-alpha: #6e6a8633;
+  --rp-main-highlight-high: #524f67;
+  --rp-main-highlight-high-alpha: #6e6a8666;
+  --rp-moon-base: #232136;
+  --rp-moon-surface: #2a273f;
+  --rp-moon-overlay: #393552;
+  --rp-moon-muted: #6e6a86;
+  --rp-moon-subtle: #908caa;
+  --rp-moon-text: #e0def4;
+  --rp-moon-love: #eb6f92;
+  --rp-moon-gold: #f6c177;
+  --rp-moon-rose: #ea9a97;
+  --rp-moon-pine: #3e8fb0;
+  --rp-moon-foam: #9ccfd8;
+  --rp-moon-iris: #c4a7e7;
+  --rp-moon-highlight-low: #2a283e;
+  --rp-moon-highlight-low-alpha: #817c9c14;
+  --rp-moon-highlight-med: #44415a;
+  --rp-moon-highlight-med-alpha: #817c9c26;
+  --rp-moon-highlight-high: #56526e;
+  --rp-moon-highlight-high-alpha: #817c9c4d;
+  --rp-dawn-base: #faf4ed;
+  --rp-dawn-surface: #fffaf3;
+  --rp-dawn-overlay: #f2e9e1;
+  --rp-dawn-muted: #9893a5;
+  --rp-dawn-subtle: #797593;
+  --rp-dawn-text: #575279;
+  --rp-dawn-love: #b4637a;
+  --rp-dawn-gold: #ea9d34;
+  --rp-dawn-rose: #d7827e;
+  --rp-dawn-pine: #286983;
+  --rp-dawn-foam: #56949f;
+  --rp-dawn-iris: #907aa9;
+  --rp-dawn-highlight-low: #f4ede8;
+  --rp-dawn-highlight-low-alpha: #6e6a860d;
+  --rp-dawn-highlight-med: #dfdad9;
+  --rp-dawn-highlight-med-alpha: #6e6a8614;
+  --rp-dawn-highlight-high: #cecacd;
+  --rp-dawn-highlight-high-alpha: #6e6a8626;
+}
+
+/** variables **/
+:root {
+  --nav-width: 300px;
+  /* every gap is a gap in the chrome, so it is measured off the chrome. The paper's
+     own allowance belongs to the book instead, next to the width in `ex` the sm/md/lg
+     buttons set. Both come to the same 24px the root used to give them */
+  --gap: var(--ui-font-size, 18pt);
+  --paper-padding: calc(var(--reading-font-size, 18pt) * 3);
+  cursor: default;
+}
+.settings .colors button.white {
+  --body-font-color: rgb(27, 27, 27);
+  --body-background-color: rgb(230, 230, 230);
+  --paper-background-color: rgb(255, 255, 255);
+  --link-color: rgb(65, 110, 210);
+  --horizontal-line-color: rgb(220, 220, 220);
+}
+:root[data-color\:light=white] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: rgb(27, 27, 27);
+    --body-background-color: rgb(230, 230, 230);
+    --paper-background-color: rgb(255, 255, 255);
+    --link-color: rgb(65, 110, 210);
+    --horizontal-line-color: rgb(220, 220, 220);
+  }
+}
+:root[data-color\:dark=white] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: rgb(27, 27, 27);
+    --body-background-color: rgb(230, 230, 230);
+    --paper-background-color: rgb(255, 255, 255);
+    --link-color: rgb(65, 110, 210);
+    --horizontal-line-color: rgb(220, 220, 220);
+  }
+}
+.settings .colors button.sepia {
+  --body-font-color: rgb(79, 50, 28);
+  --body-background-color: rgb(225, 216, 200);
+  --paper-background-color: rgb(248, 241, 227);
+  --link-color: rgb(209, 150, 0);
+  --horizontal-line-color: rgb(230, 218, 201);
+}
+:root[data-color\:light=sepia] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: rgb(79, 50, 28);
+    --body-background-color: rgb(225, 216, 200);
+    --paper-background-color: rgb(248, 241, 227);
+    --link-color: rgb(209, 150, 0);
+    --horizontal-line-color: rgb(230, 218, 201);
+  }
+}
+:root[data-color\:dark=sepia] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: rgb(79, 50, 28);
+    --body-background-color: rgb(225, 216, 200);
+    --paper-background-color: rgb(248, 241, 227);
+    --link-color: rgb(209, 150, 0);
+    --horizontal-line-color: rgb(230, 218, 201);
+  }
+}
+.settings .colors button.gray {
+  --body-font-color: rgba(255, 255, 255, 0.78);
+  --body-background-color: rgb(50, 50, 51);
+  --paper-background-color: rgb(74, 74, 77);
+  --link-color: rgb(90, 200, 250);
+  --horizontal-line-color: rgb(111, 111, 111);
+  --body-font-smoothing: antialiased;
+}
+:root[data-color\:light=gray] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: rgba(255, 255, 255, 0.78);
+    --body-background-color: rgb(50, 50, 51);
+    --paper-background-color: rgb(74, 74, 77);
+    --link-color: rgb(90, 200, 250);
+    --horizontal-line-color: rgb(111, 111, 111);
+    --body-font-smoothing: antialiased;
+  }
+}
+:root[data-color\:dark=gray] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: rgba(255, 255, 255, 0.78);
+    --body-background-color: rgb(50, 50, 51);
+    --paper-background-color: rgb(74, 74, 77);
+    --link-color: rgb(90, 200, 250);
+    --horizontal-line-color: rgb(111, 111, 111);
+    --body-font-smoothing: antialiased;
+  }
+}
+.settings .colors button.night {
+  --body-font-color: rgb(176, 176, 176);
+  --body-background-color: rgb(0, 0, 0);
+  --paper-background-color: rgb(18, 18, 18);
+  --paper-outline-color: #272727;
+  --link-color: rgb(90, 200, 250);
+  --horizontal-line-color: rgb(62, 62, 62);
+  --body-font-smoothing: antialiased;
+}
+:root[data-color\:light=night] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: rgb(176, 176, 176);
+    --body-background-color: rgb(0, 0, 0);
+    --paper-background-color: rgb(18, 18, 18);
+    --paper-outline-color: #272727;
+    --link-color: rgb(90, 200, 250);
+    --horizontal-line-color: rgb(62, 62, 62);
+    --body-font-smoothing: antialiased;
+  }
+}
+:root[data-color\:dark=night] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: rgb(176, 176, 176);
+    --body-background-color: rgb(0, 0, 0);
+    --paper-background-color: rgb(18, 18, 18);
+    --paper-outline-color: #272727;
+    --link-color: rgb(90, 200, 250);
+    --horizontal-line-color: rgb(62, 62, 62);
+    --body-font-smoothing: antialiased;
+  }
+}
+.settings .colors button.rose-pine {
+  --body-font-color: var(--rp-main-subtle);
+  --body-background-color: var(--rp-main-surface);
+  --paper-background-color: var(--rp-main-base);
+  --paper-outline-color: var(--rp-main-highlight-med-alpha);
+  --link-color: var(--rp-main-pine);
+  --horizontal-line-color: var(--rp-main-highlight-high-alpha);
+  --selection-bg: var(--rp-main-highlight-med);
+  --body-font-smoothing: antialiased;
+}
+:root[data-color\:light=rose-pine] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: var(--rp-main-subtle);
+    --body-background-color: var(--rp-main-surface);
+    --paper-background-color: var(--rp-main-base);
+    --paper-outline-color: var(--rp-main-highlight-med-alpha);
+    --link-color: var(--rp-main-pine);
+    --horizontal-line-color: var(--rp-main-highlight-high-alpha);
+    --selection-bg: var(--rp-main-highlight-med);
+    --body-font-smoothing: antialiased;
+  }
+}
+:root[data-color\:dark=rose-pine] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: var(--rp-main-subtle);
+    --body-background-color: var(--rp-main-surface);
+    --paper-background-color: var(--rp-main-base);
+    --paper-outline-color: var(--rp-main-highlight-med-alpha);
+    --link-color: var(--rp-main-pine);
+    --horizontal-line-color: var(--rp-main-highlight-high-alpha);
+    --selection-bg: var(--rp-main-highlight-med);
+    --body-font-smoothing: antialiased;
+  }
+}
+.settings .colors button.rose-pine-moon {
+  --body-font-color: var(--rp-moon-subtle);
+  --body-background-color: var(--rp-moon-surface);
+  --paper-background-color: var(--rp-moon-base);
+  --paper-outline-color: var(--rp-moon-highlight-med-alpha);
+  --link-color: var(--rp-moon-rose);
+  --horizontal-line-color: var(--rp-moon-highlight-high-alpha);
+  --selection-bg: var(--rp-moon-highlight-med);
+  --body-font-smoothing: antialiased;
+}
+:root[data-color\:light=rose-pine-moon] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: var(--rp-moon-subtle);
+    --body-background-color: var(--rp-moon-surface);
+    --paper-background-color: var(--rp-moon-base);
+    --paper-outline-color: var(--rp-moon-highlight-med-alpha);
+    --link-color: var(--rp-moon-rose);
+    --horizontal-line-color: var(--rp-moon-highlight-high-alpha);
+    --selection-bg: var(--rp-moon-highlight-med);
+    --body-font-smoothing: antialiased;
+  }
+}
+:root[data-color\:dark=rose-pine-moon] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: var(--rp-moon-subtle);
+    --body-background-color: var(--rp-moon-surface);
+    --paper-background-color: var(--rp-moon-base);
+    --paper-outline-color: var(--rp-moon-highlight-med-alpha);
+    --link-color: var(--rp-moon-rose);
+    --horizontal-line-color: var(--rp-moon-highlight-high-alpha);
+    --selection-bg: var(--rp-moon-highlight-med);
+    --body-font-smoothing: antialiased;
+  }
+}
+.settings .colors button.rose-pine-dawn {
+  --body-font-color: var(--rp-dawn-text);
+  --body-background-color: var(--rp-dawn-base);
+  --paper-background-color: var(--rp-dawn-overlay);
+  --paper-outline-color: var(--rp-dawn-highlight-med);
+  --link-color: var(--rp-dawn-love);
+  --horizontal-line-color: var(--rp-dawn-highlight-high);
+  --selection-bg: var(--rp-dawn-highlight-med);
+}
+:root[data-color\:light=rose-pine-dawn] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: var(--rp-dawn-text);
+    --body-background-color: var(--rp-dawn-base);
+    --paper-background-color: var(--rp-dawn-overlay);
+    --paper-outline-color: var(--rp-dawn-highlight-med);
+    --link-color: var(--rp-dawn-love);
+    --horizontal-line-color: var(--rp-dawn-highlight-high);
+    --selection-bg: var(--rp-dawn-highlight-med);
+  }
+}
+:root[data-color\:dark=rose-pine-dawn] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: var(--rp-dawn-text);
+    --body-background-color: var(--rp-dawn-base);
+    --paper-background-color: var(--rp-dawn-overlay);
+    --paper-outline-color: var(--rp-dawn-highlight-med);
+    --link-color: var(--rp-dawn-love);
+    --horizontal-line-color: var(--rp-dawn-highlight-high);
+    --selection-bg: var(--rp-dawn-highlight-med);
+  }
+}
+.settings .colors button.solarized,
+:root[data-color\:light=solarized] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: #002a35;
+    --body-background-color: #f3edda;
+    --paper-background-color: #fdf6e3;
+    --paper-outline-color: #e0d9c6;
+    --link-color: #cb4b17;
+    --horizontal-line-color: #9faaa8;
+    --selection-bg: #cadcdf;
+  }
+}
+.settings .colors button.solarized,
+:root[data-color\:dark=solarized] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: #002a35;
+    --body-background-color: #f3edda;
+    --paper-background-color: #fdf6e3;
+    --paper-outline-color: #e0d9c6;
+    --link-color: #cb4b17;
+    --horizontal-line-color: #9faaa8;
+    --selection-bg: #cadcdf;
+  }
+}
+.settings .colors button.kiselevka,
+:root[data-color\:light=kiselevka] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: #81a8bf;
+    --body-background-color: #14222c;
+    --paper-background-color: #0f1921;
+    --paper-outline-color: #1e3140;
+    --link-color: #a99d8c;
+    --horizontal-line-color: #2d3941;
+    --selection-bg: #153d4f;
+  }
+}
+.settings .colors button.kiselevka,
+:root[data-color\:dark=kiselevka] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: #81a8bf;
+    --body-background-color: #14222c;
+    --paper-background-color: #0f1921;
+    --paper-outline-color: #1e3140;
+    --link-color: #a99d8c;
+    --horizontal-line-color: #2d3941;
+    --selection-bg: #153d4f;
+  }
+}
+.settings .colors button.gruvbox,
+:root[data-color\:light=gruvbox] {
+  @media (prefers-color-scheme:light) {
+    --body-font-color: #282828;
+    --body-background-color: #ecdcb3;
+    --dialog-background-color: #d9c8a4;
+    --paper-background-color: #f2e5bc;
+    --paper-outline-color: #c8b899;
+    --horizontal-line-color: #c8b899;
+    --selection-bg: #bac6ab;
+  }
+}
+.settings .colors button.gruvbox,
+:root[data-color\:dark=gruvbox] {
+  @media (prefers-color-scheme:dark) {
+    --body-font-color: #fbf1c7;
+    --body-background-color: #393634;
+    --dialog-background-color: #4c4642;
+    --paper-background-color: #1d2021;
+    --paper-outline-color: #5b534d;
+    --horizontal-line-color: #5b534d;
+    --selection-bg: #353f3d;
+    --link-color: #8ec07c;
+  }
+}
+:root[data-color\:dark] {
+  --body-font-smoothing: antialiased;
+}
+
+:root,
+:root[data-paper-size=sm] { --paper-width: 90ex; }
+:root[data-paper-size=md] { --paper-width: 120ex; }
+:root[data-paper-size=lg] { --paper-width: 160ex; }
+:root[data-paper-size=xl] { --paper-width: 100%; }
+
+* {
+  font-family: inherit;
+}
+
+*::selection {
+  background-color: var(--selection-bg);
+}
+
+/** layout **/
+body {
+  display: grid;
+  grid-template-columns: minmax(var(--nav-width), 1fr) minmax(auto, calc(var(--paper-width) + 2*var(--paper-padding))) auto;
+}
+
+/** global **/
+html,
+body {
+  font: var(--reading-font-weight, 400) var(--reading-font-size, 18pt)/1.4 var(--reading-font, Reader);
+  color: var(--body-font-color);
+  background: var(--body-background-color);
+  font-variant-numeric: oldstyle-nums tabular-nums slashed-zero;
+  -webkit-font-smoothing: var(--body-font-smoothing, normal);
+}
+a {
+  color: var(--link-color);
+}
+
+nav,
+aside,
+.table,
+dialog,
+#add-name {
+  font-family: var(--ui-font, Reader);
+  font-size: var(--ui-font-size, 18pt);
+  font-weight: var(--ui-font-weight, 400);
+}
+
+dialog {
+  background-color: var(--dialog-background-color, var(--body-background-color));
+  color: var(--body-font-color);
+  box-shadow: 0 10px 20px rgba(0,0,0,.2);
+  border: 1px solid var(--horizontal-line-color);
+}
+
+@property --scroll-progress {
+  syntax: '<percentage>';
+  initial-value: 100%;
+  inherits: false;
+}
+@keyframes scrollProgress {
+  0% {
+    --scroll-progress: 0%;
+  }
+  100% {
+    --scroll-progress: 100%;
+  }
+}
+
+/** nav **/
+nav {
+  height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  position: sticky;
+  top: 0;
+  padding: calc(var(--gap) * 0.75);
+  /* the chapter list reads a size down from the rest of the chrome, and `rem` would
+     read it down from the book instead */
+  font-size: calc(var(--ui-font-size, 18pt) * 0.875);
+  line-height: 1.2;
+  ol {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+    align-items: start;
+    li {
+      max-width: 100%;
+      &:not(.active) {
+        white-space: nowrap;
+      }
+      padding-top: 0.1ex;
+      padding-bottom: 0.1ex;
+      padding-left: calc(var(--gap) * 0.25);
+      padding-right: calc(var(--gap) * 0.25);
+      &.active {
+        background: var(--body-font-color);
+        outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
+        border-radius: 0.5ex;
+        color: var(--body-background-color);
+        a {
+          pointer-events: none;
+          color: inherit;
+        }
+      }
+      a {
+        display: block;
+        /* the link reaches out over its item's padding and half the gap on either side,
+           so there is nowhere between two entries that a click falls through; the item
+           (and its highlight) stays the size it was */
+        margin: calc(-0.1ex - 0.25em) calc(var(--gap) * -0.25);
+        padding: calc(0.1ex + 0.25em) calc(var(--gap) * 0.25);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--body-font-color);
+        &:hover {
+          color: var(--link-color);
+        }
+      }
+      &:first-child a {
+        font-weight: bold;
+      }
+      /* one part of the chapter named above it, with a guide down its left */
+      &.part {
+        position: relative;
+        margin-left: 1em;
+        max-width: calc(100% - 1em);
+        &::before {
+          content: '';
+          position: absolute;
+          /* under the start of the chapter's name, and over half the gap on either side,
+             so the guides of its parts join into one line */
+          left: calc(var(--gap) * 0.25 - 1em);
+          top: -0.25em;
+          bottom: -0.25em;
+          border-left: 4px solid var(--body-font-color);
+          opacity: 0.15;
+          pointer-events: none;
+        }
+      }
+      /* a heading for the chapters below it, not a link */
+      &.book {
+        font-size: 0.75em;
+        opacity: 0.6;
+        padding-top: calc(var(--gap) * 0.5);
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+  }
+}
+
+/** aside **/
+aside {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+aside a,
+aside button {
+  appearance: none;
+  background: var(--paper-background-color);
+  color: var(--body-font-color);
+  /* the ua stylesheet pins a button to 13.3px Arial, and `* { font-family: inherit }`
+     only ever took back the family half of that. The labels on the rail read well
+     under the rest of the chrome, and at 0.6 they land where that 13.3px had them */
+  font-size: 0.6em;
+  font-weight: inherit;
+  outline: 1px solid var(--horizontal-line-color);
+  width: 100%;
+  min-width: 24px;
+  aspect-ratio: 1;
+  display: grid;
+  place-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: calc(var(--gap) * .25)
+}
+aside > div {
+  padding-top: calc(var(--gap) * .75);
+  padding-bottom: calc(var(--gap) * .75);
+  padding-left: calc(var(--gap) * .75);
+  padding-right: calc(var(--gap) * .75);
+  display: flex;
+  flex-direction: column;
+  row-gap: calc(var(--gap) * .5);
+}
+aside > div + div {
+  position: relative;
+}
+aside > div + div::before {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate3d(-50%, 0, 0);
+  content: '';
+  display: block;
+  width: calc(var(--gap) * 2);
+  height: 1px;
+  background: var(--horizontal-line-color);
+  opacity: 0.5;
+}
+aside .colors button {
+  border-radius: 2em;
+  &::before {
+    content: var(--checkmark);
+    font-size: .7em;
+  }
+  @media (prefers-color-scheme:light) {
+    &.checked\:light {
+      --checkmark: '✔';
+    }
+  }
+  @media (prefers-color-scheme:dark) {
+    &.checked\:dark {
+      --checkmark: '✔';
+    }
+  }
+}
+aside a.close {
+  position: relative;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
+  &::before,
+  &::after {
+    content: '';
+    display: block;
+    width: 50%;
+    height: 1px;
+    transform: translate3d(-50%, -50%, 0) rotateZ(var(--rotate, 45deg));
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    background: currentColor;
+  }
+  &::after {
+    --rotate: -45deg;
+  }
+
+  outline: 0;
+  background: radial-gradient(closest-side, var(--paper-background-color) 79%, transparent 80% 100%), conic-gradient(var(--link-color) var(--scroll-progress, 0%), var(--horizontal-line-color) 0);
+  animation: scrollProgress auto linear;
+  animation-timeline: scroll();
+}
+
+aside button {
+  border-radius: 1em;
+  corner-shape: squircle;
+  outline-width: 0;
+
+  &.selected {
+    font-weight: bold;
+  }
+
+  &.refresh::after {
+    content: 'ℝ';
+  }
+  &.zen::after {
+    content: 'ℤ';
+  }
+  &.names-editor::after {
+    content: 'ℕ';
+  }
+  &.font::after {
+    content: '𝔽';
+  }
+}
+
+/** main **/
+main {
+  display: flex;
+  background: var(--paper-background-color);
+  padding: 1rem 3rem;
+  outline: 1px solid var(--paper-outline-color, transparent);
+  box-shadow: 0px 6px 12px 3px var(--paper-shadow-color, transparent);
+  article {
+    flex: 1;
+    text-indent: 3ch;
+    max-width: var(--paper-width, 90ex);
+    margin: 0 auto;
+    p:first-child {
+      line-height: 1.2;
+      font-size: 1.5rem;
+      font-weight: bold;
+    }
+    hr {
+      background: var(--horizontal-line-color);
+    }
+
+    ::highlight(name) {
+      color: var(--link-color);
+    }
+  }
+}
+
+/** table **/
+.table {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto auto;
+  row-gap: var(--gap);
+  column-gap: calc(var(--gap) * 2);
+  padding: 0 var(--gap) var(--gap);
+  background: var(--paper-background-color);
+  box-shadow: 0px 6px 12px 3px var(--paper-shadow-color);
+  outline: 1px solid var(--paper-outline-color);
+  line-height: 1.2;
+  align-self: stretch;
+  align-content: start;
+}
+.table .name {
+  font-weight: bold;
+}
+.table .th {
+  white-space: nowrap;
+  padding: calc(var(--gap)/2) 0;
+  position: sticky;
+  top: 0;
+  background: var(--paper-background-color);
+}
+.table .th::before {
+  content: '';
+  display: block;
+  border-bottom: 1px solid var(--horizontal-line-color);
+  width: calc(100% + 1ex);
+  height: calc(2ex + 2px);
+  box-shadow: 0 calc(1ex - 5px) 1.4ex -1ex rgba(0, 0, 0, .5);
+  position: absolute;
+  bottom: -1px;
+  left: calc(-1ex / 2);
+}
+.table .th span {
+  display: inline-block;
+  position: relative;
+}
+.table .th span::after {
+  position: absolute;
+  bottom: calc(1ex/4);
+  right: -1.8ex;
+  color: var(--body-font-color);
+}
+.table .th[data-sort=asc] span::after { content: '↑'; }
+.table .th[data-sort=desc] span::after { content: '↓'; }
+.table .desc { display: block; }
+.table .delete { color: inherit; }
+.table .delete:hover { color: var(--link-color); }
+
+/** zen mode **/
+[data-zen=true] nav {
+  opacity: 0;
+  transition: opacity .15s ease-in-out;
+  &:hover {
+    opacity: 1;
+  }
+}
+
+/** command palette **/
+#command-palette[open] {
+  --width: calc(var(--paper-width) - 80px);
+  width: var(--width);
+  max-height: 70%;
+  position: fixed;
+  top: 10%;
+  left: calc((100% - var(--width)) / 2);
+  border-radius: 1.5ex;
+  overflow: hidden;
+  box-shadow: 0 10px 20px rgba(0,0,0,.2);
+  border: 1px solid var(--horizontal-line-color);
+  background: var(--body-background-color);
+  display: flex;
+  flex-direction: column;
+  padding: 0.7ex;
+
+  form {
+    display: contents;
+
+    input {
+      background: var(--paper-background-color);
+      font-size: inherit;
+      padding: 1ex 1.3ex;
+      border: 1px solid var(--paper-outline-color);
+      border-radius: 0.8ex;
+      color: var(--body-font-color);
+    }
+  }
+
+  ul {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    position: relative;
+    margin-top: 0.7ex;
+    gap: 1px;
+
+    li {
+      a {
+        display: block;
+        padding: 0.5ex 1.3ex;
+        border-radius: 0.8ex;
+        color: var(--body-font-color);
+        text-decoration: none;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      &:hover,
+      &.selected {
+        a {
+          background: var(--paper-background-color);
+        }
+      }
+
+      ::highlight(match) {
+        background: yellow;
+      }
+    }
+  }
+}
+
+/** names editor **/
+#names-editor[open] {
+  --width: calc(var(--paper-width) - 80px);
+  width: var(--width);
+  height: 80%;
+  position: fixed;
+  top: 10%;
+  left: calc((100% - var(--width)) / 2);
+  border-radius: 1.5ex;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7ex;
+  padding: 0.7ex;
+
+  form {
+    display: contents;
+
+    textarea {
+      background: var(--paper-background-color);
+      font-size: inherit;
+      padding: 1ex 1.3ex;
+      border: 1px solid var(--paper-outline-color);
+      border-radius: 0.8ex;
+      color: var(--body-font-color);
+      flex: 1;
+    }
+
+    button {
+      appearance: none;
+      background: transparent;
+      color: var(--body-font-color);
+      width: 100%;
+      min-width: 25px;
+      display: grid;
+      place-content: center;
+      border-radius: 0.8ex;
+      cursor: pointer;
+      font-size: inherit;
+      line-height: 1.8;
+    }
+  }
+}
+
+/** font picker **/
+#font-picker[open] {
+  --width: min(46ch, calc(var(--paper-width) - 80px));
+  width: var(--width);
+  max-height: 80%;
+  position: fixed;
+  top: 10%;
+  left: calc((100% - var(--width)) / 2);
+  border-radius: 1.5ex;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7ex;
+  padding: 0.7ex;
+
+  /* the filter, which is the only input sitting directly in the dialog */
+  > input {
+    background: var(--paper-background-color);
+    font: inherit;
+    padding: 1ex 1.3ex;
+    border: 1px solid var(--paper-outline-color);
+    border-radius: 0.8ex;
+    color: var(--body-font-color);
+  }
+
+  /* which of the two fonts the list is picking */
+  .target {
+    display: flex;
+    gap: 0.5ex;
+
+    button {
+      flex: 1;
+      text-align: center;
+      outline: 1px solid var(--horizontal-line-color);
+
+      &.selected {
+        font-weight: bold;
+      }
+    }
+  }
+
+  label {
+    display: grid;
+    grid-template-columns: 7ch 1fr 8ch;
+    align-items: center;
+    gap: 1ex;
+    padding: 0 1.3ex;
+    font-size: 0.75em;
+
+    input[type=range] {
+      accent-color: var(--link-color);
+      width: 100%;
+      cursor: pointer;
+    }
+    span {
+      text-align: right;
+      opacity: 0.7;
+    }
+  }
+
+  ul {
+    flex: 1;
+    overflow-y: auto;
+    list-style: none;
+  }
+
+  small {
+    padding: 0 1.3ex;
+    opacity: 0.7;
+    a {
+      color: var(--link-color);
+      cursor: pointer;
+    }
+  }
+
+  button {
+    appearance: none;
+    background: transparent;
+    color: var(--body-font-color);
+    width: 100%;
+    text-align: left;
+    padding: 0.3ex 1.3ex;
+    border-radius: 0.8ex;
+    cursor: pointer;
+    font-size: inherit;
+    line-height: 1.7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &:hover,
+    &:focus {
+      background: var(--selection-bg);
+    }
+    /* the font in use, so the list says where you already are */
+    &.selected {
+      color: var(--link-color);
+    }
+  }
+}
+
+/** add name button **/
+#add-name {
+  position: fixed;
+  z-index: 10;
+  transform: translate3d(-50%, -100%, 0);
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-background-color);
+  outline: 1px solid var(--horizontal-line-color);
+  box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
+  border-radius: 0.8ex;
+  corner-shape: squircle;
+  max-width: 40ch;
+  overflow: hidden;
+
+  button {
+    appearance: none;
+    border: 0;
+    background: none;
+    color: var(--link-color);
+    padding: 0.2ex 0.8ex;
+    font: inherit;
+    font-size: 0.7em;
+    line-height: 1.7;
+    white-space: nowrap;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--body-font-color);
+    }
+
+    /* one row per person to bind the name to, and the plain add last */
+    & + button {
+      border-top: 1px solid var(--horizontal-line-color);
+    }
+  }
+}
+
+.text-left { text-align: left; }
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+.indent-none { text-indent: 0; }

@@ -5,6 +5,18 @@
     "start": "node server/server.js",
     "test": "node --test",
     "check:books": "node tools/check-books.js",
-    "lint": "node tools/lint.js"
+    "lint": "npx --yes @biomejs/biome@1 lint src/parser.js lib server",
+    "build": "vite build && node -e \"require('node:fs').copyFileSync('dist/hyper-reader.html', 'hyper-reader.html')\"",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "chroma-js": "^2.6.0",
+    "hyperapp": "^2.0.22",
+    "idb": "^8.0.4",
+    "lodash-es": "^4.18.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4",
+    "vite-plugin-singlefile": "^2.3.3"
   }
 }

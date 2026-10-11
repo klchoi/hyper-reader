@@ -3,3 +3,4 @@ node_modules/
 .books-snapshot.json
 # what the server keeps of a private library
 data/
+dist/

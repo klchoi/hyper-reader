@@ -21,7 +21,7 @@ function bookCode() {
 
 function loadParser() {
   let code = parserScript() + '\n' + bookCode();
-  let exports = ['extractChapters', 'normalizeFileContent', 'readNumberWords', 'cleanTitle', 'bookRecord', 'Book', 'chapterTitle', 'slug', 'PARSER_VERSION'];
+  let exports = ['extractChapters', 'finishChapters', 'normalizeFileContent', 'readNumberWords', 'cleanTitle', 'bookRecord', 'Book', 'chapterTitle', 'slug', 'PARSER_VERSION'];
   // the parser logs while it works; a test run should not
   let quiet = { log() {}, group() {}, groupCollapsed() {}, groupEnd() {}, table() {}, info() {} };
   return new Function('console', `${code}\nreturn { ${exports.join(', ')} };`)(quiet);

@@ -2,7 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const { loadParser } = require('./load.js');
 
-const { extractChapters, normalizeFileContent, readNumberWords, cleanTitle, bookRecord, Book, chapterTitle } = loadParser();
+const { extractChapters, finishChapters, normalizeFileContent, readNumberWords, cleanTitle, bookRecord, Book, chapterTitle } = loadParser();
 
 // -- helpers
 const words = ['gió', 'núi', 'mưa', 'đêm', 'trăng', 'suối', 'rừng', 'đường', 'nhà', 'bến'];
@@ -120,7 +120,7 @@ describe('the last chapter', () => {
 });
 
 describe('parts, ranges and extras', () => {
-  const parts = (chapters) => chapters.map(c => c.part && `${c.part.of} > ${c.part.text}`);
+  const parts = (chapters) => chapters.map(c => c.part && (c.part.head ? `${c.part.of} >` : `${c.part.of} > ${c.part.text}`));
   it('shows the parts of a chapter one by one, under the chapter named once', () => {
     let text = book([1, 2].map(n => `Chương ${n}\n\n${story(6, n)}`), ['thượng', 'trung', 'hạ'].map(p => `Chương 3: (${p})\n\n${story(6)}`), `Chương 4\n\n${story(6)}`);
     let chapters = real(parse(text));
@@ -136,6 +136,21 @@ describe('parts, ranges and extras', () => {
   it('counts the parts written as numbers out of all of them', () => {
     let text = book(['nhất', 'nhị', 'tam'].map((p, k) => `Chương ${5 + k}: Dạ tập (${p})\n\n${story(6, k)}`), `Chương 8: Sáng\n\n${story(6)}`);
     assert.deepEqual(parts(real(parse(text))), ['Chương 5-7: Dạ tập > (1/3)', 'Chương 5-7: Dạ tập > (2/3)', 'Chương 5-7: Dạ tập > (3/3)', undefined]);
+  });
+  it('takes a chapter with the title of the parts after it for the first of them', () => {
+    let text = book([`Chương 88: Na Trát\n\n${story(6)}`, `Chương 89: Na Trát (2)\n\n${story(6, 1)}`, `Chương 90: Na Trát (3)\n\n${story(6, 2)}`, `Chương 91: Đi\n\n${story(6, 3)}`]);
+    assert.deepEqual(parts(real(parse(text))), ['Chương 88-90: Na Trát > (1/3)', 'Chương 88-90: Na Trát > (2/3)', 'Chương 88-90: Na Trát > (3/3)', undefined]);
+  });
+  it('lets the chapter that names the parts after it open them', () => {
+    let text = book(`Chương 12: Trước\n\n${story(6)}`, 'Thứ 13 chương tam đối', ['thượng', 'trung', 'hạ'].map(p => `Chương 13: (${p})\n\n${story(6)}`), `Chương 14: Sau\n\n${story(6)}`);
+    let chapters = real(parse(text));
+    assert.deepEqual(parts(chapters), [undefined, 'Chương 13: Tam đối >', 'Chương 13: Tam đối > (thượng)', 'Chương 13: Tam đối > (trung)', 'Chương 13: Tam đối > (hạ)', undefined]);
+    assert.equal(chapters[1].title, 'Chương 13: Tam đối');
+  });
+  it('keeps a part the book repeats among the others', () => {
+    let drafts = [['119', 'Hành động (1)'], ['119', 'Hành động (1)'], ['120', 'Hành động (2)']]
+      .map(([number, title], k) => ({ offset: k * 10, heading: { number, title, text: title } }));
+    assert.deepEqual(parts(finishChapters(drafts, story(3))), ['Chương 119-120: Hành động > (1/2)', 'Chương 119-120: Hành động > (1/2)', 'Chương 119-120: Hành động > (2/2)']);
   });
   it('starts the parts over with the next chapter, and takes a note in brackets for none', () => {
     let text = book(['27', '28'].flatMap(n => ['thượng', 'hạ'].map(p => `Chương ${n}: (${p})\n\n${story(6)}`)), `Chương 29: Thu hoạch\n\n${story(6)}`, `Chương 30: Thu hoạch (tu)\n\n${story(6)}`);

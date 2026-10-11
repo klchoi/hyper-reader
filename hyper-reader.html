@@ -2360,44 +2360,19 @@
       }
     }
 
-    let InitDbDone = (state, { db }) => [
-      { ...state, db },
+    // what keeps the books is chosen once, and everything kept is asked of it (see Backends)
+    let InitBackendDone = (state, { backend }) => [
+      { ...state, backend },
       (dispatch) => {
-        window.db = db;
         dispatch(LoadSettings);
         dispatch(LoadProgress);
         dispatch(LoadRecentBooks);
         dispatch(LoadRecentBook);
       }
     ];
-    let InitDb = (state) => [
+    let InitBackend = (state) => [
       state,
-      async (dispatch) => {
-        let db = await openDB('text-reader', 23, {
-          upgrade(db, oldVersion, newVersion, transaction, events) {
-            console.log('upgrade db', { oldVersion, newVersion, transaction, events });
-            let schemas = {
-              files: {},
-              fileContents: {},
-              settings: {},
-              progress: {},
-              books: {},
-              chapters: {},
-              names: {},
-            };
-            for (let [store, keyOptions] of Object.entries(schemas)) {
-              if (!db.objectStoreNames.contains(store)) {
-                db.createObjectStore(store, keyOptions);
-              }
-            }
-          },
-          blocked: console.log,
-          blocking: console.log,
-          terminated: console.log,
-        });
-
-        dispatch(InitDbDone, { db });
-      }
+      async (dispatch) => dispatch(InitBackendDone, { backend: await chooseBackend() }),
     ];
 
     let InitTheme = (state) => [
@@ -2576,15 +2551,7 @@
 
     let LoadSettings = (state) => [
       state,
-      async (dispatch) => {
-        let settings = {};
-        let cursor = await state.db.transaction('settings').store.openCursor();
-        while (cursor) {
-          settings[cursor.key] = cursor.value;
-          cursor = await cursor.continue();
-        }
-        dispatch(ApplySettings, settings);
-      }
+      async (dispatch) => dispatch(ApplySettings, await state.backend.settings()),
     ];
     // a setting css can select on goes on the element. A list or a shape is for the
     // app to read and only reads as junk in an attribute, so it stays out of one
@@ -2604,15 +2571,7 @@
       state,
       async (dispatch) => {
         dispatch(ApplySettings, settings);
-
-        let tx = state.db.transaction('settings', 'readwrite');
-        await Promise.all([
-          ...Object.entries(settings).map(([key, value]) => {
-            applyDataset(key, value);
-            return tx.store.put(value, key);
-          }),
-          tx.done,
-        ]);
+        await state.backend.saveSettings(settings);
       }
     ];
 
@@ -2676,7 +2635,7 @@
     let LoadRecentBooks = (state) => [
       state,
       async (dispatch) => {
-        let files = await state.db.getAll('files');
+        let files = await state.backend.files();
         files.sort((a, z) => a.name.localeCompare(z.name, 'vi-VN', { sensitivity: 'accent' }));
         dispatch(LoadRecentBooksDone, { files });
       }
@@ -2684,13 +2643,7 @@
 
     let LoadProgressDone = (state, { progress }) => ({ ...state, progress });
     let LoadProgress = (state) => [state, async (dispatch) => {
-      let progress = {};
-      let cursor = await state.db.transaction('progress').store.openCursor();
-      while (cursor) {
-        progress[cursor.key] = cursor.value;
-        cursor = await cursor.continue();
-      }
-      dispatch(LoadProgressDone, { progress });
+      dispatch(LoadProgressDone, { progress: await state.backend.progress() });
     }];
 
     let LoadRecentBook = (state) => [
@@ -2783,51 +2736,36 @@
     ];
     // `offset` says where to open, `chapterId` is only what an older bookmark or
     // progress record has instead. Both may be missing, and then the book starts over
-    let OpenBook = (state, { bookId, offset, chapterId, migrate = true }) => [
+    let OpenBook = (state, { bookId, offset, chapterId }) => [
       state,
       async (dispatch) => {
         if (!bookId) {
           console.info('Failed to load file:', { bookId, offset, chapterId });
           return;
         }
-        let retry = { bookId, offset, chapterId, migrate: false };
-
-        let book = await state.db.get('books', bookId);
-        if (!book) {
-          console.info('Book not found:', { bookId });
-          if (migrate) dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, retry] });
-          return
-        }
-
-        // a book stored by an older parser keeps the titles and groups that parser cut
-        // it into: parsing the file again is what updates them
-        if (book.parser != PARSER_VERSION && migrate) {
-          console.info('Book parsed by an older parser:', { bookId, parser: book.parser });
-          dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, retry] });
-          return;
-        }
-        // a book stored before chapters carried their offset: parsing the file again is
-        // what brings them back, and the file content it needs is still here
-        if (!book.chapters.some(c => c.offset != null) && migrate) {
-          console.info('Chapter offsets missing:', { bookId, offset, chapterId });
-          dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, retry] });
-          return;
-        }
         // nothing to go on means the book starts over
-        let listed = chapterAt(book.chapters, offset)
+        let listedIn = (book) => chapterAt(book.chapters, offset)
           || book.chapters.find(c => c.id == chapterId)
           || book.chapters[0];
-        // an offset inside the chapter is a place on its page, not just the chapter
-        let position = Math.max(toOffset(offset) ?? 0, listed.offset ?? 0);
 
-        let chapter = await state.db.get('chapters', bookId + '/' + listed.id);
-        if (!chapter) {
-          console.info('Chapter not found:', { bookId, offset, chapterId, id: listed.id });
-          if (migrate) dispatch(RefreshBook, { bookId, onSuccess: [OpenBook, retry] });
+        // the backend reads the book again when an older parser read it
+        let book = await state.backend.book(bookId);
+        if (!book) {
+          console.info('Book not found:', { bookId });
           return;
         }
-        // the book record is the one that places the chapter, so it holds the offset
-        chapter = { ...chapter, offset: listed.offset };
+        let listed = listedIn(book);
+        let chapter = await state.backend.chapter(bookId, listed);
+        // a record that lists a chapter whose text is gone is read again, once
+        if (!chapter) {
+          console.info('Chapter not found:', { bookId, offset, chapterId, id: listed.id });
+          book = await state.backend.rereadBook(bookId);
+          listed = book && listedIn(book);
+          chapter = book && await state.backend.chapter(bookId, listed);
+          if (!chapter) return;
+        }
+        // an offset inside the chapter is a place on its page, not just the chapter
+        let position = Math.max(toOffset(offset) ?? 0, listed.offset ?? 0);
 
         dispatch(LoadNames, { bookId: book.id });
         dispatch(OpenBookDone, { book, chapter, offset: position });
@@ -2843,10 +2781,10 @@
     let SetNames = (state, names) => ({ ...state, namesEditor: { ...state.namesEditor, names } });
     let SaveNames = (state, { bookId, names }) => [state, async () => {
       names = names.trim() + '\n';
-      await state.db.put('names', names, bookId);
+      await state.backend.saveNames(bookId, names);
     }];
     let LoadNames = (state, { bookId }) => [state, async (dispatch) => {
-      let names = await state.db.get('names', bookId);
+      let names = await state.backend.names(bookId);
       dispatch(SetNames, names);
       dispatch(HighlightNames);
     }];
@@ -3551,13 +3489,13 @@
       return [
         state,
         async (dispatch) => {
-          let progress = (await state.db.get('progress', book.id) || {});
+          let progress = { ...state.progress[book.id] };
           progress.offset = offset ?? chapter.offset;
           progress.chapterId = chapter.id;
           progress.chapterIndex = book.chapters.findIndex(c => c.id == chapter.id) + (book.chapters[0].id ? 1 : 0);
           progress.chapterCount = (book.chapters[0].id ? book.chapters.length : book.chapters.length - 1);
           progress.updatedAt = new Date().toISOString();
-          await state.db.put('progress', progress, book.id);
+          await state.backend.saveProgress(book.id, progress);
           dispatch(SaveProgressDone, { book, progress });
         }
       ];
@@ -3586,7 +3524,7 @@
         //refresh recent books in state
         dispatch(LoadRecentBooks);
 
-        let books = files.map(({ file }) => Book(file));
+        let books = files.map(file => Book(file));
 
         let booksOpenInNewTab = books;
         let bookOpenInCurrentTab = null;
@@ -3601,10 +3539,11 @@
 
         //resolve every chapter up front: an await between two window.open calls loses the
         //drop's user activation, so every tab after the first gets blocked by the popup blocker
-        let positions = new Map(await Promise.all(books.map(async (book) => {
-          let { offset, chapterId } = (await state.db.get('progress', book.id)) || {};
+        let progress = await state.backend.progress();
+        let positions = new Map(books.map(book => {
+          let { offset, chapterId } = progress[book.id] || {};
           return [book.id, { bookId: book.id, offset, chapterId }];
-        })));
+        }));
 
         let blocked = booksOpenInNewTab.filter(book => (
           !window.open(state.router.route(bookRoute(positions.get(book.id))), '_blank')
@@ -3627,12 +3566,7 @@
         let readFile = (localFile) => new Promise(resolve => {
           let reader = new FileReader();
           reader.addEventListener('load', event => {
-            let file = {
-              name: localFile.name,
-              size: localFile.size,
-            };
-            let fileContent = event.target.result;
-            resolve({ file, fileContent });
+            resolve({ name: localFile.name, size: localFile.size, text: event.target.result });
           });
           reader.readAsText(localFile);
         });
@@ -3646,54 +3580,25 @@
       },
     ];
 
+    // `files` are [{ name, size, text }]
     let StoreBooks = (state, { files, onSuccess }) => [
       state,
       async (dispatch) => {
-        let chapterKeys = await state.db.getAllKeys('chapters');
-        // the books are read before the transaction opens: it would not wait for them
-        let read = await Promise.all(files.map(async ({ file, fileContent }) => ({ file, fileContent, book: await readBook(file, fileContent) })));
-
-        let tx = state.db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
-        await Promise.all([
-          ...read.flatMap(({ file, fileContent, book }) => {
-            return [
-              tx.objectStore('files').put(file, book.id),
-              tx.objectStore('fileContents').put(fileContent, book.id),
-              tx.objectStore('books').put(bookRecord(book), book.id),
-              ...chapterKeys.filter(k => k.startsWith(book.id + '/')).map(k => tx.objectStore('chapters').delete(k)),
-              ...book.chapters.map(c => tx.objectStore('chapters').put(c, book.id + '/' + c.id)),
-            ];
-          }),
-          tx.done,
-        ]);
-
+        await state.backend.addBooks(files);
         if (onSuccess) dispatch(...onSuccess);
       }
     ];
 
-    let RefreshBook = (state, { bookId, onSuccess }) => [
+    // the book read again, and opened where the reader is
+    let RefreshBook = (state, { bookId }) => [
       state,
       async (dispatch) => {
         if (!bookId) {
           console.info('Failed to load file:', { bookId });
           return;
         }
-
-        let [file, fileContent] = await Promise.all([
-          state.db.get('files', bookId),
-          state.db.get('fileContents', bookId),
-        ]);
-        if (!file || !fileContent) {
-          console.info('File not found:', { bookId, file, fileContent });
-          return;
-        }
-
-        if (!onSuccess) onSuccess = [OpenBook, { bookId, offset: state.chapter.offset, chapterId: state.chapter.id }];
-
-        dispatch(StoreBooks, {
-          files: [{ file, fileContent }],
-          onSuccess,
-        });
+        if (!await state.backend.rereadBook(bookId)) return;
+        dispatch(OpenBook, { bookId, offset: state.chapter.offset, chapterId: state.chapter.id });
       }
     ];
 
@@ -3701,17 +3606,7 @@
     let DeleteBook = (state, { bookId }) => [
       state,
       async (dispatch) => {
-        let chapterKeys = (await state.db.getAllKeys('chapters')).filter(k => k.startsWith(bookId + '/'));
-
-        let tx = state.db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
-        await Promise.all([
-          tx.objectStore('files').delete(bookId),
-          tx.objectStore('fileContents').delete(bookId),
-          tx.objectStore('books').delete(bookId),
-          ...chapterKeys.map(k => tx.objectStore('chapters').delete(k)),
-          tx.done,
-        ]);
-
+        await state.backend.deleteBook(bookId);
         dispatch(DeleteBookDone, { bookId });
       }
     ];
@@ -3754,7 +3649,7 @@
       init: [
         {
           router: new HashRouter(),
-          db: null,
+          backend: null,
           files: [],
           book: null,
           chapter: null,
@@ -3787,7 +3682,7 @@
         (dispatch) => {
           dispatch(InitRouter);
           dispatch(InitTheme);
-          dispatch(InitDb);
+          dispatch(InitBackend);
           dispatch(InitDropzone);
         }
       ],
@@ -4349,6 +4244,115 @@
       return book;
     }
     // @worker:end
+
+    // ---- Backends -----------------------------------------------------------------------
+    // What keeps the books, where each was left and the settings, and reads a book into its
+    // chapters. The page asks it, and does not mind which it is. Every call is async:
+    //   settings()                  every setting, as { key: value }
+    //   saveSettings(settings)      some of them
+    //   progress()                  where each book was left, as { bookId: record }
+    //   saveProgress(id, record)
+    //   names(id)                   the names corrected in a book, as text (or undefined)
+    //   saveNames(id, text)
+    //   files()                     the books kept, as the files they came from: [{ name, size }]
+    //   addBooks(files)             read and keep [{ name, size, text }]; their records
+    //   book(id)                    the record of a book (bookRecord), read again first if an
+    //                               older parser read it; null for a book not kept
+    //   chapter(id, listed)         a chapter of the record, with its text; null if it is gone
+    //   rereadBook(id)              read a kept book again; its record, or null
+    //   deleteBook(id)
+    function chooseBackend() {
+      return browserBackend();
+    }
+
+    // the browser's: IndexedDB, and the parser in a worker (see readBook)
+    async function browserBackend() {
+      let db = await openDB('text-reader', 23, {
+        upgrade(db, oldVersion, newVersion, transaction, events) {
+          console.log('upgrade db', { oldVersion, newVersion, transaction, events });
+          let stores = ['files', 'fileContents', 'settings', 'progress', 'books', 'chapters', 'names'];
+          for (let store of stores) {
+            if (!db.objectStoreNames.contains(store)) db.createObjectStore(store);
+          }
+        },
+        blocked: console.log,
+        blocking: console.log,
+        terminated: console.log,
+      });
+      // a store as { key: value }
+      let everything = async (store) => {
+        let found = {};
+        for (let cursor = await db.transaction(store).store.openCursor(); cursor; cursor = await cursor.continue()) {
+          found[cursor.key] = cursor.value;
+        }
+        return found;
+      };
+      let backend = {
+        settings: () => everything('settings'),
+        async saveSettings(settings) {
+          let tx = db.transaction('settings', 'readwrite');
+          await Promise.all([...Object.entries(settings).map(([key, value]) => tx.store.put(value, key)), tx.done]);
+        },
+        progress: () => everything('progress'),
+        saveProgress: (id, record) => db.put('progress', record, id),
+        names: (id) => db.get('names', id),
+        saveNames: (id, text) => db.put('names', text, id),
+        files: () => db.getAll('files'),
+        async addBooks(files) {
+          let chapterKeys = await db.getAllKeys('chapters');
+          // the books are read before the transaction opens: it would not wait for them
+          let read = await Promise.all(files.map(async ({ name, size, text }) => ({ file: { name, size }, text, book: await readBook({ name, size }, text) })));
+          let tx = db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
+          await Promise.all([
+            ...read.flatMap(({ file, text, book }) => [
+              tx.objectStore('files').put(file, book.id),
+              tx.objectStore('fileContents').put(text, book.id),
+              tx.objectStore('books').put(bookRecord(book), book.id),
+              ...chapterKeys.filter(k => k.startsWith(`${book.id}/`)).map(k => tx.objectStore('chapters').delete(k)),
+              ...book.chapters.map(c => tx.objectStore('chapters').put(c, `${book.id}/${c.id}`)),
+            ]),
+            tx.done,
+          ]);
+          return read.map(({ book }) => bookRecord(book));
+        },
+        async book(id) {
+          let book = await db.get('books', id);
+          // a book stored by an older parser keeps the titles and groups that parser cut it
+          // into, and one stored before chapters carried their offset has none: reading the
+          // file again is what updates them
+          let stale = !book || book.parser !== PARSER_VERSION || !book.chapters.some(c => c.offset != null);
+          if (!stale) return book;
+          console.info('Book read again:', { id, parser: book?.parser });
+          return backend.rereadBook(id);
+        },
+        async chapter(id, listed) {
+          let chapter = await db.get('chapters', `${id}/${listed.id}`);
+          // the book record is the one that places the chapter, so it holds the offset
+          return chapter && { ...chapter, offset: listed.offset };
+        },
+        async rereadBook(id) {
+          let [file, text] = await Promise.all([db.get('files', id), db.get('fileContents', id)]);
+          if (!file || !text) {
+            console.info('File not found:', { id });
+            return null;
+          }
+          let [book] = await backend.addBooks([{ ...file, text }]);
+          return book;
+        },
+        async deleteBook(id) {
+          let chapterKeys = (await db.getAllKeys('chapters')).filter(k => k.startsWith(`${id}/`));
+          let tx = db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
+          await Promise.all([
+            tx.objectStore('files').delete(id),
+            tx.objectStore('fileContents').delete(id),
+            tx.objectStore('books').delete(id),
+            ...chapterKeys.map(k => tx.objectStore('chapters').delete(k)),
+            tx.done,
+          ]);
+        },
+      };
+      return backend;
+    }
 
     function getColorScheme() {
       if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';

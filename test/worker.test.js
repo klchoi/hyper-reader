@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Worker: NodeWorker } = require('node:worker_threads');
-const { parserScript } = require('./load.js');
+const { parserScript } = require('../lib/parser.js');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'hyper-reader.html'), 'utf8');
 const between = (a, b) => html.slice(html.indexOf(a), html.indexOf(b));

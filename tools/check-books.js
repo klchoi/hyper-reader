@@ -23,7 +23,7 @@ function digestOf(parser, folder, file) {
 if(!isMainThread) {
   // a worker takes the books it is given and answers with their digests
   let { folder, files } = workerData;
-  let parser = require('../test/load.js').loadParser();
+  let parser = require('../lib/parser.js').loadParser();
   let books = {};
   for(let file of files) {
     try { books[file.normalize()] = digestOf(parser, folder, file); }

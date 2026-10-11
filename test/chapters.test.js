@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { loadParser } = require('./load.js');
+const { loadParser } = require('../lib/parser.js');
 
 const { extractChapters, finishChapters, normalizeFileContent, readNumberWords, cleanTitle, bookRecord, Book, chapterTitle } = loadParser();
 

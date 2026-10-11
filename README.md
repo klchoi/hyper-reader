@@ -1,23 +1,32 @@
 # hyper-reader
 
 A reader for long novels kept as `.txt` files. It is one page, `hyper-reader.html`: open it,
-drop a book on it, and read by chapter. Books and reading progress are kept in the browser
-(IndexedDB).
+drop a book on it, and read by chapter. The books, where each was left and the settings are kept
+by a backend, of which there are two: the browser's, or a small Node server's.
 
 ## Running it
 
-Open `hyper-reader.html` in a browser, from the file or from a local server
-(`python3 -m http.server`, then `http://localhost:8000/hyper-reader.html`). A book is read in a
-worker, so a big one does not hold the page still; the console says which way each book was
-read (`Chapters of "...": read in a worker`, or `... read in the page (why)` when no worker
-could be had). Listing the fonts installed on the machine needs the local server.
+In the browser alone: open `hyper-reader.html` from the file. The browser keeps everything
+(IndexedDB), and a book is read in a worker, so a big one does not hold the page still; the
+console says which way each book was read (`Chapters of "...": read in a worker`, or `... read
+in the page (why)` when no worker could be had).
+
+With the server: `npm start` (or `node server/server.js [--port 8080] [--data <folder>]`), then
+`http://127.0.0.1:8080/`. The server serves the page, reads the books with the page's own parser
+and keeps them as files in `data/` (or the folder given). It needs nothing but Node, answers on
+this computer only, and loads the parser again when the page changes. Listing the fonts
+installed on the machine works here and not from the file.
+
+The two keep their books apart: a book dropped on the page opened as a file is not on the
+server, and the other way round.
 
 ## What is in the page
 
 - `<script id="chapter-parser">` the chapter parser. It touches nothing of the page, so a worker
   can be made from its text, and the tests load it from here.
-- `<script type="module">` the page: the app, the stored data, and `readBook`, which hands a book
-  to the worker.
+- `<script type="module">` the page: the app, and its backends (under `Backends`): what it asks
+  of whatever keeps the books, the browser's backend (IndexedDB, and `readBook`, which hands a
+  book to the worker) and the server's (calls to `server/server.js`).
 
 ## The chapter parser
 
@@ -37,10 +46,14 @@ they are read again the next time they are opened.
 ## Working on it
 
 ```
-npm test                 the tests: the parser, read from the page, on small invented books
+npm test                 the tests: the parser, read from the page, on small invented books,
+                         the worker, and the server's answers
+npm start                the server
 npm run lint             Biome over the parser (node tools/lint.js --all adds the page)
 npm run check:books -- <folder>
 ```
+
+`lib/parser.js` loads the parser out of the page for the tests, the tools and the server.
 
 `check:books` runs the parser over a folder of `.txt` books and compares each with the snapshot it
 saved earlier, naming the books a change moves and how (titles, groups, offsets). The first run, or

@@ -1,3 +1,5 @@
 node_modules/
 # what check-books saves of a private library
 .books-snapshot.json
+# what the server keeps of a private library
+data/

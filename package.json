@@ -2,6 +2,7 @@
   "name": "hyper-reader",
   "private": true,
   "scripts": {
+    "start": "node server/server.js",
     "test": "node --test",
     "check:books": "node tools/check-books.js",
     "lint": "node tools/lint.js"

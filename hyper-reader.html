@@ -4261,8 +4261,57 @@
     //   chapter(id, listed)         a chapter of the record, with its text; null if it is gone
     //   rereadBook(id)              read a kept book again; its record, or null
     //   deleteBook(id)
-    function chooseBackend() {
+    //
+    // Served by the server (`node server/server.js`), the page leaves its books to the server;
+    // opened as a file, or served by anything else, it keeps them in the browser. The two keep
+    // books apart: a book dropped on one is not in the other.
+    async function chooseBackend() {
+      if (location.protocol.startsWith('http')) {
+        try {
+          let hello = await fetch('api/hello');
+          if (hello.ok && (await hello.json()).backend === 'server') {
+            console.info('Books kept by the server');
+            return serverBackend();
+          }
+        } catch (error) {
+          console.info('No server to keep the books, the browser keeps them:', error);
+        }
+      }
       return browserBackend();
+    }
+
+    // the server's: it reads the books and keeps them (see server/server.js for its answers)
+    function serverBackend() {
+      // a body is sent as JSON, or as text when it is text; an answer of 404 is null
+      let call = async (method, route, body) => {
+        let text = typeof body === 'string';
+        let response = await fetch(`api/${route}`, {
+          method,
+          headers: body === undefined ? {} : { 'content-type': text ? 'text/plain; charset=utf-8' : 'application/json' },
+          body: body === undefined || text ? body : JSON.stringify(body),
+        });
+        // the answer is read whole, whatever it is: one left unread holds its connection, and
+        // the next call over it is cut off
+        let answer = response.headers.get('content-type')?.startsWith('application/json') ? await response.json() : await response.text();
+        if (response.status === 404) return null;
+        if (!response.ok) throw new Error(`${method} api/${route}: ${response.status} ${answer}`);
+        return response.status === 204 ? undefined : answer;
+      };
+      let id = encodeURIComponent;
+      return {
+        settings: () => call('GET', 'settings'),
+        saveSettings: (settings) => call('PATCH', 'settings', settings),
+        progress: () => call('GET', 'progress'),
+        saveProgress: (bookId, record) => call('PUT', `progress/${id(bookId)}`, record),
+        names: (bookId) => call('GET', `names/${id(bookId)}`),
+        saveNames: (bookId, text) => call('PUT', `names/${id(bookId)}`, text),
+        files: () => call('GET', 'files'),
+        addBooks: (files) => Promise.all(files.map(file => call('POST', 'books', file))),
+        book: (bookId) => call('GET', `books/${id(bookId)}`),
+        chapter: (bookId, listed) => call('GET', `books/${id(bookId)}/chapters/${id(listed.id)}`),
+        rereadBook: (bookId) => call('POST', `books/${id(bookId)}/reread`),
+        deleteBook: (bookId) => call('DELETE', `books/${id(bookId)}`),
+      };
     }
 
     // the browser's: IndexedDB, and the parser in a worker (see readBook)

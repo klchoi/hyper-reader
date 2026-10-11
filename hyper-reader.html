@@ -519,10 +519,23 @@
           &:first-child a {
             font-weight: bold;
           }
-          /* one part of the chapter named above it */
+          /* one part of the chapter named above it, with a guide down its left */
           &.part {
+            position: relative;
             margin-left: 1em;
             max-width: calc(100% - 1em);
+            &::before {
+              content: '';
+              position: absolute;
+              /* under the start of the chapter's name, and over half the gap on either side,
+                 so the guides of its parts join into one line */
+              left: calc(var(--gap) * 0.25 - 1em);
+              top: -0.25em;
+              bottom: -0.25em;
+              border-left: 1px solid var(--body-font-color);
+              opacity: 0.3;
+              pointer-events: none;
+            }
           }
           /* a heading for the chapters below it, not a link */
           &.book {
@@ -1034,13 +1047,14 @@
     // where it starts in the text, what the list calls it, the group (a book, a section)
     // the list puts it under, and its text. `part` is set on a chapter that is one of the parts
     // of a longer one, `{ of, text }`: the list shows `of` once over the parts, and each part
-    // as `text` (`thượng`, `2/5`). The extraction below describes each chapter as a draft -
+    // as `text` (`(thượng)`, `(2/5)`). The extraction below describes each chapter as a draft -
     // `{ offset, group, heading }` - and finishChapters turns the drafts into these.
     //
     // heading: { type, number, part, title, text }
     //   type    the word before the number: `Chương`, `Hồi`, `Phiên ngoại`
     //   number  `27`, `1-6` for a run of chapters, `kết` for the last one
-    //   part    { text: 'thượng' } after the number, { text: 'tiết 2', leading: true } before it
+    //   part    { text: 'thượng', bracketed } after the number (bracketed when it was written
+    //           `(thượng)`), { text: 'tiết 2', leading: true } before it
     //   title   what the heading says besides, as written
     //   text    the heading as it stands in the book
 
@@ -1058,9 +1072,9 @@
 
     // the part a heading names after its title: `Yoga (thượng)`, `Dạ tập (nhị)`, `Chỉ nhiên (3)`,
     // `Khánh công yến (hạ 6)【động đồ】`, or before it (`tiết 2`), as { stem, word, number, order,
-    // tag }: the title without the part, the part as written, its number if it is written as
-    // one (`nhị` is 2, `thượng` is none), where it comes among the parts, and a tag after it.
-    // A note in brackets (`(tu)`, `(nhuận)`) is no part
+    // bracketed, tag }: the title without the part, the part as written, its number if it is
+    // written as one (`nhị` is 2, `thượng` is none), where it comes among the parts, whether it
+    // was in brackets, and a tag after it. A note in brackets (`(tu)`, `(nhuận)`) is no part
     const PART_MARK = /\s*[(（]\s*([^()（）]{1,16}?)\s*[)）]\s*(【[^】]*】)?\s*$/u;
     function partMark({ title = '', part }) {
       let marked = PART_MARK.exec(title);
@@ -1075,13 +1089,17 @@
       // `hạ 1`, `hạ 2` come after `hạ` and before each other
       let order = number ?? HALF_WORDS[half[1]] + (half[2] ?? 0) / 1000;
       let ours = marked?.[1].toLowerCase() === word;
-      return { stem: (ours ? title.slice(0, marked.index) : title).trim(), word, number, order, tag: ours ? marked[2] : undefined };
+      return {
+        stem: (ours ? title.slice(0, marked.index) : title).trim(), word, number, order,
+        bracketed: ours || !!part?.bracketed, tag: ours ? marked[2] : undefined,
+      };
     }
 
     // A chapter written in parts: the parts follow one another, in one book, with the one title
     // and a part after it (`Yoga (thượng)`, `Yoga (hạ)`), under the one number or numbers that
     // follow on. Each part is given `{ of, text }`: the title of the whole (`Chương 9-10: Yoga`),
-    // and the part, as written or, when the parts are numbers, as `2/5`
+    // and the part, as written or, when the parts are numbers, as `2/5`, in the brackets it was
+    // written in: `(thượng)`, `(2/5)`
     function partsOf(drafts) {
       let marks = drafts.map(({ heading }) => heading && partMark(heading));
       let follows = (a, b) => {
@@ -1103,7 +1121,8 @@
         let numbered = run.every(m => m.number != null);
         let total = Math.max(run.length, ...run.map(m => m.number ?? 0));
         run.forEach((m, k) => {
-          parts[start + k] = { of, text: [numbered ? `${m.number}/${total}` : m.word, m.tag].filter(Boolean).join(' ') };
+          let shown = numbered ? `${m.number}/${total}` : m.word;
+          parts[start + k] = { of, text: [m.bracketed ? `(${shown})` : shown, m.tag].filter(Boolean).join(' ') };
         });
       }
       return parts;
@@ -1377,7 +1396,7 @@
     //   shape     what it looks like, for the trust a book gives that look
     //   chapter   n, span (the last of a run: `7-10`), end / endWord (`kết`, `cuối`), chapType,
     //             extra (phiên ngoại), and a part of it: half (1 thượng, 2 trung, 3 hạ, or a
-    //             number), halfText, halfNum, halfType
+    //             number), halfText, halfBracketed (written `(hạ)`), halfNum, halfType
     //   book      bookNum, bookType, and bookName for a book that names itself and has no
     //             number (`Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`)
     //   outer     the section it is a part of: `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`
@@ -1385,7 +1404,7 @@
     const HEADING_DEFAULTS = {
       kind: 'chap', base: 0, index: 0, start: 0, ord: 0, text: '', title: '', rest: '', whole: false, shape: '',
       n: null, span: null, end: false, endWord: null, chapType: null, extra: false,
-      half: null, halfText: null, halfNum: null, halfType: null,
+      half: null, halfText: null, halfBracketed: false, halfNum: null, halfType: null,
       bookNum: null, bookType: null, bookName: null, outer: null, inline: false,
     };
 
@@ -1427,7 +1446,7 @@
       // Kỳ Bạch Tuyết (nhất) | Kiều thê chuyện xưa (nhất) | Quy tắc quái đàm — mới vào học viện (1)
       { kind: 'chap', base: 4, re: '^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R' },
       // (hạ)
-      { kind: 'half', base: 5, re: '^L?(?<hm>h)R?$' },
+      { kind: 'half', base: 5, re: '^(?<hl>L)?(?<hm>h)R?$' },
     ].map(rule => ({ ...rule, re: new RegExp(rule.re, 'd') }));
 
     // the title a line carries after its heading: no separator left in front, no bracket behind
@@ -1490,7 +1509,7 @@
       if(rule.kind === 'half') {
         let numbered = at('hn') ?? at('hn2');
         if(numbered) Object.assign(roles, { halfNum: numbered.value, halfType: 'tiết', half: numbered.value });
-        else Object.assign(roles, { half: at('hm').value, halfText: at('hm').word });
+        else Object.assign(roles, { half: at('hm').value, halfText: at('hm').word, halfBracketed: !!at('hl') });
       }
       return { roles, number, marker };
     }
@@ -1609,7 +1628,8 @@
           }
         }
         return heading({
-          ...read.roles, ...(part && { half: part.half, halfText: part.halfText }), kind, base, rest, title, whole,
+          // (a part in the title is one in brackets: `(thượng)`)
+          ...read.roles, ...(part && { half: part.half, halfText: part.halfText, halfBracketed: true }), kind, base, rest, title, whole,
           shape: shapeOf(tokens, m[0].length, whole),
           text: line.slice(tokens[0].s, last.e),
           start: tokens[0].s,
@@ -2025,11 +2045,11 @@
         if(end) heading.number = end.endWord;
         else if(first.kind === 'half') {
           heading.number = String(state.n);
-          heading.part = first.halfNum != null ? { text: `${first.halfType} ${first.halfNum}`, leading: true } : { text: first.halfText };
+          heading.part = first.halfNum != null ? { text: `${first.halfType} ${first.halfNum}`, leading: true } : { text: first.halfText, bracketed: first.halfBracketed };
         }
         else if(numbered) {
           heading.number = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);
-          if(numbered.half != null && numbered.kind === 'chap') heading.part = { text: numbered.halfText };
+          if(numbered.half != null && numbered.kind === 'chap') heading.part = { text: numbered.halfText, bracketed: numbered.halfBracketed };
         }
         // a part whose heading leaves out its section stays in the one before it
         let inherited = section && !lead.outer && state.book === 0 && type === section.type ? section.name : undefined;
@@ -4198,7 +4218,7 @@
     // @book:begin - what the tests load of the page: a book, and what is stored of it
     // bump when a change to the parser should reach the books already stored, which
     // are parsed again the next time they are opened
-    const PARSER_VERSION = 9;
+    const PARSER_VERSION = 10;
 
     // a book: where it came from, and its chapters once the text has been read (see readBook)
     function Book(file) {

@@ -2,17 +2,16 @@
 // a chapter written in parts named once, over its parts. A chapter is shown by its number and
 // its name (`Chương 12: Tên` and `Hồi 12: Tên` as `12. Tên`), the numbers in a column of their
 // own. A part is listed under its chapter's name, by the chapter it is when it is one of the
-// chapters its whole runs over (and the whole by its name alone), or as it is written.
+// chapters its whole runs over (`9.`, and the whole by its name alone), or as it is written.
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
 import { bookRoute } from './places.ts';
 
-// a row: a book's name, a chapter or one of its parts (`numbered` by the chapter it is, or
-// `named` as it is written), or the name of a chapter in parts (with the ids of its parts).
-// `number` and `label` are what is shown, `tip` the title in full
+// a row: a book's name, a chapter or one of its parts, or the name of a chapter in parts (with
+// the ids of its parts). `number` and `label` are what is shown, `tip` the title in full
 type Row = {
   key: string; book?: string; id?: string; offset: number; href: string;
-  number?: string; label: string; tip: string; part?: 'numbered' | 'named'; parts?: string[];
+  number?: string; label: string; tip: string; part?: boolean; parts?: string[];
 };
 
 // `Chương 12: Tên`, `Hồi 12: Tên`, `Chương 3 (thượng)`, `Chương 1-6`, `Chương kết` as their
@@ -49,8 +48,8 @@ export function ChapterList() @{
       }
       if (c.part) whole?.parts?.push(c.id);
       let shown: Partial<Row> = !c.part ? chapter(c.title)
-        : c.part.chapter != null ? { number: String(c.part.chapter), label: fix(c.part.text), tip: fix(c.title), part: 'numbered' }
-        : { label: fix(c.part.text), tip: fix(c.title), part: 'named' };
+        : c.part.chapter != null ? { number: String(c.part.chapter), label: fix(c.part.text), tip: fix(c.title), part: true }
+        : { label: fix(c.part.text), tip: fix(c.title), part: true };
       rows.push(row(c.id, c.offset, { id: c.id, ...shown }));
     });
     return rows;
@@ -73,7 +72,7 @@ export function ChapterList() @{
           } @else {
             // the name of a chapter in parts is written out whole while one of its parts is read
             // the link is as wide as the list, the entry (and its highlight) as wide as its text
-            <li class={{ active: row.id !== undefined && row.id === activeId.value, part: !!row.part, named: row.part === 'named', reading: !!activeId.value && !!row.parts?.includes(activeId.value) }}>
+            <li class={{ active: row.id !== undefined && row.id === activeId.value, part: !!row.part, reading: !!activeId.value && !!row.parts?.includes(activeId.value) }}>
               <a href={row.href} onClick={(event: MouseEvent) => open(event, row.offset)} title={row.tip} aria-label={row.tip}>
                 <span class="entry">
                   @if (row.number !== undefined) {

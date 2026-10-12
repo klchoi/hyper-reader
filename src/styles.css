@@ -572,13 +572,17 @@ nav {
       &:first-child a {
         font-weight: bold;
       }
-      /* one part of the chapter named above it, with a guide down its side just after the
-         column of numbers: the chapter it is in that column, or the part as it is written
-         under the chapters' names */
+      /* one part of the chapter named above it, under the chapters' names: the chapter it is
+         (`9.`), or the part as it is written (`(thượng)`), with a guide down its side under
+         the dots after the chapters' numbers */
       &.part {
         position: relative;
-        &.named .entry {
+        .entry {
           margin-left: calc(var(--number-column) + var(--number-gap));
+        }
+        .number {
+          min-width: 0;
+          text-align: left;
         }
         .name {
           font-variant-numeric: lining-nums tabular-nums;
@@ -586,9 +590,9 @@ nav {
         &::before {
           content: '';
           position: absolute;
-          /* in the gap after the numbers, and over half the gap between rows on either side,
-             so the guides of its parts join into one line */
-          left: calc(var(--gap) * 0.25 + var(--number-column) + var(--number-gap) / 2 - 2px);
+          /* its right edge the dots', and over half the gap between rows on either side, so
+             the guides of its parts join into one line */
+          left: calc(var(--gap) * 0.25 + var(--number-column) - 4px);
           top: -0.25em;
           bottom: -0.25em;
           border-left: 4px solid var(--body-font-color);

@@ -1,6 +1,6 @@
 // The chapters of the book open, down the side: a book's name over the chapters it holds, and
 // a chapter written in parts named once, over its parts. A chapter is shown by its number and
-// its name (`Chương 12: Tên` as `12  Tên`), the numbers in a column of their own.
+// its name (`Chương 12: Tên` and `Hồi 12: Tên` as `12  Tên`), the numbers in a column of their own.
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
 import { bookRoute } from './places.ts';
@@ -9,8 +9,9 @@ import { bookRoute } from './places.ts';
 // the ids of its parts). `number` and `label` are what is shown, `tip` the title in full
 type Row = { key: string; book?: string; id?: string; offset: number; href: string; number?: string; label: string; tip: string; part: boolean; parts?: string[] };
 
-// `Chương 12: Tên`, `Chương 3 (thượng)`, `Chương 1-6`, `Chương kết` as their number and the rest
-const NUMBERED = /^Chương (\S+?)(?::\s+|\s+(?=\()|$)(.*)$/u;
+// `Chương 12: Tên`, `Hồi 12: Tên`, `Chương 3 (thượng)`, `Chương 1-6`, `Chương kết` as their
+// number and the rest
+const NUMBERED = /^(?:Chương|Hồi) (\S+?)(?::\s+|\s+(?=\()|$)(.*)$/u;
 const numbered = (title: string) => {
   let found = NUMBERED.exec(title);
   return found ? { number: found[1], label: found[2] } : { label: title };

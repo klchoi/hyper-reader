@@ -10621,7 +10621,7 @@ function ChapterList_render(__anchor, __block) {
 	append(__anchor, nav);
 }
 ChapterList[RENDER_ENTRY] = ChapterList_render;
-var NUMBERED = /^Chương (\S+?)(?::\s+|\s+(?=\()|$)(.*)$/u;
+var NUMBERED = /^(?:Chương|Hồi) (\S+?)(?::\s+|\s+(?=\()|$)(.*)$/u;
 var numbered = (title) => {
 	let found = NUMBERED.exec(title);
 	return found ? {

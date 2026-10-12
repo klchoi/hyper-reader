@@ -118,6 +118,25 @@ describe('the server', () => {
     assert.ok(!fs.existsSync(path.join(data, 'uploads', upload.name)));
     assert.equal((await call('GET', `books/${kept.id}`)).status, 404);
   });
+  it('ends its indexer once every book is indexed, and starts it for a book read', async () => {
+    let until = async (done: () => boolean) => {
+      for(let tries = 0; tries < 400 && !done(); tries++) await wait(25);
+      assert.ok(done());
+    };
+    await until(() => !server.library.running().indexer);
+    // a book opened that is indexed already asks nothing of it
+    let opened = (await books())[0];
+    assert.equal((await call('GET', `books/${opened.id}`)).status, 200);
+    assert.equal(server.library.running().indexer, false);
+    let { answer: record } = await call('POST', 'books', { ...upload, name: 'Sách mới (1-3 chương).txt' });
+    assert.equal(server.library.running().indexer, true);
+    await settled();
+    await until(() => !server.library.running().indexer);
+    let { answer } = await call('GET', `search?q=${encodeURIComponent('Quách Tĩnh')}&book=${record.id}`);
+    assert.equal(answer.indexed, true);
+    assert.ok(answer.total > 0);
+    await call('DELETE', `books/${record.id}`);
+  });
   it('reads a book again when an older parser read it, or its file changed', async () => {
     let file = path.join(shelf, 'Sách thử (1-3 chương).txt');
     let { id } = (await books()).find(book => book.path === 'Sách thử (1-3 chương).txt')!;

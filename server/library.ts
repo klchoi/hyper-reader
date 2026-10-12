@@ -64,11 +64,14 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
   let roots = new Map<string, string>([[UPLOADS, uploads], ...libraries.map(({ name, dir }): [string, string] => [name, path.resolve(dir)])]);
   let readers = createReaders();
   let indexer = createIndexer({ database, roots });
+  // what was left unindexed when the server last stopped
+  indexer.nudge();
   let fileOf = (row: BookRow) => path.join(roots.get(row.root) ?? '', row.path);
   let idOf = (root: string, rel: string, name: string) => `${slug(name).slice(0, 48) || 'book'}-${hashOf(`${root}/${rel.normalize()}`)}`;
 
-  // the text the offsets of a book count in, kept for the books read last. Null when the file
-  // is not the one read (changed, or gone): the book is to be read again
+  // the text the offsets of a book count in, kept for the book read last only: a big one is tens
+  // of MB, which the server keeps once it has held them. Null when the file is not the one read
+  // (changed, or gone): the book is to be read again
   let texts = new Map<string, ReadText>();
   async function textOf(row: BookRow) {
     let kept = texts.get(row.id);
@@ -81,8 +84,8 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
       throw error;
     }
     if(read.size !== row.size || read.mtime !== row.mtime) return null;
+    texts.clear();
     texts.set(row.id, read);
-    if(texts.size > 4) texts.delete(texts.keys().next().value!);
     return read.text;
   }
 
@@ -184,7 +187,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
       let row = store.book(id);
       if(!row) return null;
       if(row.parser !== PARSER_VERSION) return library.rereadBook(id);
-      indexer.first(id);
+      if(row.indexed !== PARSER_VERSION) indexer.first(id);
       return recordOf(row);
     },
     async chapter(id: string, chapterId: string, again = true): Promise<(ReturnType<typeof listedOf> & { content: string }) | null> {
@@ -279,6 +282,9 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
       }
       return { indexed, total, mentions };
     },
+
+    // the processes it has at work: readers, and the indexer
+    running: () => ({ readers: readers.running(), indexer: indexer.running() }),
 
     // once, however often asked
     close(): Promise<void> {

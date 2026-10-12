@@ -1,6 +1,5 @@
-// A reader of books, on a thread of its own (see readers.ts): a file read, its text as the
+// A reader of books, in a process of its own (see readers.ts): a file read, its text as the
 // parser reads it, and what the parser makes of it, the chapters and the names it gives most.
-import { parentPort } from 'node:worker_threads';
 import fs from 'node:fs';
 import path from 'node:path';
 import { extractChapters, normalizeFileContent } from '../src/parser.ts';
@@ -37,11 +36,14 @@ const jobs = {
   text: (file: string) => readText(file),
 };
 
-parentPort!.on('message', ({ id, kind, file }: Asked) => {
+process.on('message', ({ id, kind, file }: Asked) => {
   try {
-    parentPort!.postMessage({ id, result: jobs[kind](file) } satisfies Answered);
+    process.send!({ id, result: jobs[kind](file) } satisfies Answered);
   } catch(error) {
     let { message, code } = error as NodeJS.ErrnoException;
-    parentPort!.postMessage({ id, error: { message: String(message), code } } satisfies Answered);
+    process.send!({ id, error: { message: String(message), code } } satisfies Answered);
   }
 });
+// the server gone, its reader goes too
+process.on('disconnect', () => process.exit());
+process.send!({ ready: true });

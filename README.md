@@ -26,9 +26,11 @@ database, `<data>/library.db` (`data/` by default):
   books that can be deleted from the page.
 
 A book's id is its name and where it is (`tien-lo-xanh-biec-do-3fa9c21b`), and its place in the
-page a path (`/books/<id>?at=<offset>`), which the server answers with the page. The books are read on
-threads of their own, and their full text indexed behind them for search (`/api/search?q=`,
-`&book=` for every place in one book), a book opened first; the characters a book names most
+page a path (`/books/<id>?at=<offset>`), which the server answers with the page. The books are read in
+processes of their own, and their full text indexed behind them for search (`/api/search?q=`,
+`&book=` for every place in one book), a book opened first; the processes end when they have
+nothing left to do, and with them the memory a big book takes to read (a few hundred MB), so
+the server waits on little (~40-60 MB, and the text of the book being read). The characters a book names most
 are kept with it (`/api/characters?q=`). Where a book was left and its names outlive it, so a
 file that goes and comes back finds them again. It needs nothing but Node (24, for `node:sqlite`
 and for running TypeScript as it is written), answers on this computer only, and runs the page's
@@ -115,7 +117,7 @@ they are read again the next time they are opened.
 
 ```
 npm test                 the tests: the parser, read from the page, on small invented books,
-                         the worker, and the server's answers
+                         the worker, the server's readers, and the server's answers
 npm start                the server
 npm run lint             oxlint over all the code: src/, server/, test/, tools/
 npm run typecheck        TypeScript over the page (src/, the .tsrx too, with tsrx-tsc) and over

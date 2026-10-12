@@ -3,8 +3,8 @@
 // (hyper-reader.html), and keeps the books in a SQLite database in a folder of its own (see
 // store.ts): those of the libraries it is given, folders of .txt files read where they are, and
 // those dropped on the page, kept in <data>/uploads. The books are read by the page's own parser
-// (src/parser.ts), on threads of their own (readers.ts), and their full text indexed for search
-// behind them (indexer.ts):
+// (src/parser.ts), in processes of their own (readers.ts), and their full text indexed for search
+// behind them (indexer.ts); the processes end when they have nothing left to do:
 //
 //   node server/server.ts [--port 8080] [--host 127.0.0.1] [--data <folder>] [--library [name=]<folder>]...
 //

@@ -12,7 +12,9 @@
 //   addBooks(files)             read and keep [{ name, size, date, text }]; their records
 //   book(id)                    the record of a book (bookRecord), read again first if an
 //                               older parser read it; null for a book not kept
-//   chapter(id, listed)         a chapter of the record, with its text; null if it is gone
+//   chapter(id, listed, raw)    a chapter of the record as the page shows it: its lines, corrected
+//                               by the book's names, and the names in them (see marks.ts); `raw`,
+//                               with its text as read too; null if it is gone
 //   rereadBook(id)              read a kept book again; its record, or null
 //   deleteBook(id)
 // and only the server's, which reads libraries on its disk and indexes the books for search:
@@ -31,6 +33,11 @@ import type { Chapter, Listed } from './parser.ts';
 import type { Reader } from './reading.ts';
 import { entryOf, findBooks, queryString, topTags } from './catalog.ts';
 import type { Listing, Progress, Query, TagCount } from './catalog.ts';
+import { markChapter } from './marks.ts';
+import type { Marked } from './marks.ts';
+
+// a chapter as the page shows it: `length` is that of its text as read
+export type Shown = Listed & Marked & { length: number; content?: string };
 
 // a file dropped on the page: `date` its time (ms)
 export type FileInfo = { name: string; size: number; date?: number };
@@ -47,7 +54,7 @@ export interface Backend {
   tags(limit?: number): Promise<TagCount[]>;
   addBooks(files: (FileInfo & { text: string })[]): Promise<BookRecord[]>;
   book(id: string): Promise<BookRecord | null>;
-  chapter(id: string, listed: Listed): Promise<Chapter | null>;
+  chapter(id: string, listed: Listed, raw?: boolean): Promise<Shown | null>;
   rereadBook(id: string): Promise<BookRecord | null>;
   deleteBook(id: string): Promise<void>;
   status?(): Promise<LibraryStatus>;
@@ -112,7 +119,7 @@ function serverBackend(): Backend {
     tags: (limit = 40) => call('GET', `tags?limit=${limit}`),
     addBooks: (files) => Promise.all(files.map(file => call('POST', 'books', file))),
     book: (bookId) => call('GET', `books/${id(bookId)}`),
-    chapter: (bookId, listed) => call('GET', `books/${id(bookId)}/chapters/${id(listed.id)}`),
+    chapter: (bookId, listed, raw) => call('GET', `books/${id(bookId)}/chapters/${id(listed.id)}${raw ? '?raw=1' : ''}`),
     rereadBook: (bookId) => call('POST', `books/${id(bookId)}/reread`),
     deleteBook: (bookId) => call('DELETE', `books/${id(bookId)}`),
     status: () => call('GET', 'library'),
@@ -194,10 +201,12 @@ async function browserBackend({ readBook }: Reader): Promise<Backend> {
       console.info('Book read again:', { id, parser: book?.parser });
       return backend.rereadBook(id);
     },
-    async chapter(id, listed) {
-      let chapter = await db.get('chapters', `${id}/${listed.id}`);
+    async chapter(id, listed, raw) {
+      let [chapter, names] = await Promise.all([db.get('chapters', `${id}/${listed.id}`), db.get('names', id)]);
+      if (!chapter) return null;
       // the book record is the one that places the chapter, so it holds the offset
-      return chapter && { ...chapter, offset: listed.offset };
+      let { content, ...rest } = { ...(chapter as Chapter), offset: listed.offset };
+      return { ...rest, length: content.length, ...markChapter({ content, offset: listed.offset }, names ?? ''), ...(raw && { content }) };
     },
     async rereadBook(id) {
       let [file, text] = await Promise.all([db.get('files', id), db.get('fileContents', id)]);

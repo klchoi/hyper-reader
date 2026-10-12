@@ -68,7 +68,8 @@ function routes(library: Library): Route[] {
     ['GET', /^\/api\/tags$/, (_, __, query) => library.tags(Number(query.get('limit')) || undefined)],
     ['POST', /^\/api\/books$/, (_, body) => library.addBook(body ?? {})],
     ['GET', /^\/api\/books\/([^/]+)$/, ([id]) => library.book(id)],
-    ['GET', /^\/api\/books\/([^/]+)\/chapters\/([^/]+)$/, ([id, chapterId]) => library.chapter(id, chapterId)],
+    // ?raw=1: with the text as read, besides the lines as the names list corrects them
+    ['GET', /^\/api\/books\/([^/]+)\/chapters\/([^/]+)$/, ([id, chapterId], _, query) => library.chapter(id, chapterId, { raw: query.get('raw') === '1' })],
     ['POST', /^\/api\/books\/([^/]+)\/reread$/, ([id]) => library.rereadBook(id)],
     ['DELETE', /^\/api\/books\/([^/]+)$/, ([id]) => library.deleteBook(id)],
     ['GET', /^\/api\/library$/, () => library.status()],

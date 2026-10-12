@@ -5,13 +5,15 @@
 import { Context, tick, track } from 'ripple';
 import type { Tracked } from 'ripple';
 import { chooseBackend } from './backends.ts';
-import type { Backend, BookRecord, BookSaying, FileInfo, LibraryStatus, Mention, Person, Progress } from './backends.ts';
+import type { Backend, BookRecord, BookSaying, FileInfo, LibraryStatus, Mention, Person, Progress, Shown } from './backends.ts';
 import { PAGE } from './catalog.ts';
 import type { Query, Shelved, TagCount } from './catalog.ts';
-import { articleNames, commandPaletteNames, highlightNames, nameFixer, namesWith, offerFor } from './names.ts';
+import { offerFor, paintChapter, paintTitles } from './names.ts';
 import type { AddNameAt, AddNameOffer } from './names.ts';
+import { markChapter, nameFixer, namesWith } from './marks.ts';
+import type { Marked } from './marks.ts';
 import { bookRoute, chapterAt, createRouter, getColorScheme, markFound, nextTick, toOffset } from './places.ts';
-import type { Chapter, Listed, Route } from './places.ts';
+import type { Listed, Route } from './places.ts';
 import { latinize } from './parser.ts';
 import type { Reader } from './reading.ts';
 
@@ -59,7 +61,9 @@ export function createStore({ reader }: Page) {
   let backend: Backend;
 
   const book = track<BookRecord | null>(null);
-  const chapter = track<Chapter | null>(null);
+  // the chapter open, its lines corrected by the book's names and the names in them marked, as the
+  // backend gave it (see marks.ts)
+  const chapter = track<Shown | null>(null);
   // the chapter asked for, while its text is on its way: the list shows it as the one read
   const opening = track<string | null>(null);
   const progress = track<Record<string, Progress>>({});
@@ -89,6 +93,10 @@ export function createStore({ reader }: Page) {
   const addName = track<AddNameOffer | null>(null);
   // the names as the list corrects them, made again only when the list changes
   const fixNames = track(() => nameFixer(names.value));
+  // while the list is edited, the chapter as what is typed would have it, marked here; and the
+  // chapter as the page shows it, so
+  const edited = track<Marked | null>(null);
+  const shown = track(() => (chapter.value && edited.value ? { ...chapter.value, ...edited.value } : chapter.value));
 
   // what the command palette offers: the books the backend found, or the chapters of the one
   // open, searchable under both spellings of a corrected title
@@ -221,7 +229,7 @@ export function createStore({ reader }: Page) {
   // after a scroll
   let progressTimer: ReturnType<typeof setTimeout> | undefined;
   let unsaved: (() => Promise<void>) | null = null;
-  function saveProgressLater(open: BookRecord, at: Chapter, offset: number, wait: number) {
+  function saveProgressLater(open: BookRecord, at: Listed, offset: number, wait: number) {
     clearTimeout(progressTimer);
     unsaved = () => saveProgress(open, at, offset);
     progressTimer = setTimeout(() => saveNow(), wait);
@@ -233,7 +241,7 @@ export function createStore({ reader }: Page) {
     unsaved = null;
     return save?.() ?? Promise.resolve();
   }
-  async function saveProgress(open: BookRecord, at: Chapter, offset?: number) {
+  async function saveProgress(open: BookRecord, at: Listed, offset?: number) {
     let record: Progress = {
       ...progress.value[open.id],
       offset: offset ?? at.offset,
@@ -293,7 +301,9 @@ export function createStore({ reader }: Page) {
     let sameBook = book.value?.id === record.id;
     book.value = record;
     chapter.value = found;
+    edited.value = null;
     opening.value = null;
+    paintShown();
     togglePalette(false);
     loadNames(record.id);
     saveProgressLater(record, found, position, 10000);
@@ -334,7 +344,7 @@ export function createStore({ reader }: Page) {
     let at = chapter.value;
     if (!open || !at) return;
     // the page can still be showing the chapter we just left
-    if (!(offset >= at.offset && offset <= at.offset + at.content.length)) return;
+    if (!(offset >= at.offset && offset <= at.offset + at.length)) return;
     if (toOffset(router.current().offset) === offset) return;
     router.replace(bookRoute({ bookId: open.id, offset }));
     saveProgressLater(open, at, offset, 3000);
@@ -408,21 +418,67 @@ export function createStore({ reader }: Page) {
   }
 
   // ---- names
-  function highlight() {
-    highlightNames(names.value, articleNames);
+  // the chapter's names put in colour where they were found
+  const paintShown = () => shown.value && paintChapter(shown.value);
+  // and those of the list in the titles of the chapter list, which stay as they are from one
+  // chapter to the next: painted again for another book or list, or `again`
+  let navPainted: { record: BookRecord | null; names: string } | null = null;
+  function paintNav(again = false) {
+    let record = book.value;
+    if (!again && navPainted?.record === record && navPainted.names === names.value) return;
+    navPainted = { record, names: names.value };
+    paintTitles('nl', 'nav a .name', names.value);
   }
+  function highlight() {
+    paintShown();
+    paintNav(true);
+  }
+  const highlightPalette = () => paintTitles('cp', '#command-palette a', names.value, shown.value);
   async function loadNames(bookId: string) {
-    names.value = (await backend.names(bookId)) ?? '';
+    let loaded = (await backend.names(bookId)) ?? '';
+    if (book.value?.id !== bookId) return;
+    names.value = loaded;
+    paintNav();
+  }
+  // the list as it is typed: the chapter is marked here, from its text as stored (asked of the
+  // backend the first time), a moment after the typing stops
+  let stored: { key: string; content: string; offset: number } | null = null;
+  let markTimer: ReturnType<typeof setTimeout> | undefined;
+  function setNames(text: string) {
+    names.value = text;
+    clearTimeout(markTimer);
+    markTimer = setTimeout(async () => {
+      let open = book.value;
+      let at = chapter.value;
+      if (!open || !at) return;
+      let key = `${open.id}/${at.id}`;
+      if (stored?.key !== key) {
+        let found = await backend.chapter(open.id, at, true);
+        if (found?.content == null || chapter.value !== at) return;
+        stored = { key, content: found.content, offset: found.offset };
+      }
+      edited.value = markChapter(stored, names.value);
+      highlight();
+    }, 300);
+  }
+  const toggleNamesEditor = (open: boolean) => { namesEditorOpen.value = open; };
+  // the chapter as the backend marks it with the list saved
+  async function markAgain(open: BookRecord) {
+    clearTimeout(markTimer);
+    let at = chapter.value;
+    let found = at && await backend.chapter(open.id, at);
+    if (found && chapter.value === at) {
+      chapter.value = found;
+      edited.value = null;
+    }
     highlight();
   }
-  const setNames = (text: string) => { names.value = text; };
-  const toggleNamesEditor = (open: boolean) => { namesEditorOpen.value = open; };
   async function saveNames() {
     let open = book.value;
     namesEditorOpen.value = false;
     if (!open) return;
     await backend.saveNames(open.id, `${names.value.trim()}\n`);
-    highlight();
+    await markAgain(open);
   }
   // mousemove and selectionchange fire a lot: the same offer at the same place is left alone
   function showAddName(at: AddNameAt | null) {
@@ -438,8 +494,8 @@ export function createStore({ reader }: Page) {
     names.value = listed;
     getSelection()?.removeAllRanges();
     await backend.saveNames(open.id, `${listed.trim()}\n`);
-    highlight();
-    highlightNames(names.value, commandPaletteNames);
+    await markAgain(open);
+    highlightPalette();
   }
 
   // ---- the command palette
@@ -452,7 +508,7 @@ export function createStore({ reader }: Page) {
     await nextTick();
     document.querySelector<HTMLInputElement>('#command-palette input')?.select();
     highlightMatches();
-    highlightNames(names.value, commandPaletteNames);
+    highlightPalette();
   }
   async function selectCommand(index: number) {
     palette.value = { ...palette.value, selectedIndex: index };
@@ -494,14 +550,14 @@ export function createStore({ reader }: Page) {
         if (palette.value.q !== q || book.value?.id !== open.id) return;
         mentions.value = { q, indexed, total, found: places.slice(0, 200) };
         highlightMatches();
-        highlightNames(names.value, commandPaletteNames);
+        highlightPalette();
       }, 250);
     } else {
       mentions.value = { q, indexed: true, total: 0, found: [] };
     }
     selectCommand(0);
     highlightMatches();
-    highlightNames(names.value, commandPaletteNames);
+    highlightPalette();
   }
   async function runCommand(command: Command | undefined) {
     if (!command) return;
@@ -594,7 +650,7 @@ export function createStore({ reader }: Page) {
 
   return {
     router,
-    book, chapter, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
+    book, chapter, shown, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
     shelves, finding, shuffle, find, findMore,
     fixNames, commands, unlisted, selectedCommand, mentions, searching, status, found,
     start, follow,

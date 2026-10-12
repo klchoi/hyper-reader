@@ -98,26 +98,6 @@ export function chapterAt(chapters: Listed[], offset: unknown) {
   return placed.findLast(chapter => chapter.offset <= at) || placed[0];
 }
 
-export type Line = { text: string; offset: number };
-
-// one paragraph per line, each with the offset it starts at in the book. The
-// reader sees the names corrected, and that changes lengths, so the offsets are
-// read off the text as stored
-const lineSeparator = /\n|<\/?\w+>/gi;
-export function chapterLines(chapter: Chapter, fixNames: (text: string) => string): Line[] {
-  let fixed = fixNames(chapter.content).split(lineSeparator);
-  let lines: Line[] = [];
-  let at = 0;
-  for (let m of chapter.content.matchAll(lineSeparator)) {
-    lines.push({ text: chapter.content.slice(at, m.index), offset: chapter.offset + at });
-    at = m.index + m[0].length;
-  }
-  lines.push({ text: chapter.content.slice(at), offset: chapter.offset + at });
-  // a correction that split or joined a line would shift every line after it
-  if (fixed.length === lines.length) for (let [i, line] of lines.entries()) line.text = fixed[i];
-  return lines;
-}
-
 // a line as the page shows it: a rule, a line of marks set apart, or prose with its links
 export type Piece = string | { href: string };
 export function lineKind(line: string): 'rule' | 'marks' | 'prose' {

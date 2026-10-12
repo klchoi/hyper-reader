@@ -1,16 +1,12 @@
 // The chapter open, a paragraph to a line, each marked with the offset it starts at in the book
-// (see places.ts): a rule, a line of marks set apart, or prose with its links.
+// (the backend's lines, see marks.ts): a rule, a line of marks set apart, or prose with its links.
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
-import { chapterLines, lineKind, linePieces } from './places.ts';
+import { lineKind, linePieces } from './places.ts';
 
 export function ChapterText() @{
   const store = StoreContext.get();
-  const lines = track(() => {
-    let chapter = store.chapter.value;
-    if (!chapter) return [];
-    return chapterLines(chapter, store.fixNames.value).map(line => ({ ...line, kind: lineKind(line.text), pieces: linePieces(line.text) }));
-  });
+  const lines = track(() => (store.shown.value?.lines ?? []).map(line => ({ ...line, kind: lineKind(line.text), pieces: linePieces(line.text) })));
 
   <main>
     <article>

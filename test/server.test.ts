@@ -11,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createServer } from '../server/server.ts';
 import { extractChapters, normalizeFileContent } from '../src/parser.ts';
 import { PARSER_VERSION } from '../src/book.ts';
+import type { Line, Mark } from '../src/marks.ts';
 
 const story = (count: number, who: string) => Array.from({ length: count }, (_, k) => (
   `Hôm ấy nàng đi qua núi ${k % 7 ? 'rừng' : 'suối'} và gặp ${who} bên bờ, nhớ chuyện cũ rất lâu trước kia.`
@@ -120,10 +121,29 @@ describe('the server', () => {
     assert.equal(record.parser, PARSER_VERSION);
     assert.deepEqual(record.chapters.map((c: { title: string }) => c.title), ['Sách thử', 'Chương 1: Tiêu đề 1', 'Chương 2: Tiêu đề 2', 'Chương 3: Tiêu đề 3']);
     let parsed = extractChapters('Sách thử', normalizeFileContent(bookText('Hoàng Dung')), { name: 'Sách thử' });
+    // a line to a paragraph, and the text as read only when asked for
     let { answer: chapter } = await call('GET', `books/${id}/chapters/${parsed[2].id}`);
-    assert.equal(chapter.content, parsed[2].content);
-    assert.equal(chapter.offset, parsed[2].offset);
+    assert.equal(chapter.lines.map((line: Line) => line.text).join('\n'), parsed[2].content);
+    assert.deepEqual([chapter.offset, chapter.length, chapter.content], [parsed[2].offset, parsed[2].content.length, undefined]);
+    assert.equal((await call('GET', `books/${id}/chapters/${parsed[2].id}?raw=1`)).answer.content, parsed[2].content);
     assert.equal((await call('GET', `books/${id}/chapters/no-such-chapter`)).status, 404);
+  });
+  it('corrects a chapter by the names of its book, and says where they are', async () => {
+    let { id } = await bookNamed('Sách thử');
+    let { answer: record } = await call('GET', `books/${id}`);
+    let shown = async () => (await call('GET', `books/${id}/chapters/${record.chapters[2].id}`)).answer;
+    await call('PUT', `names/${id}`, 'Hoàng Dung -> Dung Nhi\n');
+    let chapter = await shown();
+    let [, line] = chapter.lines;
+    assert.match(line.text, /gặp Dung Nhi bên bờ/);
+    // (the offsets are those of the text as read, which the correction made shorter)
+    assert.equal(line.offset, chapter.offset + 'Chương 2: Tiêu đề 2\n'.length);
+    let marked = chapter.marks.filter((mark: Mark) => mark.at === 1);
+    assert.deepEqual(marked.map((mark: Mark) => [line.text.slice(mark.start, mark.end), mark.known]), [['Dung Nhi', true]]);
+    assert.deepEqual(chapter.persons[marked[0].person].ids, ['dung nhi']);
+    // the list changed is the chapter marked again
+    await call('PUT', `names/${id}`, '\n');
+    assert.match((await shown()).lines[1].text, /gặp Hoàng Dung bên bờ/);
   });
   it('keeps the parts of a chapter as the parser gives them', async () => {
     let text = ['Sách phần tác giả: ai đó', 'Chương 1: Trước', story(8, 'A'), ...['thượng', 'trung', 'hạ'].flatMap(p => [`Chương 2: Yoga (${p})`, story(8, 'B')]), 'Chương 3: Sau', story(8, 'C')].join('\n\n');

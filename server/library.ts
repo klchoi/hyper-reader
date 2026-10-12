@@ -14,6 +14,8 @@ import { slug } from '../src/parser.ts';
 import { PARSER_VERSION } from '../src/book.ts';
 import type { BookRecord } from '../src/book.ts';
 import { entryOf, findBooks, topTags } from '../src/catalog.ts';
+import { markChapter } from '../src/marks.ts';
+import type { Marked } from '../src/marks.ts';
 import type { Entry, Progress, Query } from '../src/catalog.ts';
 
 const UPLOADS = 'uploads';
@@ -69,6 +71,18 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
   // what was left unindexed when the server last stopped
   indexer.nudge();
   let fileOf = (row: BookRow) => path.join(roots.get(row.root) ?? '', row.path);
+  // the chapters marked last (see src/marks.ts), with the names list they were marked by: a
+  // chapter read on, or gone back to, is not marked again
+  let marked = new Map<string, { names: string; at: Marked }>();
+  let markedOf = (key: string, content: string, offset: number, names: string) => {
+    let kept = marked.get(key);
+    if(kept?.names === names) return kept.at;
+    let at = markChapter({ content, offset }, names);
+    marked.delete(key);
+    marked.set(key, { names, at });
+    if(marked.size > 16) marked.delete(marked.keys().next().value!);
+    return at;
+  };
   // every book as the library is browsed (see src/catalog.ts), made again once a book came,
   // changed or went
   let catalog: Entry[] | null = null;
@@ -202,14 +216,19 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
       if(row.indexed !== PARSER_VERSION) indexer.first(id);
       return recordOf(row);
     },
-    async chapter(id: string, chapterId: string, again = true): Promise<(ReturnType<typeof listedOf> & { content: string }) | null> {
+    // a chapter as the page shows it: its lines corrected by the book's names list, and the names
+    // in them (see src/marks.ts), and how long its text is; `raw`, with the text as read too (for
+    // the names to be marked as they are edited)
+    async chapter(id: string, chapterId: string, { raw = false, again = true } = {}): Promise<(ReturnType<typeof listedOf> & Marked & { length: number; content?: string }) | null> {
       let row = store.book(id);
       let chapter = row && store.chapters(id).find(c => c.id === chapterId);
       if(!row || !chapter) return null;
       let text = await textOf(row);
       // the file changed since it was read: read again, and the chapter asked of that
-      if(text == null) return again && await library.rereadBook(id) ? library.chapter(id, chapterId, false) : null;
-      return { ...listedOf(chapter), content: text.slice(chapter.offset, chapter.end).trim() };
+      if(text == null) return again && await library.rereadBook(id) ? library.chapter(id, chapterId, { raw, again: false }) : null;
+      let content = text.slice(chapter.offset, chapter.end).trim();
+      let at = markedOf(`${id}/${row.size}/${row.mtime}/${chapterId}`, content, chapter.offset, store.names(id) ?? '');
+      return { ...listedOf(chapter), length: content.length, ...at, ...(raw && { content }) };
     },
     async rereadBook(id: string): Promise<BookRecord | null> {
       let row = store.book(id);

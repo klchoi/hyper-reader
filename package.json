@@ -1,14 +1,15 @@
 {
   "name": "hyper-reader",
   "private": true,
+  "type": "module",
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning server/server.js",
+    "start": "node --disable-warning=ExperimentalWarning server/server.ts",
     "test": "node --disable-warning=ExperimentalWarning --test",
-    "check:books": "node tools/check-books.js",
-    "lint": "oxlint --deny-warnings src lib server test tools vite.config.mjs",
+    "check:books": "node tools/check-books.ts",
+    "lint": "oxlint --deny-warnings src server test tools vite.config.ts",
     "build": "vite build && node -e \"require('node:fs').copyFileSync('dist/hyper-reader.html', 'hyper-reader.html')\"",
     "dev": "vite",
-    "typecheck": "tsrx-tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsrx-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
     "chroma-js": "^2.6.0",
@@ -19,6 +20,7 @@
     "@ripple-ts/vite-plugin": "^0.4.7",
     "@tsrx/typescript-plugin": "^0.6.3",
     "@types/chroma-js": "^2.4.5",
+    "@types/node": "^24.19.2",
     "oxlint": "^1.87.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.4",

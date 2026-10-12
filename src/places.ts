@@ -1,5 +1,6 @@
 // Where the reader is: the url, the place in a book, a chapter as its lines, and how sizes and
 // dates are said. Nothing here keeps state.
+import type { Chapter, Listed } from './parser.ts';
 
 // A place in the page: a book, and where in it (an offset, or for an older link the id of a
 // chapter), or nothing, the library.
@@ -86,8 +87,7 @@ export function toOffset(value: unknown): number | undefined {
   if (Number.isFinite(number)) return number;
 }
 
-export type Listed = { id: string; title: string; offset: number; group?: string; part?: { of: string; text: string } };
-export type Chapter = Listed & { content: string };
+export type { Chapter, Listed };
 
 // the chapter a character offset falls in: the last one starting at or before it.
 // an offset outlives a re-parse that retitles a chapter, which its slug never did

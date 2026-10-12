@@ -10,18 +10,11 @@ import { articleNames, commandPaletteNames, highlightNames, nameFixer, namesWith
 import type { AddNameAt, AddNameOffer } from './names.ts';
 import { bookRoute, chapterAt, createRouter, getColorScheme, markFound, nextTick, toOffset } from './places.ts';
 import type { Chapter, Listed, Route } from './places.ts';
+import { latinize } from './parser.ts';
+import type { Reader } from './reading.ts';
 
-// what the page is given to start with: the parser and what a book is (see load-parser.js),
-// and the reader of books (see reading.js)
-export type Page = {
-  parser: {
-    Book(file: { name: string }): { id: string; name: string; description?: string };
-    bookRecord(book: any): BookRecord;
-    latinize(text: string): string;
-    PARSER_VERSION: number;
-  };
-  reader: { readBook(file: FileInfo, text: string): Promise<any> };
-};
+// what the page is given to start with: the reader of books (see reading.ts)
+export type Page = { reader: Reader };
 
 export type Settings = Record<string, any>;
 // what the palette offers: a book, a chapter, or a place in the book that says what was typed
@@ -53,7 +46,7 @@ function applyDataset(key: string, value: unknown) {
   document.documentElement.dataset[key] = String(value ?? '');
 }
 
-export function createStore({ parser, reader }: Page) {
+export function createStore({ reader }: Page) {
   const router = createRouter();
   let backend: Backend;
 
@@ -83,7 +76,7 @@ export function createStore({ parser, reader }: Page) {
   // under both spellings of a corrected title
   const bookCommands = track(() => books.value.map(({ id, name }) => {
     let { offset, chapterId } = progress.value[id] || {};
-    return { key: `book:${id}`, label: name, open: { bookId: id, offset, chapterId }, term: parser.latinize(name).toLowerCase() };
+    return { key: `book:${id}`, label: name, open: { bookId: id, offset, chapterId }, term: latinize(name).toLowerCase() };
   }));
   const chapterCommands = track(() => {
     let open = book.value;
@@ -91,7 +84,7 @@ export function createStore({ parser, reader }: Page) {
     let fix = fixNames.value;
     return open.chapters.map(listed => {
       let label = fix(listed.title);
-      return { key: `chapter:${listed.offset}`, label, open: { bookId: open.id, offset: listed.offset }, term: parser.latinize(`${label} | ${listed.title}`).toLowerCase() };
+      return { key: `chapter:${listed.offset}`, label, open: { bookId: open.id, offset: listed.offset }, term: latinize(`${label} | ${listed.title}`).toLowerCase() };
     });
   });
   const mentionCommands = track<Command[]>(() => {
@@ -429,7 +422,7 @@ export function createStore({ parser, reader }: Page) {
     for (let link of document.querySelectorAll('#command-palette a')) {
       let text = link.firstChild;
       if (!text) continue;
-      let match = parser.latinize(text.textContent || '').toLowerCase();
+      let match = latinize(text.textContent || '').toLowerCase();
       if (!match.includes(q)) continue;
       let start = match.indexOf(q);
       let range = new Range();
@@ -485,7 +478,7 @@ export function createStore({ parser, reader }: Page) {
   // into a book opens it
   async function start() {
     applySettings({ 'color:dark': 'night', 'color:light': 'white' });
-    backend = await chooseBackend({ readBook: reader.readBook, Book: parser.Book, bookRecord: parser.bookRecord, PARSER_VERSION: parser.PARSER_VERSION });
+    backend = await chooseBackend(reader);
     applySettings(await backend.settings());
     searching.value = !!backend.searchBook;
     loadProgress();
@@ -503,7 +496,7 @@ export function createStore({ parser, reader }: Page) {
   }
 
   return {
-    router, parser,
+    router,
     books, book, chapter, progress, settings, palette, fontPicker, names, namesEditorOpen, addName,
     fixNames, commands, selectedCommand, mentions, searching, status, found,
     start, follow,

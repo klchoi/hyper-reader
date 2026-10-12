@@ -4275,61 +4275,1517 @@ function mount(component, options) {
 	};
 }
 //#endregion
-//#region src/parser.js?raw
-var parser_default = "// The chapter parser: a script of its own, with no imports and no exports, so it can be read as\n// text and run anywhere: in the page (src/reading.js), in a worker made from its text, and in\n// node (lib/parser.js) for the tests, the tools and the server. It touches nothing of the page.\n\nfunction normalizeFileContent(source) {\n  let text = source.normalize();\n  text = text.replace(/[\\r\\n]+/g, '\\n');\n  text = text.replace(/\\t+/g, '\\n');\n  text = text.replace(/(?<=\\S) {2,}(?=\\p{Lu})/gu, '\\n');\n  text = text.replace(/(.+)/g, (s) => s.trim());\n  text = text.replace(/^'([^']+)'$/gm, '\"$1\"');\n  text = text.replace(/(\\d)\\s*(\\.)\\s*(\\d)/gm, '$1$2$3');\n  text = text.replace(/\\s+([.,;:?!\\]】)])/gm, '$1');\n  text = text.replace(/([([【])\\s+/gm, '$1');\n  text = text.replace(/([:—]{2,})/gm, c => c.slice(0, 1));\n  text = text.replace(/(:)[^\\s\\w]+\\s*/gm, '$1 ');\n  text = text.replace(/^\\s*\"\\s+|\\s+\"\\s*$/gm, '\"');\n  //\"QQ Group 712797052\"\n  text = text.replace(/\\s?\"?QQ Group \\d+\"?/gu, '');\n  //tìm sách a \"Cuộc đời này không phụ diên đuôi tình\" cá nhân cải biên\n  text = text.replaceAll('  tìm sách a \"Cuộc đời này không phụ diên đuôi tình\" cá nhân cải biên', '');\n  text = text.replace(/\\b(?<protocol>https?:)(?:\\/\\/)? (?<path>(?:\\w+)(?:\\. \\w+)+(?:\\/(?:(?:\\. )?[\\w/])+)?)/gm, (...args) => {\n    let { protocol, path } = args.pop();\n    path = path.replace(/\\s/g, '');\n    if (protocol) return `${protocol}//${path}`;\n    return path;\n  });\n  text = text.replaceAll('cha mẹ vợ', 'mẹ vợ');\n  return text;\n}\n\n// ---- chapters -----------------------------------------------------------------------\n// A chapter, as the rest of the app knows it:\n//   { id, title, offset, group, part, content }\n// where it starts in the text, what the list calls it, the group (a book, a section)\n// the list puts it under, and its text. `part` is set on a chapter that is one of the parts\n// of a longer one, `{ of, text }`: the list shows `of` once over the parts, and each part\n// as `text` (`(thượng)`, `(2/5)`). The extraction below describes each chapter as a draft -\n// `{ offset, group, heading }` - and finishChapters turns the drafts into these.\n//\n// heading: { type, number, part, title, text }\n//   type    the word before the number: `Chương`, `Hồi`, `Phiên ngoại`\n//   number  `27`, `1-6` for a run of chapters, `kết` for the last one\n//   part    { text: 'thượng', bracketed } after the number (bracketed when it was written\n//           `(thượng)`), { text: 'tiết 2', leading: true } before it\n//   title   what the heading says besides, as written\n//   text    the heading as it stands in the book\n\nfunction chapterTitle({ type = 'Chương', number, part, title, text }, ordinal) {\n  // a lone `/` or `|` after the chapter word was a separator with nothing behind it\n  title = title?.replace(/^[\\s/|\\\\]+/, '') ?? '';\n  let isExtra = (s) => /phiên ngoại/iu.test(s ?? '');\n  let extra = isExtra(text) && !isExtra(title) && !isExtra(type) ? 'Phiên ngoại' : undefined;\n  let label = [extra, number != null && `${type} ${number}`].filter(Boolean).join(' ');\n  let named = [label, title.replace(/./, c => c.toUpperCase())].filter(Boolean).join(': ');\n  let shown = part && !title.includes(`(${part.text})`) ? part : null;\n  let full = [shown?.leading && `${shown.text}:`, named, shown && !shown.leading && `(${shown.text})`].filter(Boolean).join(' ');\n  return full || `${type} ${ordinal + 1}`;\n}\n\n// the part a heading names after its title: `Yoga (thượng)`, `Dạ tập (nhị)`, `Chỉ nhiên (3)`,\n// `Khánh công yến (hạ 6)【động đồ】`, or before it (`tiết 2`), as { stem, word, number, order,\n// bracketed, tag }: the title without the part, the part as written, its number if it is\n// written as one (`nhị` is 2, `thượng` is none), where it comes among the parts, whether it\n// was in brackets, and a tag after it. A note in brackets (`(tu)`, `(nhuận)`) is no part\nconst PART_MARK = /\\s*[(（]\\s*([^()（）]{1,16}?)\\s*[)）]\\s*(【[^】]*】)?\\s*$/u;\nfunction partMark({ title = '', part }) {\n  let marked = PART_MARK.exec(title);\n  // a stray mark beside the part is none of it: `(lục ·)`\n  let bare = (written) => written?.toLowerCase().replace(/^[\\s\\p{P}]+|[\\s\\p{P}]+$/gu, '');\n  let word = bare(part?.text ?? marked?.[1]);\n  if(!word) return null;\n  let number = part?.leading ? Number(/\\d+$/.exec(word)?.[0] ?? NaN)\n    : /^\\d+$/.test(word) ? Number(word)\n    : word in HALF_WORDS ? null : valueOfPart(word);\n  if(Number.isNaN(number)) number = null;\n  let half = /^(thượng|trung|hạ)(?:\\s+(\\d+))?$/u.exec(word);\n  if(number == null && !half) return null;\n  // `hạ 1`, `hạ 2` come after `hạ` and before each other\n  let order = number ?? HALF_WORDS[half[1]] + (half[2] ?? 0) / 1000;\n  let ours = bare(marked?.[1]) === word;\n  return {\n    stem: (ours ? title.slice(0, marked.index) : title).trim(), word, number, order,\n    bracketed: ours || !!part?.bracketed, tag: ours ? marked[2] : undefined,\n  };\n}\n\n// A chapter written in parts: the parts follow one another, in one book, with the one title\n// and a part after it (`Yoga (thượng)`, `Yoga (hạ)`), under the one number or numbers that\n// follow on. Each part is given `{ of, text }`: the title of the whole (`Chương 9-10: Yoga`),\n// and the part, as written or, when the parts are numbers, as `2/5`, in the brackets it was\n// written in: `(thượng)`, `(2/5)`. A chapter just before the parts with their title and no\n// part of its own is their first part when the next is the second (`Na Trát`, then `Na Trát\n// (2)`), and their heading when the next is the first and it holds nothing but its heading\n// (`Thứ 13 chương tam đối`): it is given `{ of, head: true }`, and parts that left the title\n// out are given the one it says as `title`. One with a text of its own stays a chapter\nfunction partsOf(drafts, text) {\n  let headingOnly = (i) => text.slice(drafts[i].offset, drafts[i + 1]?.offset ?? text.length)\n    .split('\\n').filter(line => line.trim()).length <= TUNING.drafts.headingLines;\n  let marks = drafts.map(({ heading }) => heading && partMark(heading));\n  // `Thứ 55 chương` and a bare `56` are both chapters\n  let together = (a, b) => drafts[a].group === drafts[b].group\n    && (drafts[a].heading.type ?? 'Chương') === (drafts[b].heading.type ?? 'Chương');\n  // how far the numbers go on from chapter a to chapter b, `152-153` to `154` being one\n  let numbers = (i) => String(drafts[i].heading.number ?? '').split('-').map(Number);\n  let step = (a, b) => drafts[a].heading.number === drafts[b].heading.number ? 0 : numbers(b)[0] - numbers(a).at(-1);\n  marks.forEach((mark, i) => {\n    let next = marks[i + 1];\n    let title = drafts[i].heading?.title?.trim();\n    if(mark || !next || !title || !together(i, i + 1) || step(i, i + 1) > 1) return;\n    // parts that leave the title out, under the number of the chapter that gave it:\n    // `Chương 13: Tam đối`, then `Chương 13 (thượng)`, `(trung)`, `(hạ)`\n    let untitled = next.stem === '' && step(i, i + 1) === 0;\n    if(title.toLowerCase() !== next.stem.toLowerCase() && !untitled) return;\n    let second = next.number != null ? next.number === 2 : next.order > 1;\n    let first = next.number != null ? next.number === 1 : next.order === 1;\n    if(second) marks[i] = { stem: title, word: next.number != null ? '1' : 'thượng', number: next.number != null ? 1 : null, order: 1, bracketed: next.bracketed };\n    else if(first && headingOnly(i)) marks[i] = { stem: title, head: true, order: 0 };\n    else return;\n    for(let j = i + 1; untitled && marks[j]?.stem === '' && step(i, j) === 0; j++) marks[j] = { ...marks[j], stem: title, given: title };\n  });\n  let follows = (a, b) => {\n    if(!marks[a] || !marks[b] || marks[b].head || !together(a, b)) return false;\n    if(marks[a].stem.toLowerCase() !== marks[b].stem.toLowerCase()) return false;\n    // a book may skip a number between two parts with a title\n    let named = marks[a].stem !== '';\n    let s = step(a, b);\n    if(!(s === 0 || s === 1 || (named && s === 2))) return false;\n    // the parts go forward: `27 (hạ)` then `28 (thượng)` is the next chapter's first part.\n    // The same part again is the book repeating it\n    return marks[b].order > marks[a].order || (marks[b].order === marks[a].order && (s === 0 || named));\n  };\n  let parts = new Array(drafts.length);\n  for(let start = 0, end; start < drafts.length; start = end) {\n    for(end = start + 1; end < drafts.length && follows(end - 1, end); end++);\n    if(end - start < 2) continue;\n    let [first, last] = [drafts[start].heading, drafts[end - 1].heading];\n    let number = first.number === last.number ? first.number : `${numbers(start)[0]}-${numbers(end - 1).at(-1)}`;\n    let of = chapterTitle({ ...first, number, part: undefined, title: marks[start].stem }, start);\n    let run = marks.slice(start, end);\n    let shown = run.filter(m => !m.head);\n    let numbered = shown.every(m => m.number != null);\n    let total = Math.max(new Set(shown.map(m => m.order)).size, ...shown.map(m => m.number ?? 0));\n    run.forEach((m, k) => {\n      let said = numbered ? `${m.number}/${total}` : m.word;\n      parts[start + k] = m.head ? { of, head: true } : { of, text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(' '), title: m.given };\n    });\n  }\n  return parts;\n}\n\n// the drafts, in order, as chapters: each one runs to where the next begins. The heading of\n// a chapter's parts holds nothing but itself, so it begins the first part, which opens with\n// the chapter's title, and the parts that left the title out take it\nfunction finishChapters(drafts, text) {\n  let parts = partsOf(drafts, text);\n  let kept = [];\n  drafts.forEach((draft, i) => {\n    if(parts[i]?.head) return;\n    let { of, text: shown, title } = parts[i] ?? {};\n    kept.push({\n      ...draft,\n      offset: parts[i - 1]?.head ? drafts[i - 1].offset : draft.offset,\n      heading: title ? { ...draft.heading, title } : draft.heading,\n      part: parts[i] && { of, text: shown },\n    });\n  });\n  return kept.map(({ offset, group, heading, part }, i) => {\n    let title = chapterTitle(heading, i);\n    let end = kept[i + 1]?.offset ?? text.length;\n    return { id: `${slug(title)}-${i}`, title, offset, group, part, content: text.slice(offset, end).trim() };\n  });\n}\n\n// ---- tuning -------------------------------------------------------------------------\n// Every number the parser was tuned with, and what it is for. They were set by running\n// the parser over a library of books (tools/check-books.js); change one and run it again.\nconst TUNING = {\n  // 3. how much a heading speaks for itself, 0 to 10, before the book's own style weighs in\n  base: {\n    decimal: 2,          // `3.07` is hardly ever anything but a chapter\n    digits: 1.5,         // a number in digits, bare, beside a title: sentences rarely begin with one\n    thien: -4,           // `Cửu thiên chi thượng ...`: `thiên` is a chapter word only now and then\n    phraseAlone: 1,      // `Kỳ Bạch Tuyết (nhất)` with nothing after it\n    bookAlone: 3,        // a book heading on its own line, or `Quyển thứ nhất: Kinh thành phong vân`\n    bookTitle: 8,        // `Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`, one of the books a file holds\n    bookTitleMax: 40,    // ...with a title no longer than this\n    bookProse: -10,      // a book word that begins a sentence: `Hai bộ ngực ...`\n    markerProseMax: 2,   // the most a paragraph running on behind `Chương 10:` counts against it\n    titlePage: -6,       // `【NAME】1-74 tác giả: ...`\n    roman: -2,           // roman numerals read as a word more often than as a number\n    inline: 3,           // a heading in the middle of a line\n    inlineTitleMax: 80,  // and the title it is given, in characters\n  },\n  // 3. how much a line reads like a sentence of the story and not like a title\n  prose: {\n    longerThan: 100, long: 3,         // a line this long\n    commas: 2, manyCommas: 2,         // this many commas\n    oneCommaOver: 40, oneComma: 1,    // one comma in a line this long\n    sentenceOver: 50, sentence: 2,    // a line this long that ends like a sentence\n  },\n  // 4. the path: what a step from one heading to the next is worth\n  reward: {\n    next: 8,             // n after n-1\n    gap: 3,              // taken off for each number a jump skips\n    repeat: 3,           // the same heading again, close by\n    boundary: 7,         // the numbers start over where a book or extra begins\n    carryOn: 4,          // ...or go on from where the book before stopped\n    restart: -6,         // ...and where nothing says so\n    half: 4,             // the next part of a chapter\n    end: 6,              // the last chapter\n    interlude: 1,        // a piece set between two chapters\n  },\n  path: {\n    threshold: 4.5,      // what a heading must be worth to be on the path by itself\n    closeLines: 3,       // lines apart that two headings may still be one\n    gapMax: 4,           // numbers a jump may skip\n    smallNumber: 3,      // a number up to this may be the first of a book\n    startAlone: 3,       // worth of a path that starts at a small number...\n    startFar: -6,        // ...and at any other\n    lateStartCost: 4,    // a book that starts at a big number, off the boundary reward\n    lateStartCap: 10,    // ...up to this many\n    opensExtraLines: 4,  // lines after `Kỳ Bạch Tuyết phiên ngoại` its first chapter may stand\n    breakMinBase: 6,     // how much a heading must say for itself to break the numbers\n    unnamedFrom: 6,      // the numbers starting over after this many chapters is a new book...\n    unnamedUpTo: 2,      // ...when they start over at this or lower\n    endLookback: 40,     // headings back an end (`Chương kết`) looks for the chapter it closes\n    endMin: 2,           // ...which must be at least this number\n    skippedBooksMax: 3,  // books never named that a named one may skip over\n  },\n  // 4. how far a shape is trusted, by how much of it landed on the path\n  trust: { scale: 6 },\n  // 4. a heading with a line or so before the next, in a book of long chapters\n  tiny: { typicalAtLeast: 30, lines: 2 },\n  // 4. a contents list at the head of a book: this many entries, from the least to the most\n  contents: { minEntries: 3, maxEntries: 60 },\n  // 4. weak headings taken back to fill a gap: the first of a book up to this number\n  fill: { firstMax: 4 },\n  // 5. the drafts\n  drafts: {\n    titleMax: 100,       // characters of a title, before a paragraph running on is cut\n    seriesMin: 8,        // headings that begin alike, to be a series\n    seriesOver: 1.2,     // ...and more than the numbered headings by this factor\n    pageParagraphs: 60,  // paragraphs to a page, when a book has no headings\n    headingLines: 2,     // lines of a chapter that holds nothing but its heading (of its parts)\n  },\n};\n\n// ---- the parser ---------------------------------------------------------------------\n// Contents, in the order of the file:\n//   1. Words and numbers   `hai mươi tư`, `nhất lẻ một`, `XIV` as numbers\n//   2. Lines into tokens   a line as a string of classes (number, chapter word, bracket, ...)\n//   3. Headings            the shapes a heading takes, and the candidate found at each line\n//   4. The path            the best way through the candidates, and the checks around it\n//   5. Drafts              the path as chapters, or pages, or a series, and the title page\n//   6. extractChapters     the whole, in a few lines\n//\n// The headings of a book are the lines whose numbers run in sequence: 1, 2, 3 ... A line\n// that merely looks like a heading (`Một giờ sau...`, `Kết quả là...`) has a number that\n// fits nowhere in that sequence, so the sequence is what is looked for, not the look.\n//\n//   findCandidates    every line that could be a heading, read into a node (number,\n//                       marker words, book, title) with how much its shape speaks for it\n//   chooseHeadings    the best path through the nodes: a number followed by the next one\n//                       scores, a repeat close by is the same heading, a jump costs, a\n//                       book or an extra (phiên ngoại) may start the numbers over\n//   buildChapters     the chosen nodes become chapters, with their title and book\n//\n// A shape (`【N】`, `Chương N: T`, `(N) T`) that mostly lands on the path is trusted\n// more on a second look, so a book's own style outweighs the one-off lines.\n\n// ==== 1. Words and numbers ===================================================================\nconst WORD_DIGITS = { một: 1, mốt: 1, hai: 2, ba: 3, bốn: 4, tư: 4, năm: 5, lăm: 5, sáu: 6, bảy: 7, tám: 8, chín: 9 };\nconst SINO_DIGITS = { nhất: 1, nhị: 2, tam: 3, tứ: 4, ngũ: 5, lục: 6, thất: 7, bát: 8, cửu: 9 };\n// the units that may follow `mươi`: `hai mươi tư` is 24, `ba mươi mốt` 31 (`mốt` and `lăm` are\n// the forms a unit takes there)\nconst TENS_UNITS = ['mốt', 'hai', 'ba', 'bốn', 'tư', 'lăm', 'sáu', 'bảy', 'tám', 'chín'];\n\n// the longest number the words at `i` read as: { value, length } in words, or null\nfunction readNumberWords(words, i) {\n  let w = (k) => words[i + k];\n  let best = null;\n  let take = (value, length) => {\n    if(!best || length > best.length) best = { value, length };\n  };\n  // 100-199 read out digit by digit: `nhất lẻ loi` is 100, `nhất lẻ một` 101,\n  // `nhất nhất linh` 110. `lẻ loi` stands for two zeros, `lẻ` and `linh` for one\n  if(w(0) === 'nhất') {\n    let digit = (x) => (x === 'lẻ' || x === 'linh') ? 0 : (SINO_DIGITS[x] ?? WORD_DIGITS[x]);\n    if(w(1) === 'lẻ' && w(2) === 'loi') take(100, 3);\n    if(['lẻ', 'linh', ...Object.keys(SINO_DIGITS)].includes(w(1)) && digit(w(2)) != null) {\n      take(100 + 10 * digit(w(1)) + digit(w(2)), 3);\n    }\n  }\n  if(w(0) === 'mười') {\n    take(10, 1);\n    if(w(1) in WORD_DIGITS && w(1) !== 'tư') take(10 + WORD_DIGITS[w(1)], 2);\n  }\n  if(w(0) in WORD_DIGITS) {\n    take(WORD_DIGITS[w(0)], 1);\n    if(w(1) === 'mươi') {\n      let tens = 10 * WORD_DIGITS[w(0)];\n      take(tens, 2);\n      if(TENS_UNITS.includes(w(2))) take(tens + WORD_DIGITS[w(2)], 3);\n    }\n  }\n  let sino = (k) => SINO_DIGITS[w(k)];\n  if(w(0) === 'thập') {\n    take(10, 1);\n    if(sino(1)) take(10 + sino(1), 2);\n  }\n  if(sino(0)) {\n    take(sino(0), 1);\n    if(w(1) === 'thập') {\n      take(sino(0) * 10, 2);\n      if(sino(2)) take(sino(0) * 10 + sino(2), 3);\n    }\n  }\n  return best;\n}\n\nconst ROMAN_VALUES = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };\nfunction readRoman(word) {\n  if(!/^[IVXLCDM]+$/.test(word)) return null;\n  let total = 0;\n  for(let k = 0; k < word.length; k++) {\n    let [a, b] = [ROMAN_VALUES[word[k]], ROMAN_VALUES[word[k + 1]] ?? 0];\n    total += a < b ? -a : a;\n  }\n  return total > 0 && total < 4000 ? total : null;\n}\n\n// ==== 2. Lines into tokens ===================================================================\n// A token's class is one letter:\n//   N number   E end word (kết, cuối)   c chapter word   p phiên ngoại / ngoại truyện\n//   b book word   t thứ / đệ   f tiết   h thượng / trung / hạ\n//   n the book's own name   L opening bracket   R closing bracket   S other mark   x any word\nconst CHAPTER_WORDS = { chương: 'Chương', hồi: 'Hồi', thiên: 'Thiên' };\nconst BOOK_WORDS = { quyển: 'Quyển', tập: 'Tập', bộ: 'Bộ', cuốn: 'Cuốn', quý: 'Quý' };\nconst HALF_WORDS = { thượng: 1, trung: 2, hạ: 3 };\n// the words that are a class of token by themselves (a class and what it carries), and the\n// phrases of two words that are\nconst KNOWN_WORDS = new Map([\n  ...Object.entries(CHAPTER_WORDS).map(([word, shown]) => [word, ['c', { word: shown }]]),\n  ...Object.entries(BOOK_WORDS).map(([word, shown]) => [word, ['b', { word: shown }]]),\n  ...Object.entries(HALF_WORDS).map(([word, value]) => [word, ['h', { value, word }]]),\n  ['thứ', ['t', {}]], ['đệ', ['t', {}]], ['tiết', ['f', {}]],\n]);\nconst KNOWN_PHRASES = [['phiên ngoại', 'p', 'Phiên ngoại'], ['ngoại truyện', 'p', 'Ngoại truyện'], ['giai đoạn', 'b', 'Giai đoạn']];\n\n// the token a word or a phrase of two begins, as [class, what it carries, its length], or null\nfunction readKnownWord(word, lower, pos) {\n  for(let [phrase, cls, shown] of KNOWN_PHRASES) {\n    if(lower.startsWith(phrase, pos)) return [cls, { word: shown }, phrase.length];\n  }\n  let known = KNOWN_WORDS.get(word);\n  return known && [...known, word.length];\n}\n\nconst OPENERS = '【[(（《“\"«';\nconst CLOSERS = '】])）》”\"»';\n\nfunction lexLine(line, lower, names) {\n  let tokens = [];\n  let pos = 0;\n  while(pos < line.length && tokens.length < 18) {\n    let ch = line[pos];\n    if(/\\s/.test(ch)) { pos++; continue; }\n    let add = (cls, end, extra = {}) => {\n      tokens.push({ cls, s: pos, e: end, text: line.slice(pos, end), ...extra });\n      pos = end;\n    };\n    let name = names.find(n => lower.startsWith(n, pos) && !/\\p{L}/u.test(lower[pos + n.length] ?? ''));\n    if(name) { add('n', pos + name.length); continue; }\n    if(OPENERS.includes(ch)) { add('L', pos + 1); continue; }\n    if(CLOSERS.includes(ch)) { add('R', pos + 1); continue; }\n    if(/\\d/.test(ch)) {\n      let m = /^\\d+(?:\\.\\d+)?/.exec(line.slice(pos));\n      let [major, minor] = m[0].split('.');\n      // `0.05` is a fraction (a countdown, a price), not chapter 5 of a book 0\n      if(minor != null && Number(major) === 0) { add('x', pos + m[0].length); continue; }\n      // `3.40` is chapter 40 of book 3\n      add('N', pos + m[0].length, { value: Number(minor ?? major), book: minor == null ? null : Number(major), digits: true });\n      continue;\n    }\n    let word = /^\\p{L}+/u.exec(line.slice(pos));\n    if(!word) { add('S', pos + 1); continue; }\n    word = word[0];\n    // the words that follow, for the numbers that take several\n    let words = [lower.slice(pos, pos + word.length)];\n    let ahead = pos + word.length;\n    for(let k = 0; k < 4; k++) {\n      let next = /^ \\p{L}+/u.exec(line.slice(ahead));\n      if(!next) break;\n      words.push(lower.slice(ahead + 1, ahead + next[0].length));\n      ahead += next[0].length;\n    }\n    let number = readNumberWords(words, 0);\n    if(number) {\n      // the end of the last word it read\n      let end = pos;\n      for(let k = 0; k < number.length; k++) end += (k ? 1 : 0) + words[k].length;\n      add('N', end, { value: number.value, sino: words[0] in SINO_DIGITS || words[0] === 'thập' });\n      continue;\n    }\n    let roman = readRoman(word);\n    let lowered = words[0];\n    let end = pos + word.length;\n    let known = readKnownWord(lowered, lower, pos);\n    if(roman != null && word.length <= 7) add('N', end, { value: roman, roman: true });\n    else if(known) add(known[0], pos + known[2], known[1]);\n    else if(lowered === 'kết' || lowered === 'cuối') {\n      // `Chương kết` ends the book; `Kết quả là` and `Cuối cùng` are only sentences\n      let after = /^\\s*(\\S)/.exec(line.slice(end));\n      let lone = !after || /[^\\p{L}\\p{N}]/u.test(after[1]);\n      add(lone ? 'E' : 'x', end, { word: lowered });\n    }\n    else add('x', end);\n  }\n  return tokens;\n}\n\n// ==== 3. Headings ============================================================================\n// A heading found in the text, a candidate for a chapter. Every one has all of these:\n//   kind      'chap' | 'book' | 'extrahead' | 'half' | 'interlude'\n//   base      how much it speaks for itself, 0-10, before the book's own style weighs in\n//   where     index (in the text), start (in its line), ord (the rank of its line among the\n//             lines that have anything in them)\n//   said      text (the heading as written), title (what follows), rest (the line after it),\n//             whole (nothing follows)\n//   shape     what it looks like, for the trust a book gives that look\n//   chapter   n, span (the last of a run: `7-10`), end / endWord (`kết`, `cuối`), chapType,\n//             extra (phiên ngoại), and a part of it: half (1 thượng, 2 trung, 3 hạ, or a\n//             number), halfText, halfBracketed (written `(hạ)`), halfNum, halfType\n//   book      bookNum, bookType, and bookName for a book that names itself and has no\n//             number (`Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`)\n//   outer     the section it is a part of: `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`\n//   inline    found in the middle of a line, not at its start\nconst HEADING_DEFAULTS = {\n  kind: 'chap', base: 0, index: 0, start: 0, ord: 0, text: '', title: '', rest: '', whole: false, shape: '',\n  n: null, span: null, end: false, endWord: null, chapType: null, extra: false,\n  half: null, halfText: null, halfBracketed: false, halfNum: null, halfType: null,\n  bookNum: null, bookType: null, bookName: null, outer: null, inline: false,\n};\n\nfunction heading(fields) {\n  for(let key in fields) if(!(key in HEADING_DEFAULTS)) throw new Error(`a heading has no ${key}`);\n  return { ...HEADING_DEFAULTS, ...fields };\n}\n\n// the shapes a heading can take, over the token classes. The first that fits wins\nconst DECOR = '[LS]*';\nconst NAME_PART = '(?:nR?S?)?';\nconst BOOK_PART = '(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?';\n// the book after the chapter, in brackets: `Thứ 1 chương (bộ 02) chi du thuyền xuân sắc`\nconst BOOK_AFTER = '(?:L(?<bm4>b)t?(?<bn4>N)R)?';\nconst HEADING_RULES = [\n  // Chương 5 | Chương kết | Thứ 5 chương | Ba mươi tám chương | Quyển 2 Chương 7 | 【NAME】 Chương 5\n  // | Thứ 1 chương (bộ 02)\n  { kind: 'chap', base: 9, re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))${BOOK_AFTER}` },\n  // Phiên ngoại: 【1】 title\n  { kind: 'chap', base: 9, re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?` },\n  // Thứ 7-10 chương: several chapters under one heading\n  { kind: 'chap', base: 9, re: `^${DECOR}(?<tt>t)?(?<cn>N)S(?<cn3>N)(?<cm2>c)` },\n  // 【NAME】9 | NAME #3 | NAME (5) | 《NAME》2\n  { kind: 'chap', base: 7, re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?` },\n  // Quyển thứ ba 3: the chapter's number follows its book's\n  { kind: 'chap', base: 7, re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}${DECOR}(?<cn>N)` },\n  // Quyển thứ hai | Bộ 2 | Thứ 4 cuốn\n  { kind: 'book', base: 6, re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}` },\n  // Kỳ Bạch Tuyết phiên ngoại\n  { kind: 'extrahead', base: 5, re: '^[LS]*x{1,8}(?<pm>p)$' },\n  // Tiết thứ hai | Thứ 1 tiết\n  { kind: 'half', base: 5, re: '^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)' },\n  // Nhất, trong sương mù đường về: a Sino-Vietnamese ordinal and a comma\n  { kind: 'chap', base: 5, weakTitled: 4.5, sino: true, re: '^(?<cn>N)(?<sep>S)' },\n  // (5) | 【nhất】 | 5. | 22) | 2,\n  { kind: 'chap', base: 5, weakTitled: 3, re: '^L?(?<cn>N)R?' },\n  // Phòng tắm thiên Chương 1: a few words, then the chapter\n  { kind: 'chap', base: 6, re: '^[LS]*(?<pre>[xc]{1,6})(?<cm>c)(?<cn>N)(?![xNE])' },\n  // Kỳ Bạch Tuyết (nhất) | Kiều thê chuyện xưa (nhất) | Quy tắc quái đàm — mới vào học viện (1)\n  { kind: 'chap', base: 4, re: '^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R' },\n  // (hạ)\n  { kind: 'half', base: 5, re: '^(?<hl>L)?(?<hm>h)R?$' },\n].map(rule => ({ ...rule, re: new RegExp(rule.re, 'd') }));\n\n// the title a line carries after its heading: no separator left in front, no bracket behind\nfunction cleanTitle(rest) {\n  let title = rest.replace(/^[\\s:：.,\\-—–/|)\\]】”\"»*#!]+/u, '').trimEnd();\n  // a closing bracket with nothing opened before it goes; one that closes a tag stays\n  while(/[】\\]”\"»]$/u.test(title) && (title.match(/[】\\]”\"»]/gu) || []).length > (title.match(/[【[“«]/gu) || []).length) {\n    title = title.slice(0, -1).trimEnd();\n  }\n  return title;\n}\n\n// how much a line reads like a sentence of the story and not like a title\nfunction proseCost(rest) {\n  let t = TUNING.prose;\n  let cost = 0;\n  let commas = (rest.match(/[,;]/g) || []).length;\n  if(rest.length > t.longerThan) cost += t.long;\n  if(commas >= t.commas) cost += t.manyCommas;\n  else if(commas === 1 && rest.length > t.oneCommaOver) cost += t.oneComma;\n  if(rest.length > t.sentenceOver && /[.!?…\"”]$/.test(rest)) cost += t.sentence;\n  return cost;\n}\n\nfunction leadingTitle(m, tokens, line, rest) {\n  let span = m.indices.groups.pre ?? m.indices.groups.ph;\n  if(!span) return null;\n  let words = tokens.slice(span[0], span[1]);\n  let dash = m.indices.groups.ph ? words.findLastIndex(t => t.cls === 'S') : -1;\n  let from = words[dash + 1] ?? words[0];\n  return cleanTitle([line.slice(from.s, words.at(-1).e), cleanTitle(rest)].filter(Boolean).join(' '));\n}\n\n// what a matched rule says: the chapter's number, its markers, the book and half it names\nfunction readRoles(rule, at) {\n  let roles = {};\n  let number = at('cn') ?? at('cn2');\n  let marker = at('cm') ?? at('cm2');\n  if(rule.kind === 'chap') {\n    if(number.cls === 'E') Object.assign(roles, { end: true, endWord: number.word });\n    else {\n      roles.n = number.value;\n      if(number.book != null) roles.bookNum = number.book;\n    }\n    if(marker) {\n      roles.chapType = marker.word ?? marker.text;\n      if(marker.cls === 'p' || at('pm0')) {\n        roles.extra = true;\n        roles.chapType = (at('pm0') ?? marker).word;\n      }\n    }\n  }\n  if(at('cn3')) roles.span = at('cn3').value;\n  let bookNumber = at('bn') ?? at('bn2') ?? at('bn3') ?? at('bn4');\n  if(bookNumber) {\n    roles.bookNum = bookNumber.value;\n    roles.bookType = (at('bm') ?? at('bm2') ?? at('bm3') ?? at('bm4')).word;\n  }\n  if(rule.kind === 'extrahead') roles.extra = true;\n  if(rule.kind === 'half') {\n    let numbered = at('hn') ?? at('hn2');\n    if(numbered) Object.assign(roles, { halfNum: numbered.value, halfType: 'tiết', half: numbered.value });\n    else Object.assign(roles, { half: at('hm').value, halfText: at('hm').word, halfBracketed: !!at('hl') });\n  }\n  return { roles, number, marker };\n}\n\n// how much the heading speaks for itself, 0-10, before the book's own style weighs in\nfunction baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase, titled }) {\n  let base = rule.base;\n  // a bare number with a title after it is the weakest shape of all; in digits less so\n  if(rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? TUNING.base.decimal : 0) + (number?.digits ? TUNING.base.digits : 0);\n  // `3.07` is hardly ever anything but a chapter\n  else if(number?.book != null) base += TUNING.base.decimal;\n  if(marker?.cls === 'c' && marker.word === 'Thiên') base += TUNING.base.thien;\n  if(hasPhrase && whole) base += TUNING.base.phraseAlone;\n  // a book heading must stand on its own line to be believed, or be followed by a colon and\n  // a short title (`Quyển thứ nhất: Kinh thành phong vân`): `Hai bộ ngực...` is prose\n  // (`(quyển thứ nhất: Hoàn!)` ends a volume, it does not open one; a phase is only a heading alone)\n  let ending = /(?:^|\\s)(?:hoàn|xong|kết thúc)(?:$|[\\s.!)])/iu.test(title);\n  let bookMax = TUNING.base.bookTitleMax;\n  if(rule.kind === 'book') base += whole || (titled && title.length <= bookMax && !ending) ? TUNING.base.bookAlone : (title.length > bookMax || ending || roles.bookType === 'Giai đoạn' ? TUNING.base.bookProse : 0);\n  // a heading with its marker (`Chương 10: ...`) is still one when the paragraph runs on\n  // behind it on the same line; only a bare number is made doubtful by that\n  base -= marker ? Math.min(proseCost(title), TUNING.base.markerProseMax) : proseCost(title);\n  // the title page: `【NAME】1-74 tác giả: ...`\n  if(/tác giả/.test(rest) || /^\\s*[-–~]\\s*\\d/.test(rest)) base += TUNING.base.titlePage;\n  if(hasRoman) base += TUNING.base.roman;\n  return base;\n}\n\n// the classes up to the heading's end, runs of words as one. A number written in\n// digits is told from one in words: sentences begin with `Một` by the hundred and with\n// `192` almost never, and `3.07` is a chapter\nfunction shapeOf(tokens, length, whole) {\n  let spelled = tokens.slice(0, length).map(t => t.cls !== 'N' ? t.cls : t.book != null ? 'D' : t.digits ? '#' : 'N').join('');\n  return spelled.replace(/x+/g, 'X') + (whole ? '' : 'T');\n}\n\n// `Chính văn` (the main text, as against the extras) labels a heading and is no part of it\nconst SECTION_LABEL = /^\\s*chính văn\\s+(?=\\S)/iu;\n\n// a chapter in parts: `Chương 27: (thượng)`, `Chương 44: (nhất)`, or a title that ends in\n// `(hạ)`. The parts are shown one by one, each as the part of its chapter\nfunction partOf(title) {\n  let alone = /^\\(\\s*(\\p{L}+(?: \\p{L}+)*)\\s*\\)$/u.exec(title);\n  if(alone) {\n    let value = valueOfPart(alone[1].toLowerCase());\n    if(value != null) return { half: value, halfText: alone[1].toLowerCase(), title: '' };\n  }\n  let ending = /\\s*\\((thượng|trung|hạ)\\)$/iu.exec(title);\n  if(ending) return { half: HALF_WORDS[ending[1].toLowerCase()], halfText: ending[1].toLowerCase(), title };\n  return null;\n}\n\n// the number a part is written as: `thượng` is 1, `hạ` 3, `nhất` 1, `hai mươi` 20; null if it is no number\nfunction valueOfPart(word) {\n  if(word in HALF_WORDS) return HALF_WORDS[word];\n  let words = word.split(' ');\n  let number = readNumberWords(words, 0);\n  return number?.length === words.length ? number.value : null;\n}\n\n// `Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`: the title of one of the books a file holds\nconst BOOK_TITLE = /^\\s*tên sách\\s*[:：]\\s*(\\S.*?)\\s*$/iu;\n\nfunction readHeading(line, lower, names) {\n  if(line.length > 400) return null;\n  let named = BOOK_TITLE.exec(line);\n  if(named) {\n    return heading({ kind: 'book', base: TUNING.base.bookTitle, bookName: named[1], title: named[1], text: line.trim(), start: line.search(/\\S/), shape: 'named' });\n  }\n  let label = SECTION_LABEL.exec(line);\n  if(label) {\n    let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names);\n    return node && { ...node, start: label[0].search(/\\S/) };\n  }\n  let tokens = lexLine(line, lower, names);\n  if(!tokens.some(t => 'NEhbp'.includes(t.cls))) return null;\n  let classes = tokens.map(t => t.cls).join('');\n  for(let rule of HEADING_RULES) {\n    let m = rule.re.exec(classes);\n    if(!m) continue;\n    let at = (group) => {\n      let span = m.indices.groups[group];\n      return span ? tokens[span[0]] : null;\n    };\n    // `một hồi` (a while) and `chín thiên` are not chapters: only `chương` follows a number alone\n    if(at('cm2') && at('cm2').word !== 'Chương' && !at('tt')) continue;\n    if(rule.sino && (!at('cn').sino || at('sep').text !== ',')) continue;\n    let last = tokens[m[0].length - 1];\n    let rest = line.slice(last.e);\n    let whole = !/\\S/.test(rest);\n    let read = readRoles(rule, at);\n    // `Thứ 6 chương Chương 6: Cao trào...` and `Thứ 8 chương thật · Chương 8:: Đại tỷ...`\n    // say the chapter twice; the title is what follows the second\n    let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);\n    // `(bộ 02) chi du thuyền xuân sắc`: `chi` (of) ties the book to its name\n    if(at('bn4')) title = title.replace(/^chi\\s+/iu, '');\n    if(read.roles.n != null) {\n      title = title.replace(new RegExp(`^(?:\\\\S+\\\\s+){0,3}?(?:chương|hồi)\\\\s+${read.roles.n}\\\\s*[:：.]*\\\\s*`, 'iu'), '');\n    }\n    let part = read.roles.n != null && partOf(title);\n    let hasRoman = tokens.some(t => t.roman);\n    let base = baseOf(rule, read, { title, rest, whole, hasRoman, hasPhrase: !!at('ph'), titled: /^[:：]$/.test(last.text) });\n    // `Thứ 0 chương` sets a piece between two chapters; a bare 0 (a door code, a countdown) is nothing\n    if(read.roles.n === 0 && !read.marker) continue;\n    if(part) title = part.title;\n    let kind = rule.kind === 'chap' && read.roles.n === 0 ? 'interlude' : rule.kind;\n    // `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`: the heading of a section, then the one\n    // of the part that begins here. The part is the chapter, the section its group\n    let inner = rule.kind === 'chap' && read.roles.n != null\n      && (/^(.*?)\\s*[|｜]\\s*(\\S.*)$/u.exec(rest) ?? /^(.*?)\\s*[【[]?\\s*(thứ\\s+\\S+\\s+hồi\\b.*)$/iu.exec(rest));\n    if(inner) {\n      let held = readHeading(inner[2].replace(/^[【[]\\s*/, ''), inner[2].replace(/^[【[]\\s*/, '').toLowerCase(), names);\n      if(held && held.kind === 'chap' && held.n != null && !held.outer) {\n        let outer = `${read.marker?.word ?? 'Chương'} ${read.roles.n}`;\n        return heading({ ...held, outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(': '), start: tokens[0].s, text: line.slice(tokens[0].s) });\n      }\n    }\n    return heading({\n      // (a part in the title is one in brackets: `(thượng)`)\n      ...read.roles, ...(part && { half: part.half, halfText: part.halfText, halfBracketed: true }), kind, base, rest, title, whole,\n      shape: shapeOf(tokens, m[0].length, whole),\n      text: line.slice(tokens[0].s, last.e),\n      start: tokens[0].s,\n    });\n  }\n  return null;\n}\n\n// a heading written into the middle of a paragraph: `... Chương 101 ...`\nconst INLINE_HEADING = /(?<![\\p{L}\\p{N}])(?<word>chương|hồi)\\s+(?<n>\\d{1,4})(?![\\p{L}\\p{N}.])/giu;\n\n// headings written into the middle of a line, which a line that opens with a heading\n// of its own does not have: `(Chương 75: Xong, thỉnh mong chờ Chương 76: ...)` points at the\n// next chapter, it does not begin it\nfunction inlineHeadings(line, lineStart, ord) {\n  let found = [];\n  for(let m of line.matchAll(INLINE_HEADING)) {\n    if(!/\\S/.test(line.slice(0, m.index))) continue;\n    let rest = line.slice(m.index + m[0].length);\n    found.push(heading({\n      kind: 'chap', n: Number(m.groups.n), chapType: CHAPTER_WORDS[m.groups.word.toLowerCase()],\n      base: TUNING.base.inline, inline: true, text: m[0], rest, title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),\n      shape: 'inline', index: lineStart + m.index, ord,\n    }));\n  }\n  return found;\n}\n\nfunction findCandidates(text, name) {\n  let lowerName = name.toLowerCase().normalize();\n  let names = [...new Set([lowerName, lowerName.replace('hệ liệt', '').trim()])].filter(Boolean)\n    .sort((a, z) => z.length - a.length);\n  let nodes = [];\n  let ord = 0;\n  let lineStart = 0;\n  while(lineStart <= text.length) {\n    let lineEnd = text.indexOf('\\n', lineStart);\n    if(lineEnd === -1) lineEnd = text.length;\n    let line = text.slice(lineStart, lineEnd);\n    if(/\\S/.test(line)) {\n      ord++;\n      let lower = line.toLowerCase();\n      let node = lower.length === line.length ? readHeading(line, lower, names) : null;\n      if(node) nodes.push(heading({ ...node, index: lineStart + node.start, ord }));\n      let opensWithHeading = node && node.base >= TUNING.path.breakMinBase;\n      if(!opensWithHeading && line.length < 4000) nodes.push(...inlineHeadings(line, lineStart, ord));\n    }\n    lineStart = lineEnd + 1;\n  }\n  // one title line is the title page's own: it takes two for the file to hold books\n  if(nodes.filter(node => node.bookName).length < 2) nodes = nodes.filter(node => !node.bookName);\n  return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);\n}\n\n// ==== 4. The path ============================================================================\n// What a path has reached by a node, and all the paths need to go on from it:\n//   book    the book it is in, 0 when no book has been told apart\n//   word    what the last book named was called (`Quyển`, `Bộ`, `Giai đoạn`), if any was\n//   kind    the word of a book that numbers apart from the others (`Bộ 02` after the `Quyển`s),\n//           null while the books are of the one kind\n//   name    the name of a book that names itself and has no number (`Tên sách: ...`), until\n//           a chapter numbers it (`Thứ 1 chương (bộ 02)`)\n//   extra   whether that is the extras (phiên ngoại)\n//   n       the chapter number it stands at (the last of a run)\n//   half    the part of that chapter (thượng / trung / hạ), or null\n//   ended   the book has had its last chapter\n//   carry   the number the book before stopped at, which a book may go on from\nconst reached = (node, fields = {}) => ({\n  book: node.bookNum ?? 0, word: node.bookType, kind: null, name: node.bookName, extra: !!node.extra, n: node.span ?? node.n ?? null, half: null, ended: false, carry: 0, ...fields,\n});\n\n// The best path through the headings, as a list of { i, joined, state }: the heading's place\n// in `nodes`, whether it is the same heading as the one before (a repeat, or an end said\n// twice), and what the path has reached by it.\n// `credit` is how far each shape is trusted: shape -> -3..3. With `strongOnly` the nodes\n// too weak for their shape stay out of the path altogether (see fillGaps)\nfunction chooseHeadings(nodes, credit = {}, strongOnly = false, excluded = new Set()) {\n  let score = new Array(nodes.length).fill(-Infinity);\n  let prev = new Array(nodes.length).fill(-1);\n  let joined = new Array(nodes.length).fill(false);\n  let state = new Array(nodes.length);\n  // earlier nodes by the number they ended on, to find the one a number follows\n  let byNumber = new Map();\n  let bestByKey = new Map();   // `${book}/${extra}` -> the best node that ended in that book\n  let books = [];              // book and extra heading nodes seen\n  let top = -1;                // the best path so far ends here\n\n  let remember = (i) => {\n    let { n, book, extra } = state[i];\n    if(n != null) {\n      if(!byNumber.has(n)) byNumber.set(n, []);\n      byNumber.get(n).push(i);\n    }\n    let key = `${book}/${extra ? 1 : 0}`;\n    if(!bestByKey.has(key) || score[i] > score[bestByKey.get(key)]) bestByKey.set(key, i);\n  };\n  let apart = (i, j) => nodes[i].ord - nodes[j].ord;\n\n  // the ways into a heading that has a number, one step each: going on from an earlier\n  // number, from a book's heading, into a new book, off the numbers altogether, or\n  // starting a path\n  let goingOn = (i, { go }) => {\n    let node = nodes[i];\n    let { n, bookNum: book } = node;\n    for(let d = 0; d <= TUNING.path.gapMax; d++) {\n      for(let j of byNumber.get(n - d) ?? []) {\n        let s = state[j];\n        if(s.ended || (node.extra && !s.extra)) continue;\n        if(book != null && s.book !== 0 && book !== s.book) continue;\n        if(d === 0) {\n          // the next part of the same chapter, or the same heading again\n          if(node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, { ...s, half: node.half });\n          else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);\n        } else {\n          go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, word: node.bookType ?? s.word, name: book != null ? null : s.name, extra: s.extra || !!node.extra, half: node.half ?? null });\n        }\n      }\n    }\n  };\n\n  // a book or an extra begins, and the numbers may start over\n  let afterBookHeading = (i, { go }) => {\n    let node = nodes[i];\n    let { n, bookNum: book } = node;\n    for(let j of books) {\n      let s = state[j];\n      // a bare number straight after `Kỳ Bạch Tuyết phiên ngoại` is the first of its extras\n      let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;\n      if(s.extra !== !!node.extra && !opensExtra) continue;\n      // a book that only names itself takes the number its first chapter gives it\n      if(book != null && book !== s.book && !s.name) continue;\n      let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : (n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap));\n      let numbered = book != null && { book, word: node.bookType ?? s.word, name: null };\n      go(j, value, { ...s, n: node.span ?? n, half: node.half ?? null, ...numbered });\n    }\n  };\n\n  // a book that names itself in the heading, or extras, with the numbers starting over\n  let intoNewBook = (i, { go }) => {\n    let node = nodes[i];\n    let { n, bookNum: book } = node;\n    if(n > TUNING.path.smallNumber || (book == null && !node.extra)) return;\n    for(let j of bestByKey.values()) {\n      let s = state[j];\n      if(s.extra === !!node.extra && (book == null || book === s.book)) continue;\n      go(j, TUNING.reward.boundary - 1, reached(node, { book: book ?? s.book, word: node.bookType ?? s.word, kind: s.kind, name: book == null ? s.name : null, carry: s.n }));\n    }\n  };\n\n  // the numbers may break anywhere (a series that carries on from 101 after 47), at\n  // a price that only a heading worth the price will pay\n  let breakingOff = (i, { go }) => {\n    let node = nodes[i];\n    let { n, bookNum: book } = node;\n    if(top < 0 || state[top].ended || node.base < TUNING.path.breakMinBase) return;\n    let s = state[top];\n    // the numbers start over inside a book that has been told apart from the others:\n    // the next one began, whether or not it was named\n    let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && s.n >= TUNING.path.unnamedFrom;\n    go(top, TUNING.reward.restart, { ...s, n: node.span ?? n, book: book ?? (unnamed ? s.book + 1 : s.book), word: node.bookType ?? s.word, name: book != null ? null : s.name, extra: !!node.extra, half: node.half ?? null, carry: s.n });\n  };\n\n  let startingHere = (i, { begin }) => {\n    let node = nodes[i];\n    let start = node.n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;\n    if(start > 0) begin(start, reached(node));\n    else begin(start, reached(node), true);\n  };\n\n  // the ways into node i. Each calls `go(from, value, reached, joins)` for a way it\n  // sees, and `begin(value, reached)` for a path that could start at the node itself\n  let into = {\n    chap(i, ways) {\n      goingOn(i, ways);\n      afterBookHeading(i, ways);\n      intoNewBook(i, ways);\n      breakingOff(i, ways);\n      startingHere(i, ways);\n    },\n    // the last chapter: a repeat of the heading just before it, or the one after it\n    end(i, { go }) {\n      let node = nodes[i];\n      let recent = [];\n      for(let j = i - 1; j >= 0 && recent.length < TUNING.path.endLookback; j--) if(score[j] > -Infinity) recent.push(j);\n      for(let j of recent) {\n        let s = state[j];\n        if(s.ended || s.n == null || s.extra !== !!node.extra) continue;\n        if(apart(i, j) <= TUNING.path.closeLines) go(j, TUNING.reward.repeat + 1, { ...s, ended: true }, true);\n        else if(s.n >= TUNING.path.endMin) go(j, TUNING.reward.end, { ...s, n: s.n + 1, ended: true });\n      }\n    },\n    book(i, { go, begin }) {\n      let node = nodes[i];\n      let b = node.bookNum ?? 0;\n      let extra = node.kind === 'extrahead' || !!node.extra;\n      // a book that names itself and has no number is the next one, after whatever came\n      if(node.bookName && node.bookNum == null) {\n        for(let j of bestByKey.values()) go(j, 0, reached(node, { book: state[j].book + 1, carry: state[j].n ?? 0, n: null }));\n        begin(TUNING.path.startAlone, reached(node, { book: 1, n: null }), books.length > 0);\n        return;\n      }\n      for(let j of bestByKey.values()) {\n        let s = state[j];\n        // the next book, or one further on when a few were never named; or a book of another\n        // kind, which numbers apart from the rest (`Bộ 02` after `Quyển 13`)\n        let next = b > s.book || (b <= 2 && s.book === 0);\n        let ofAnotherKind = !extra && !next && s.word != null && node.bookType != null && s.word !== node.bookType;\n        let follows = extra ? !s.extra : (!s.extra && (next || ofAnotherKind));\n        let skipped = extra || ofAnotherKind ? 0 : Math.max(0, b - s.book - 1);\n        let kind = ofAnotherKind || (!extra && node.bookType != null && node.bookType === s.kind) ? node.bookType : null;\n        if(follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, { book: extra ? s.book : b, kind, extra, carry: s.n ?? 0, n: null }));\n      }\n      begin(TUNING.path.startAlone, reached(node, { book: extra ? 0 : b, extra, n: null }), books.length > 0);\n    },\n    // `Thứ 0 chương phiên ngoại`: a piece set between two chapters, outside their numbers\n    interlude(_i, { go }) {\n      if(top >= 0) go(top, TUNING.reward.interlude, { ...state[top] });\n    },\n    // the nearest heading before it that has a number gives the half its chapter\n    half(i, { go }) {\n      let node = nodes[i];\n      for(let j = i - 1; j >= 0; j--) {\n        if(score[j] === -Infinity) continue;\n        let s = state[j];\n        if(s.n == null || s.ended) continue;\n        if(s.half == null || node.half > s.half) go(j, TUNING.reward.half, { ...s, half: node.half });\n        break;\n      }\n    },\n  };\n\n  for(let i = 0; i < nodes.length; i++) {\n    let node = nodes[i];\n    let prior = node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold;\n    if((strongOnly && prior < 0) || excluded.has(i)) continue;\n    let best = { value: -Infinity, from: -1, joined: false, as: null };\n    let go = (j, value, as, joins = false) => {\n      if(score[j] + value > best.value) best = { value: score[j] + value, from: j, joined: joins, as };\n    };\n    // a path starting here; unless `onlyIfAlone`, it competes with the ways into the node\n    let begin = (value, as, onlyIfAlone = false) => {\n      if(onlyIfAlone && best.value !== -Infinity) return;\n      if(!(best.value > value)) best = { value, from: -1, joined: false, as };\n    };\n    let way = node.kind === 'chap' ? (node.end ? 'end' : node.n != null ? 'chap' : null)\n      : node.kind === 'extrahead' ? 'book' : node.kind;\n    into[way]?.(i, { go, begin });\n    if(best.value === -Infinity) continue;\n    score[i] = best.value + prior;\n    prev[i] = best.from;\n    joined[i] = best.joined;\n    state[i] = best.as;\n    // a piece in front of a book's first chapter (its preface, `Thứ 0 chương tự`) opens the\n    // book as its heading does\n    let opensBook = node.kind === 'interlude' && state[i].n == null;\n    if(node.kind === 'book' || node.kind === 'extrahead' || opensBook) books.push(i);\n    else remember(i);\n    if(top < 0 || score[i] > score[top]) top = i;\n  }\n\n  let path = [];\n  for(let i = top; i >= 0; i = prev[i]) path.push({ i, joined: joined[i], state: state[i] });\n  return path.reverse();\n}\n\n// A heading with a single line before the next is not a chapter of a book whose chapters\n// run to dozens of lines: a list in the story (`Hồi 1: ...`, `Hồi 2: ...`) passes\n// for a short chain the path is glad to take. The nodes of such a section are left out\nfunction tinySections(nodes, path) {\n  let chapters = path.filter(({ i }) => nodes[i].kind === 'chap');\n  let lengths = chapters.slice(1).map(({ i }, k) => nodes[i].ord - nodes[chapters[k].i].ord).sort((a, z) => a - z);\n  let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;\n  let tiny = new Set();\n  // a book of one-paragraph chapters has nothing to tell a list from\n  if(typical < TUNING.tiny.typicalAtLeast) return tiny;\n  chapters.forEach(({ i }, k) => {\n    let next = chapters[k + 1];\n    if(next && !next.joined && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);\n  });\n  return tiny;\n}\n\n// A contents list at the head of a book: a few headings close together (some with a few\n// lines of notes under them), after which the book starts its numbers over and goes\n// through them again. The entries are part of the title page, not chapters. Told by four\n// things together: there are several entries (two sections in front of the first book,\n// `Nhân vật giới thiệu`, are no list), the whole list is shorter than the chapter after\n// it (or than a chapter usually is), the chapter after it starts again at the list's\n// first number or lower, and every number the list names comes again later\nfunction frontContents(nodes, path) {\n  let chapters = path.filter(({ i, joined }) => !joined && nodes[i].kind !== 'book' && nodes[i].kind !== 'extrahead');\n  let lines = (k) => (chapters[k + 1] ? nodes[chapters[k + 1].i].ord : Infinity) - nodes[chapters[k].i].ord;\n  let number = (k) => chapters[k].state.n;\n  let lengths = chapters.slice(0, -1).map((_, k) => lines(k)).sort((a, z) => a - z);\n  let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;\n  for(let k = Math.min(chapters.length - 1, TUNING.contents.maxEntries); k >= TUNING.contents.minEntries; k--) {\n    let head = chapters.slice(0, k);\n    let total = head.reduce((sum, _, j) => sum + lines(j), 0);\n    if(total >= Math.max(lines(k), typical)) continue;\n    let numbers = head.map((_, j) => number(j)).filter(n => n != null);\n    // the numbers go back (the parts of one chapter, `Chương 44: (nhất)`, `(nhị)`, never do)\n    if(!numbers.length || number(k) == null || number(k) > Math.min(...numbers) || number(k) >= Math.max(...numbers)) continue;\n    let later = new Set(chapters.slice(k).map((_, j) => number(k + j)));\n    if(numbers.every(n => later.has(n))) return new Set(head.map(({ i }) => i));\n  }\n  return new Set();\n}\n\n// how far each shape is trusted, by how much of it landed on the path: -3 for one\n// that never does, +3 for one that always does\nfunction shapeCredit(nodes, path) {\n  let seen = {};\n  let taken = {};\n  for(let node of nodes) seen[node.shape] = (seen[node.shape] ?? 0) + 1;\n  for(let { i } of path) taken[nodes[i].shape] = (taken[nodes[i].shape] ?? 0) + 1;\n  let credit = {};\n  for(let shape in seen) credit[shape] = TUNING.trust.scale * (((taken[shape] ?? 0) + 0.5) / (seen[shape] + 1) - 0.5);\n  return credit;\n}\n\n// the headings the path left out because they are weak (a bare `Một ...` has little to\n// say for itself) are taken back where they fill what is missing: chapter 6 between 5\n// and 7, chapter 1 and 2 in front of a book's first heading, and nowhere else\nfunction fillGaps(nodes, path, credit) {\n  let isChap = (entry) => nodes[entry.i].kind === 'chap' && entry.state.n != null;\n  let weak = [];\n  nodes.forEach((node, i) => {\n    if(node.kind === 'chap' && node.n != null && node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold < 0) weak.push(i);\n  });\n  let filled = [];\n  let fill = (from, to, first, last, state) => {\n    // numbers first..last, in the order of the text between nodes `from` and `to`\n    let at = from;\n    for(let e = first; e <= last; e++) {\n      let found;\n      for(let i of weak) {\n        if(i <= at || i >= to) continue;\n        let node = nodes[i];\n        if(node.n !== e || (node.extra && !state.extra)) continue;\n        if(!found || node.base > nodes[found].base) found = i;\n      }\n      if(found != null) {\n        filled.push({ i: found, joined: false, state: { ...state, n: e } });\n        at = found;\n      }\n    }\n  };\n  let previous;     // the last chapter on the path\n  let boundary = true;\n  for(let entry of path) {\n    let node = nodes[entry.i];\n    if(node.kind === 'book' || node.kind === 'extrahead') { boundary = true; continue; }\n    if(!isChap(entry) || entry.joined) { continue; }\n    let n = entry.state.n;\n    if(previous && !boundary && entry.state.book === previous.state.book && entry.state.extra === previous.state.extra) {\n      if(n > previous.state.n + 1) fill(previous.i, entry.i, previous.state.n + 1, n - 1, previous.state);\n    } else if(n > 1 && n <= TUNING.fill.firstMax && !node.extra) {\n      fill(previous?.i ?? -1, entry.i, 1, n - 1, { ...entry.state, n: 0 });\n    }\n    previous = entry;\n    boundary = false;\n  }\n  return [...path, ...filled].sort((a, z) => a.i - z.i);\n}\n\n// ==== 5. Drafts ==============================================================================\nconst END_PHRASE = /^(chương\\s+)?(kết|cuối)$/i;\n\n// a title the heading itself carries, the plainest one when several headings stood together\nfunction pickTitle(members) {\n  let titles = members.map(m => m.title).filter(t => t && !END_PHRASE.test(t));\n  titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);\n  // a paragraph that runs on behind the heading is not part of its title\n  let title = titles[0];\n  return title?.length > TUNING.drafts.titleMax ? `${title.slice(0, TUNING.drafts.titleMax).replace(/\\s+\\S*$/, '')}…` : title;\n}\n\nfunction buildChapters(nodes, path) {\n  let clusters = [];\n  let opening;   // where the book heading in front of the next chapter begins\n  for(let { i, joined, state } of path) {\n    let node = nodes[i];\n    if(node.kind === 'book' || node.kind === 'extrahead') {\n      opening ??= node.index;\n      continue;\n    }\n    if(joined && clusters.length) {\n      clusters.at(-1).members.push(node);\n      clusters.at(-1).state = state;\n      continue;\n    }\n    clusters.push({ members: [node], state, index: Math.min(opening ?? Infinity, node.index) });\n    opening = undefined;\n  }\n  // a book is `Quyển` or `Bộ` throughout, whichever the books' headings say most often, or\n  // else the chapters that name their book (`Thứ 1 chương (bộ 02)`)\n  let mostSaid = (words) => {\n    let types = {};\n    for(let word of words) if(word) types[word] = (types[word] ?? 0) + 1;\n    return Object.keys(types).sort((a, z) => types[z] - types[a])[0];\n  };\n  let bookWord = mostSaid(path.map(({ i }) => nodes[i].kind === 'book' ? nodes[i].bookType : null))\n    ?? mostSaid(path.map(({ i }) => nodes[i].bookNum != null ? nodes[i].bookType : null)) ?? 'Quyển';\n  let drafts = [];\n  let section;    // the section whose parts are being listed\n  for(let { members, state, index } of clusters) {\n    let first = members[0];\n    let lead = members.reduce((best, m) => m.base > best.base ? m : best, first);\n    let end = members.find(m => m.end);\n    let numbered = members.find(m => m.n != null && m.kind !== 'interlude');\n    let type = members.find(m => m.chapType)?.chapType ?? (state.extra ? 'Phiên ngoại' : undefined);\n    let heading = { type, title: pickTitle(members), text: lead.text };\n    if(end) heading.number = end.endWord;\n    else if(first.kind === 'half') {\n      heading.number = String(state.n);\n      heading.part = first.halfNum != null ? { text: `${first.halfType} ${first.halfNum}`, leading: true } : { text: first.halfText, bracketed: first.halfBracketed };\n    }\n    else if(numbered) {\n      heading.number = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);\n      if(numbered.half != null && numbered.kind === 'chap') heading.part = { text: numbered.halfText, bracketed: numbered.halfBracketed };\n    }\n    // a part whose heading leaves out its section stays in the one before it\n    let inherited = section && !lead.outer && state.book === 0 && type === section.type ? section.name : undefined;\n    if(lead.outer) section = { name: lead.outer, type };\n    else if(!inherited) section = undefined;\n    let group = lead.outer ?? inherited ?? state.name ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : undefined);\n    drafts.push({ offset: index, group, heading });\n  }\n  // a book that opens with no heading of its own, ahead of a `Bộ 2`, is the first\n  let named = drafts.findIndex(d => d.group);\n  if(named > 0) {\n    let [, type, number] = /^(.*) (\\d+)$/.exec(drafts[named].group) ?? [];\n    if(Number(number) === 2) {\n      for(let d of drafts.slice(0, named)) d.group = `${type} 1`;\n    }\n  }\n  return drafts;\n}\n\n// headings that carry no number but all begin with the same words and a dash, in\n// order: `Quy tắc quái đàm — sân vận động...`, `Quy tắc quái đàm — dâm mỹ ký túc xá...`\nfunction seriesChapters(text, { name }) {\n  let lines = [];\n  let start = 0;\n  for(let line of text.split('\\n')) {\n    let found = line.length < 200 && /^\\s*((?:\\p{L}+ ){1,4}\\p{L}+) ?[—–:-]/u.exec(line);\n    if(found) lines.push({ key: found[1].toLowerCase(), index: start + line.search(/\\S/), line: line.trim(), length: found[0].trim().length });\n    start += line.length + 1;\n  }\n  let counts = new Map();\n  for(let { key } of lines) counts.set(key, (counts.get(key) ?? 0) + 1);\n  // the words are the book's own title, or any dialogue that opens with a name and a\n  // dash would pass for a heading\n  let own = name.toLowerCase().normalize();\n  let [key, count] = [...counts].filter(([words]) => own.startsWith(words)).sort((a, z) => z[1] - a[1])[0] ?? [];\n  if(!key || count < TUNING.drafts.seriesMin) return [];\n  let drafts = [];\n  for(let { key: lineKey, index, line, length } of lines) {\n    if(lineKey !== key) continue;\n    // what follows the repeated words, less the number that sometimes closes it\n    let title = cleanTitle(line.slice(length)).replace(/\\s*\\(\\s*\\S{1,12}\\s*\\)\\s*$/, '');\n    drafts.push({ offset: index, heading: { number: String(drafts.length + 1), title, text: line } });\n  }\n  return drafts;\n}\n\n// a book with no headings to find is read in pages of this many paragraphs\nfunction pagesOf(text, paragraphsPerPage = TUNING.drafts.pageParagraphs) {\n  let pattern = `(.*\\n){1,${paragraphsPerPage}}`;\n  return [...text.matchAll(new RegExp(pattern, 'gimu'))].map(m => ({ offset: m.index, heading: { text: m[0] } }));\n}\n\n// ==== 6. extractChapters =====================================================================\nfunction extractChapters(filename, text, { name }) {\n  let nodes = findCandidates(text, name);\n  // first take every node, to see which shapes the book writes its headings in\n  let first = chooseHeadings(nodes);\n  let credit = shapeCredit(nodes, first);\n  let path = chooseHeadings(nodes, credit, true, tinySections(nodes, first));\n  path = fillGaps(nodes, path, credit);\n  let listed = frontContents(nodes, path);\n  path = path.filter(({ i }) => !listed.has(i));\n  let drafts = buildChapters(nodes, path);\n  // no numbers to follow, but the same words begin every heading\n  let series = seriesChapters(text, { name });\n  if(series.length >= TUNING.drafts.seriesMin && series.length > drafts.length * TUNING.drafts.seriesOver) drafts = series;\n  if(drafts.length < 2) drafts = pagesOf(text);\n  return finishChapters(withPrologue(drafts, filename, text), text);\n}\n\n// no heading stands in front of the first one, so the title page, the author and\n// the blurb fell outside every chapter and were never read. they open the book as\n// an entry of their own\nfunction withPrologue(drafts, filename, text) {\n  let front = text.slice(0, drafts[0]?.offset ?? text.length).trim();\n  if(!front) return drafts;\n  return [{ offset: 0, heading: { title: filename, text: filename } }, ...drafts];\n}\n\nfunction slug(text) {\n  return latinize(text)\n    .replace(/\\W+/g, '-')\n    .replace(/^-+|-+$/g, '')\n    .toLowerCase();\n}\n\nfunction latinize(source) {\n  let s = source;\n  s = s.replace(/[ÁĂẮẶẰẲẴǍÂẤẬẦẨẪÄǞȦǠẠȀÀẢȂĀĄÅǺḀȺÃⱯᴀ]/g, 'A');\n  s = s.replace(/[Ꜳ]/g, 'AA');\n  s = s.replace(/[ÆǼǢᴁ]/g, 'AE');\n  s = s.replace(/[Ꜵ]/g, 'AO');\n  s = s.replace(/[Ꜷ]/g, 'AU');\n  s = s.replace(/[ꜸꜺ]/g, 'AV');\n  s = s.replace(/[Ꜽ]/g, 'AY');\n  s = s.replace(/[ḂḄƁḆɃƂʙᴃБ]/g, 'B');\n  s = s.replace(/[ĆČÇḈĈĊƇȻꜾᴄ]/g, 'C');\n  s = s.replace(/[ĎḐḒḊḌƊḎǲǅĐÐƋꝹᴅД]/g, 'D');\n  s = s.replace(/[ǱǄ]/g, 'DZ');\n  s = s.replace(/[ÉĔĚȨḜÊẾỆỀỂỄḘËĖẸȄÈẺȆĒḖḔĘɆẼḚƐƎᴇⱻЕЭ]/g, 'E');\n  s = s.replace(/[Ꝫ]/g, 'ET');\n  s = s.replace(/[ḞƑꝻꜰФ]/g, 'F');\n  s = s.replace(/[ǴĞǦĢĜĠƓḠǤꝽɢʛГҐ]/g, 'G');\n  s = s.replace(/[ḪȞḨĤⱧḦḢḤĦʜХ]/g, 'H');\n  s = s.replace(/[ÍĬǏÎÏḮİỊȈÌỈȊĪĮƗĨḬІɪЙЫИ]/g, 'I');\n  s = s.replace(/[ꞂŔŘŖṘṚṜȐȒṞɌⱤʁʀᴙᴚР]/g, 'R');\n  s = s.replace(/[ꞄŚṤŠṦŞŜȘṠṢṨꜱС]/g, 'S');\n  s = s.replace(/[ꞆŤŢṰȚȾṪṬƬṮƮŦᴛТ]/g, 'T');\n  s = s.replace(/[Ꝭ]/g, 'IS');\n  s = s.replace(/[ĴɈᴊ]/g, 'J');\n  s = s.replace(/[ḰǨĶⱩꝂḲƘḴꝀꝄᴋК]/g, 'K');\n  s = s.replace(/[ĹȽĽĻḼḶḸⱠꝈḺĿⱢǈŁꞀʟᴌЛ]/g, 'L');\n  s = s.replace(/[Ǉ]/g, 'LJ');\n  s = s.replace(/[ḾṀṂⱮƜᴍМ]/g, 'M');\n  s = s.replace(/[ŃŇŅṊṄṆǸƝṈȠǋÑɴᴎН]/g, 'N');\n  s = s.replace(/[Ǌ]/g, 'NJ');\n  s = s.replace(/[ÓŎǑÔỐỘỒỔỖÖȪȮȰỌŐȌÒỎƠỚỢỜỞỠȎꝊꝌŌṒṐƟǪǬØǾÕṌṎȬƆᴏᴐО]/g, 'O');\n  s = s.replace(/[Ƣ]/g, 'OI');\n  s = s.replace(/[Ꝏ]/g, 'OO');\n  s = s.replace(/[Ȣᴕ]/g, 'OU');\n  s = s.replace(/[ṔṖꝒƤꝔⱣꝐᴘП]/g, 'P');\n  s = s.replace(/[ꝘꝖ]/g, 'Q');\n  s = s.replace(/[ß]/g, 'ss');\n  s = s.replace(/[ɅꝞṾƲṼᴠВ]/g, 'V');\n  s = s.replace(/[Ꜩ]/g, 'TZ');\n  s = s.replace(/[ÚŬǓÛṶÜǗǙǛǕṲỤŰȔÙỦƯỨỰỪỬỮȖŪṺŲŮŨṸṴᴜУ]/g, 'U');\n  s = s.replace(/[Ꝡ]/g, 'VY');\n  s = s.replace(/[ẂŴẄẆẈẀⱲᴡ]/g, 'W');\n  s = s.replace(/[ẌẊ]/g, 'X');\n  s = s.replace(/[ÝŶŸẎỴỲƳỶỾȲɎỸʏ]/g, 'Y');\n  s = s.replace(/[Ї]/g, 'YI');\n  s = s.replace(/[ŹŽẐⱫŻẒȤẔƵᴢЗ]/g, 'Z');\n  s = s.replace(/[Þ]/g, 'TH');\n  s = s.replace(/[Ĳ]/g, 'IJ');\n  s = s.replace(/[Œɶ]/g, 'OE');\n  s = s.replace(/[áăắặằẳẵǎâấậầẩẫäǟȧǡạȁàảȃāąᶏẚåǻḁⱥãɐₐАа]/g, 'a');\n  s = s.replace(/[ꜳ]/g, 'aa');\n  s = s.replace(/[æǽǣᴂ]/g, 'ae');\n  s = s.replace(/[ꜵ]/g, 'ao');\n  s = s.replace(/[ꜷ]/g, 'au');\n  s = s.replace(/[ꜹꜻ]/g, 'av');\n  s = s.replace(/[ꜽ]/g, 'ay');\n  s = s.replace(/[ḃḅɓḇᵬᶀƀƃб]/g, 'b');\n  s = s.replace(/[ɵóŏǒôốộồổỗöȫȯȱọőȍòỏơớợờởỡȏꝋꝍⱺōṓṑǫǭøǿõṍṏȭɔᶗᴑᴓₒо]/g, 'o');\n  s = s.replace(/[ćčçḉĉɕċƈȼↄꜿ]/g, 'c');\n  s = s.replace(/[ďḑḓȡḋḍɗᶑḏᵭᶁđɖƌðꝺд]/g, 'd');\n  s = s.replace(/[ıíĭǐîïḯịȉìỉȋīįᶖɨĩḭіᴉᵢйыи]/g, 'i');\n  s = s.replace(/[ȷɟʄǰĵʝɉⱼ]/g, 'j');\n  s = s.replace(/[ǳǆ]/g, 'dz');\n  s = s.replace(/[éĕěȩḝêếệềểễḙëėẹȅèẻȇēḗḕⱸęᶒɇẽḛɛᶓɘǝₑеэ]/g, 'e');\n  s = s.replace(/[ꝫ]/g, 'et');\n  s = s.replace(/[ḟƒᵮᶂꝼф]/g, 'f');\n  s = s.replace(/[ǵğǧģĝġɠḡᶃǥᵹɡᵷгґ]/g, 'g');\n  s = s.replace(/[ḫȟḩĥⱨḧḣḥɦẖħɥʮʯх]/g, 'h');\n  s = s.replace(/[ƕ]/g, 'hv');\n  s = s.replace(/[ꞃŕřŗṙṛṝȑɾᵳȓṟɼᵲᶉɍɽɿɹɻɺⱹᵣр]/g, 'r');\n  s = s.replace(/[ꞅſẜẛẝśṥšṧşŝșṡṣṩʂᵴᶊȿс]/g, 's');\n  s = s.replace(/[ꞇťţṱțȶẗⱦṫṭƭṯᵵƫʈŧʇт]/g, 't');\n  s = s.replace(/[ꝭ]/g, 'is');\n  s = s.replace(/[ḱǩķⱪꝃḳƙḵᶄꝁꝅʞк]/g, 'k');\n  s = s.replace(/[ĺƚɬľļḽȴḷḹⱡꝉḻŀɫᶅɭłꞁл]/g, 'l');\n  s = s.replace(/[ǉ]/g, 'lj');\n  s = s.replace(/[ḿṁṃɱᵯᶆɯɰм]/g, 'm');\n  s = s.replace(/[ńňņṋȵṅṇǹɲṉƞᵰᶇɳñн]/g, 'n');\n  s = s.replace(/[ǌ]/g, 'nj');\n  s = s.replace(/[ƣ]/g, 'oi');\n  s = s.replace(/[ꝏ]/g, 'oo');\n  s = s.replace(/[ȣ]/g, 'ou');\n  s = s.replace(/[ṕṗꝓƥᵱᶈꝕᵽꝑп]/g, 'p');\n  s = s.replace(/[ꝙʠɋꝗ]/g, 'q');\n  s = s.replace(/[ᴝúŭǔûṷüǘǚǜǖṳụűȕùủưứựừửữȗūṻųᶙůũṹṵᵤу]/g, 'u');\n  s = s.replace(/[ᵺþ]/g, 'th');\n  s = s.replace(/[ᴔœ]/g, 'oe');\n  s = s.replace(/[ʌⱴꝟṿʋᶌⱱṽᵥв]/g, 'v');\n  s = s.replace(/[ʍẃŵẅẇẉẁⱳẘ]/g, 'w');\n  s = s.replace(/[ʎýŷÿẏỵỳƴỷỿȳẙɏỹ]/g, 'y');\n  s = s.replace(/[ꜩ]/g, 'tz');\n  s = s.replace(/[ᵫ]/g, 'ue');\n  s = s.replace(/[ꝸ]/g, 'um');\n  s = s.replace(/[ꝡ]/g, 'vy');\n  s = s.replace(/[ẍẋᶍₓ]/g, 'x');\n  s = s.replace(/[ї]/g, 'yi');\n  s = s.replace(/[źžẑʑⱬżẓȥẕᵶᶎʐƶɀз]/g, 'z');\n  s = s.replace(/[ﬀ]/g, 'ff');\n  s = s.replace(/[ﬃ]/g, 'ffi');\n  s = s.replace(/[ﬄ]/g, 'ffl');\n  s = s.replace(/[ﬁ]/g, 'fi');\n  s = s.replace(/[ﬂ]/g, 'fl');\n  s = s.replace(/[ĳ]/g, 'ij');\n  s = s.replace(/[ﬆ]/g, 'st');\n  s = s.replace(/[Ё]/g, 'YO');\n  s = s.replace(/[Ц]/g, 'TS');\n  s = s.replace(/[Ш]/g, 'SH');\n  s = s.replace(/[Щ]/g, 'SCH');\n  s = s.replace(/[ЪъЬь]/g, '\\'');\n  s = s.replace(/[ё]/g, 'yo');\n  s = s.replace(/[ц]/g, 'ts');\n  s = s.replace(/[ш]/g, 'sh');\n  s = s.replace(/[щ]/g, 'sch');\n  s = s.replace(/[Ж]/g, 'ZH');\n  s = s.replace(/[ж]/g, 'zh');\n  s = s.replace(/[Я]/g, 'Ya');\n  s = s.replace(/[Ч]/g, 'CH');\n  s = s.replace(/[Ю]/g, 'YU');\n  s = s.replace(/[я]/g, 'ya');\n  s = s.replace(/[ч]/g, 'ch');\n  s = s.replace(/[ю]/g, 'yu');\n  return s;\n}\n";
-//#endregion
-//#region src/book.js?raw
-var book_default = "// What a book is to the page, and what is kept of it. A script of its own, read with the parser\n// (see src/parser.js): it uses its `slug`.\n\n// bump when a change to the parser should reach the books already stored, which\n// are parsed again the next time they are opened\nconst PARSER_VERSION = 12;\n\n// a book: where it came from, and its chapters once the text has been read (see readBook)\nfunction Book(file) {\n  let id, name, description;\n  if (file?.name) {\n    name = /(?<name>^[^(]*).*?\\.txt/.exec(file.name.normalize()).groups.name.trim();\n    description = /(?<description>\\(.*)\\.txt/.exec(file?.name.normalize())?.groups?.description?.trim();\n    id = slug(name);\n  }\n  return { id, name, description, chapters: undefined };\n}\n\n// what is stored of a book: the list of its chapters without their text, which is kept\n// chapter by chapter\nfunction bookRecord({ id, name, description, chapters }) {\n  return { id, name, description, parser: PARSER_VERSION, chapters: chapters.map(({ content, ...listed }) => listed) };\n}\n";
-//#endregion
-//#region src/load-parser.js
-var EXPORTS = [
-	"extractChapters",
-	"finishChapters",
-	"normalizeFileContent",
-	"readNumberWords",
-	"cleanTitle",
-	"bookRecord",
-	"Book",
-	"chapterTitle",
-	"slug",
-	"latinize",
-	"PARSER_VERSION"
-];
-function loadParser(parserSource, bookSource, console = globalThis.console) {
-	return new Function("console", `${parserSource}\n${bookSource}\nreturn { ${EXPORTS.join(", ")} };`)(console);
+//#region src/parser-worker.ts?worker&inline
+var jsContent = "(function() {\n	//#region src/parser.ts\n	function normalizeFileContent(source) {\n		let text = source.normalize();\n		text = text.replace(/[\\r\\n]+/g, \"\\n\");\n		text = text.replace(/\\t+/g, \"\\n\");\n		text = text.replace(/(?<=\\S) {2,}(?=\\p{Lu})/gu, \"\\n\");\n		text = text.replace(/(.+)/g, (s) => s.trim());\n		text = text.replace(/^'([^']+)'$/gm, \"\\\"$1\\\"\");\n		text = text.replace(/(\\d)\\s*(\\.)\\s*(\\d)/gm, \"$1$2$3\");\n		text = text.replace(/\\s+([.,;:?!\\]】)])/gm, \"$1\");\n		text = text.replace(/([([【])\\s+/gm, \"$1\");\n		text = text.replace(/([:—]{2,})/gm, (c) => c.slice(0, 1));\n		text = text.replace(/(:)[^\\s\\w]+\\s*/gm, \"$1 \");\n		text = text.replace(/^\\s*\"\\s+|\\s+\"\\s*$/gm, \"\\\"\");\n		text = text.replace(/\\s?\"?QQ Group \\d+\"?/gu, \"\");\n		text = text.replaceAll(\"  tìm sách a \\\"Cuộc đời này không phụ diên đuôi tình\\\" cá nhân cải biên\", \"\");\n		text = text.replace(/\\b(?<protocol>https?:)(?:\\/\\/)? (?<path>(?:\\w+)(?:\\. \\w+)+(?:\\/(?:(?:\\. )?[\\w/])+)?)/gm, (...args) => {\n			let { protocol, path } = args.pop();\n			path = path.replace(/\\s/g, \"\");\n			if (protocol) return `${protocol}//${path}`;\n			return path;\n		});\n		text = text.replaceAll(\"cha mẹ vợ\", \"mẹ vợ\");\n		return text;\n	}\n	function chapterTitle({ type = \"Chương\", number, part, title, text }, ordinal) {\n		title = title?.replace(/^[\\s/|\\\\]+/, \"\") ?? \"\";\n		let isExtra = (s) => /phiên ngoại/iu.test(s ?? \"\");\n		let named = [[isExtra(text) && !isExtra(title) && !isExtra(type) ? \"Phiên ngoại\" : void 0, number != null && `${type} ${number}`].filter(Boolean).join(\" \"), title.replace(/./, (c) => c.toUpperCase())].filter(Boolean).join(\": \");\n		let shown = part && !title.includes(`(${part.text})`) ? part : null;\n		return [\n			shown?.leading && `${shown.text}:`,\n			named,\n			shown && !shown.leading && `(${shown.text})`\n		].filter(Boolean).join(\" \") || `${type} ${ordinal + 1}`;\n	}\n	const PART_MARK = /\\s*[(（]\\s*([^()（）]{1,16}?)\\s*[)）]\\s*(【[^】]*】)?\\s*$/u;\n	function partMark({ title = \"\", part }) {\n		let marked = PART_MARK.exec(title);\n		let bare = (written) => written?.toLowerCase().replace(/^[\\s\\p{P}]+|[\\s\\p{P}]+$/gu, \"\");\n		let word = bare(part?.text ?? marked?.[1]);\n		if (!word) return null;\n		let number = part?.leading ? Number(/\\d+$/.exec(word)?.[0] ?? NaN) : /^\\d+$/.test(word) ? Number(word) : word in HALF_WORDS ? null : valueOfPart(word);\n		if (Number.isNaN(number)) number = null;\n		let half = /^(thượng|trung|hạ)(?:\\s+(\\d+))?$/u.exec(word);\n		if (number == null && !half) return null;\n		let order = number ?? HALF_WORDS[half[1]] + Number(half[2] ?? 0) / 1e3;\n		let ours = marked && bare(marked[1]) === word ? marked : null;\n		return {\n			stem: (ours ? title.slice(0, ours.index) : title).trim(),\n			word,\n			number,\n			order,\n			bracketed: !!ours || !!part?.bracketed,\n			tag: ours?.[2]\n		};\n	}\n	function partsOf(drafts, text) {\n		let headingOnly = (i) => text.slice(drafts[i].offset, drafts[i + 1]?.offset ?? text.length).split(\"\\n\").filter((line) => line.trim()).length <= TUNING.drafts.headingLines;\n		let marks = drafts.map(({ heading }) => heading && partMark(heading));\n		let together = (a, b) => drafts[a].group === drafts[b].group && (drafts[a].heading.type ?? \"Chương\") === (drafts[b].heading.type ?? \"Chương\");\n		let numbers = (i) => String(drafts[i].heading.number ?? \"\").split(\"-\").map(Number);\n		let step = (a, b) => drafts[a].heading.number === drafts[b].heading.number ? 0 : numbers(b)[0] - numbers(a).at(-1);\n		marks.forEach((mark, i) => {\n			let next = marks[i + 1];\n			let title = drafts[i].heading?.title?.trim();\n			if (mark || !next || !title || !together(i, i + 1) || step(i, i + 1) > 1) return;\n			let untitled = next.stem === \"\" && step(i, i + 1) === 0;\n			if (title.toLowerCase() !== next.stem.toLowerCase() && !untitled) return;\n			let second = next.number != null ? next.number === 2 : next.order > 1;\n			let first = next.number != null ? next.number === 1 : next.order === 1;\n			if (second) marks[i] = {\n				stem: title,\n				word: next.number != null ? \"1\" : \"thượng\",\n				number: next.number != null ? 1 : null,\n				order: 1,\n				bracketed: next.bracketed\n			};\n			else if (first && headingOnly(i)) marks[i] = {\n				stem: title,\n				head: true,\n				order: 0\n			};\n			else return;\n			for (let j = i + 1; untitled && marks[j]?.stem === \"\" && step(i, j) === 0; j++) marks[j] = {\n				...marks[j],\n				stem: title,\n				given: title\n			};\n		});\n		let follows = (a, b) => {\n			let [from, to] = [marks[a], marks[b]];\n			if (!from || !to || to.head || !together(a, b)) return false;\n			if (from.stem.toLowerCase() !== to.stem.toLowerCase()) return false;\n			let named = from.stem !== \"\";\n			let s = step(a, b);\n			if (!(s === 0 || s === 1 || named && s === 2)) return false;\n			return to.order > from.order || to.order === from.order && (s === 0 || named);\n		};\n		let parts = new Array(drafts.length);\n		for (let start = 0, end = 0; start < drafts.length; start = end) {\n			for (end = start + 1; end < drafts.length && follows(end - 1, end); end++);\n			if (end - start < 2) continue;\n			let [first, last] = [drafts[start].heading, drafts[end - 1].heading];\n			let number = first.number === last.number ? first.number : `${numbers(start)[0]}-${numbers(end - 1).at(-1)}`;\n			let run = marks.slice(start, end);\n			let of = chapterTitle({\n				...first,\n				number,\n				part: void 0,\n				title: run[0].stem\n			}, start);\n			let shown = run.filter((m) => !m.head);\n			let numbered = shown.every((m) => m.number != null);\n			let total = Math.max(new Set(shown.map((m) => m.order)).size, ...shown.map((m) => m.number ?? 0));\n			run.forEach((m, k) => {\n				let said = numbered ? `${m.number}/${total}` : m.word;\n				parts[start + k] = m.head ? {\n					of,\n					head: true\n				} : {\n					of,\n					text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(\" \"),\n					title: m.given\n				};\n			});\n		}\n		return parts;\n	}\n	function finishChapters(drafts, text) {\n		let parts = partsOf(drafts, text);\n		let kept = [];\n		drafts.forEach((draft, i) => {\n			let part = parts[i];\n			if (part?.head) return;\n			kept.push({\n				...draft,\n				offset: parts[i - 1]?.head ? drafts[i - 1].offset : draft.offset,\n				heading: part?.title ? {\n					...draft.heading,\n					title: part.title\n				} : draft.heading,\n				part: part && {\n					of: part.of,\n					text: part.text\n				}\n			});\n		});\n		return kept.map(({ offset, group, heading, part }, i) => {\n			let title = chapterTitle(heading, i);\n			let end = kept[i + 1]?.offset ?? text.length;\n			return {\n				id: `${slug(title)}-${i}`,\n				title,\n				offset,\n				group,\n				part,\n				content: text.slice(offset, end).trim()\n			};\n		});\n	}\n	const TUNING = {\n		base: {\n			decimal: 2,\n			digits: 1.5,\n			thien: -4,\n			phraseAlone: 1,\n			bookAlone: 3,\n			bookTitle: 8,\n			bookTitleMax: 40,\n			bookProse: -10,\n			markerProseMax: 2,\n			titlePage: -6,\n			roman: -2,\n			inline: 3,\n			inlineTitleMax: 80\n		},\n		prose: {\n			longerThan: 100,\n			long: 3,\n			commas: 2,\n			manyCommas: 2,\n			oneCommaOver: 40,\n			oneComma: 1,\n			sentenceOver: 50,\n			sentence: 2\n		},\n		reward: {\n			next: 8,\n			gap: 3,\n			repeat: 3,\n			boundary: 7,\n			carryOn: 4,\n			restart: -6,\n			half: 4,\n			end: 6,\n			interlude: 1\n		},\n		path: {\n			threshold: 4.5,\n			closeLines: 3,\n			gapMax: 4,\n			smallNumber: 3,\n			startAlone: 3,\n			startFar: -6,\n			lateStartCost: 4,\n			lateStartCap: 10,\n			opensExtraLines: 4,\n			breakMinBase: 6,\n			unnamedFrom: 6,\n			unnamedUpTo: 2,\n			endLookback: 40,\n			endMin: 2,\n			skippedBooksMax: 3\n		},\n		trust: { scale: 6 },\n		tiny: {\n			typicalAtLeast: 30,\n			lines: 2\n		},\n		contents: {\n			minEntries: 3,\n			maxEntries: 60\n		},\n		fill: { firstMax: 4 },\n		drafts: {\n			titleMax: 100,\n			seriesMin: 8,\n			seriesOver: 1.2,\n			pageParagraphs: 60,\n			headingLines: 2\n		}\n	};\n	const WORD_DIGITS = {\n		một: 1,\n		mốt: 1,\n		hai: 2,\n		ba: 3,\n		bốn: 4,\n		tư: 4,\n		năm: 5,\n		lăm: 5,\n		sáu: 6,\n		bảy: 7,\n		tám: 8,\n		chín: 9\n	};\n	const SINO_DIGITS = {\n		nhất: 1,\n		nhị: 2,\n		tam: 3,\n		tứ: 4,\n		ngũ: 5,\n		lục: 6,\n		thất: 7,\n		bát: 8,\n		cửu: 9\n	};\n	const TENS_UNITS = [\n		\"mốt\",\n		\"hai\",\n		\"ba\",\n		\"bốn\",\n		\"tư\",\n		\"lăm\",\n		\"sáu\",\n		\"bảy\",\n		\"tám\",\n		\"chín\"\n	];\n	function readNumberWords(words, i) {\n		let w = (k) => words[i + k];\n		let best = null;\n		let take = (value, length) => {\n			if (!best || length > best.length) best = {\n				value,\n				length\n			};\n		};\n		if (w(0) === \"nhất\") {\n			let digit = (x) => x === \"lẻ\" || x === \"linh\" ? 0 : SINO_DIGITS[x] ?? WORD_DIGITS[x];\n			if (w(1) === \"lẻ\" && w(2) === \"loi\") take(100, 3);\n			if ([\n				\"lẻ\",\n				\"linh\",\n				...Object.keys(SINO_DIGITS)\n			].includes(w(1)) && digit(w(2)) != null) take(100 + 10 * digit(w(1)) + digit(w(2)), 3);\n		}\n		if (w(0) === \"mười\") {\n			take(10, 1);\n			if (w(1) in WORD_DIGITS && w(1) !== \"tư\") take(10 + WORD_DIGITS[w(1)], 2);\n		}\n		if (w(0) in WORD_DIGITS) {\n			take(WORD_DIGITS[w(0)], 1);\n			if (w(1) === \"mươi\") {\n				let tens = 10 * WORD_DIGITS[w(0)];\n				take(tens, 2);\n				if (TENS_UNITS.includes(w(2))) take(tens + WORD_DIGITS[w(2)], 3);\n			}\n		}\n		let sino = (k) => SINO_DIGITS[w(k)];\n		if (w(0) === \"thập\") {\n			take(10, 1);\n			if (sino(1)) take(10 + sino(1), 2);\n		}\n		if (sino(0)) {\n			take(sino(0), 1);\n			if (w(1) === \"thập\") {\n				take(sino(0) * 10, 2);\n				if (sino(2)) take(sino(0) * 10 + sino(2), 3);\n			}\n		}\n		return best;\n	}\n	const ROMAN_VALUES = {\n		I: 1,\n		V: 5,\n		X: 10,\n		L: 50,\n		C: 100,\n		D: 500,\n		M: 1e3\n	};\n	function readRoman(word) {\n		if (!/^[IVXLCDM]+$/.test(word)) return null;\n		let total = 0;\n		for (let k = 0; k < word.length; k++) {\n			let [a, b] = [ROMAN_VALUES[word[k]], ROMAN_VALUES[word[k + 1]] ?? 0];\n			total += a < b ? -a : a;\n		}\n		return total > 0 && total < 4e3 ? total : null;\n	}\n	const CHAPTER_WORDS = {\n		chương: \"Chương\",\n		hồi: \"Hồi\",\n		thiên: \"Thiên\"\n	};\n	const BOOK_WORDS = {\n		quyển: \"Quyển\",\n		tập: \"Tập\",\n		bộ: \"Bộ\",\n		cuốn: \"Cuốn\",\n		quý: \"Quý\"\n	};\n	const HALF_WORDS = {\n		thượng: 1,\n		trung: 2,\n		hạ: 3\n	};\n	const KNOWN_WORDS = new Map([\n		...Object.entries(CHAPTER_WORDS).map(([word, shown]) => [word, [\"c\", { word: shown }]]),\n		...Object.entries(BOOK_WORDS).map(([word, shown]) => [word, [\"b\", { word: shown }]]),\n		...Object.entries(HALF_WORDS).map(([word, value]) => [word, [\"h\", {\n			value,\n			word\n		}]]),\n		[\"thứ\", [\"t\", {}]],\n		[\"đệ\", [\"t\", {}]],\n		[\"tiết\", [\"f\", {}]]\n	]);\n	const KNOWN_PHRASES = [\n		[\n			\"phiên ngoại\",\n			\"p\",\n			\"Phiên ngoại\"\n		],\n		[\n			\"ngoại truyện\",\n			\"p\",\n			\"Ngoại truyện\"\n		],\n		[\n			\"giai đoạn\",\n			\"b\",\n			\"Giai đoạn\"\n		]\n	];\n	function readKnownWord(word, lower, pos) {\n		for (let [phrase, cls, shown] of KNOWN_PHRASES) if (lower.startsWith(phrase, pos)) return [\n			cls,\n			{ word: shown },\n			phrase.length\n		];\n		let known = KNOWN_WORDS.get(word);\n		return known && [...known, word.length];\n	}\n	const OPENERS = \"【[(（《“\\\"«\";\n	const CLOSERS = \"】])）》”\\\"»\";\n	function lexLine(line, lower, names) {\n		let tokens = [];\n		let pos = 0;\n		while (pos < line.length && tokens.length < 18) {\n			let ch = line[pos];\n			if (/\\s/.test(ch)) {\n				pos++;\n				continue;\n			}\n			let add = (cls, end, extra = {}) => {\n				tokens.push({\n					cls,\n					s: pos,\n					e: end,\n					text: line.slice(pos, end),\n					...extra\n				});\n				pos = end;\n			};\n			let name = names.find((n) => lower.startsWith(n, pos) && !/\\p{L}/u.test(lower[pos + n.length] ?? \"\"));\n			if (name) {\n				add(\"n\", pos + name.length);\n				continue;\n			}\n			if (OPENERS.includes(ch)) {\n				add(\"L\", pos + 1);\n				continue;\n			}\n			if (CLOSERS.includes(ch)) {\n				add(\"R\", pos + 1);\n				continue;\n			}\n			if (/\\d/.test(ch)) {\n				let m = /^\\d+(?:\\.\\d+)?/.exec(line.slice(pos));\n				let [major, minor] = m[0].split(\".\");\n				if (minor != null && Number(major) === 0) {\n					add(\"x\", pos + m[0].length);\n					continue;\n				}\n				add(\"N\", pos + m[0].length, {\n					value: Number(minor ?? major),\n					book: minor == null ? null : Number(major),\n					digits: true\n				});\n				continue;\n			}\n			let letters = /^\\p{L}+/u.exec(line.slice(pos));\n			if (!letters) {\n				add(\"S\", pos + 1);\n				continue;\n			}\n			let word = letters[0];\n			let words = [lower.slice(pos, pos + word.length)];\n			let ahead = pos + word.length;\n			for (let k = 0; k < 4; k++) {\n				let next = /^ \\p{L}+/u.exec(line.slice(ahead));\n				if (!next) break;\n				words.push(lower.slice(ahead + 1, ahead + next[0].length));\n				ahead += next[0].length;\n			}\n			let number = readNumberWords(words, 0);\n			if (number) {\n				let end = pos;\n				for (let k = 0; k < number.length; k++) end += (k ? 1 : 0) + words[k].length;\n				add(\"N\", end, {\n					value: number.value,\n					sino: words[0] in SINO_DIGITS || words[0] === \"thập\"\n				});\n				continue;\n			}\n			let roman = readRoman(word);\n			let lowered = words[0];\n			let end = pos + word.length;\n			let known = readKnownWord(lowered, lower, pos);\n			if (roman != null && word.length <= 7) add(\"N\", end, {\n				value: roman,\n				roman: true\n			});\n			else if (known) add(known[0], pos + known[2], known[1]);\n			else if (lowered === \"kết\" || lowered === \"cuối\") {\n				let after = /^\\s*(\\S)/.exec(line.slice(end));\n				add(!after || /[^\\p{L}\\p{N}]/u.test(after[1]) ? \"E\" : \"x\", end, { word: lowered });\n			} else add(\"x\", end);\n		}\n		return tokens;\n	}\n	const HEADING_DEFAULTS = {\n		kind: \"chap\",\n		base: 0,\n		index: 0,\n		start: 0,\n		ord: 0,\n		text: \"\",\n		title: \"\",\n		rest: \"\",\n		whole: false,\n		shape: \"\",\n		n: null,\n		span: null,\n		end: false,\n		endWord: null,\n		chapType: null,\n		extra: false,\n		half: null,\n		halfText: null,\n		halfBracketed: false,\n		halfNum: null,\n		halfType: null,\n		bookNum: null,\n		bookType: null,\n		bookName: null,\n		outer: null,\n		inline: false\n	};\n	function heading(fields) {\n		return {\n			...HEADING_DEFAULTS,\n			...fields\n		};\n	}\n	const DECOR = \"[LS]*\";\n	const NAME_PART = \"(?:nR?S?)?\";\n	const BOOK_PART = \"(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?\";\n	const HEADING_RULES = [\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))(?:L(?<bm4>b)t?(?<bn4>N)R)?`\n		},\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?`\n		},\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}(?<tt>t)?(?<cn>N)S(?<cn3>N)(?<cm2>c)`\n		},\n		{\n			kind: \"chap\",\n			base: 7,\n			re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?`\n		},\n		{\n			kind: \"chap\",\n			base: 7,\n			re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}${DECOR}(?<cn>N)`\n		},\n		{\n			kind: \"book\",\n			base: 6,\n			re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}`\n		},\n		{\n			kind: \"extrahead\",\n			base: 5,\n			re: \"^[LS]*x{1,8}(?<pm>p)$\"\n		},\n		{\n			kind: \"half\",\n			base: 5,\n			re: \"^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)\"\n		},\n		{\n			kind: \"chap\",\n			base: 5,\n			weakTitled: 4.5,\n			sino: true,\n			re: \"^(?<cn>N)(?<sep>S)\"\n		},\n		{\n			kind: \"chap\",\n			base: 5,\n			weakTitled: 3,\n			re: \"^L?(?<cn>N)R?\"\n		},\n		{\n			kind: \"chap\",\n			base: 6,\n			re: \"^[LS]*(?<pre>[xc]{1,6})(?<cm>c)(?<cn>N)(?![xNE])\"\n		},\n		{\n			kind: \"chap\",\n			base: 4,\n			re: \"^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R\"\n		},\n		{\n			kind: \"half\",\n			base: 5,\n			re: \"^(?<hl>L)?(?<hm>h)R?$\"\n		}\n	].map((rule) => ({\n		...rule,\n		re: new RegExp(rule.re, \"d\")\n	}));\n	const spanOf = (m, group) => m.indices?.groups?.[group];\n	function cleanTitle(rest) {\n		let title = rest.replace(/^[\\s:：.,\\-—–/|)\\]】”\"»*#!]+/u, \"\").trimEnd();\n		while (/[】\\]”\"»]$/u.test(title) && (title.match(/[】\\]”\"»]/gu) || []).length > (title.match(/[【[“«]/gu) || []).length) title = title.slice(0, -1).trimEnd();\n		return title;\n	}\n	function proseCost(rest) {\n		let t = TUNING.prose;\n		let cost = 0;\n		let commas = (rest.match(/[,;]/g) || []).length;\n		if (rest.length > t.longerThan) cost += t.long;\n		if (commas >= t.commas) cost += t.manyCommas;\n		else if (commas === 1 && rest.length > t.oneCommaOver) cost += t.oneComma;\n		if (rest.length > t.sentenceOver && /[.!?…\"”]$/.test(rest)) cost += t.sentence;\n		return cost;\n	}\n	function leadingTitle(m, tokens, line, rest) {\n		let span = spanOf(m, \"pre\") ?? spanOf(m, \"ph\");\n		if (!span) return null;\n		let words = tokens.slice(span[0], span[1]);\n		let from = words[(spanOf(m, \"ph\") ? words.findLastIndex((t) => t.cls === \"S\") : -1) + 1] ?? words[0];\n		return cleanTitle([line.slice(from.s, words.at(-1).e), cleanTitle(rest)].filter(Boolean).join(\" \"));\n	}\n	function readRoles(rule, at) {\n		let roles = {};\n		let number = at(\"cn\") ?? at(\"cn2\");\n		let marker = at(\"cm\") ?? at(\"cm2\");\n		if (rule.kind === \"chap\" && number) {\n			if (number.cls === \"E\") Object.assign(roles, {\n				end: true,\n				endWord: number.word\n			});\n			else {\n				roles.n = number.value;\n				if (number.book != null) roles.bookNum = number.book;\n			}\n			if (marker) {\n				roles.chapType = marker.word ?? marker.text;\n				if (marker.cls === \"p\" || at(\"pm0\")) {\n					roles.extra = true;\n					roles.chapType = (at(\"pm0\") ?? marker).word;\n				}\n			}\n		}\n		let span = at(\"cn3\");\n		if (span) roles.span = span.value;\n		let bookNumber = at(\"bn\") ?? at(\"bn2\") ?? at(\"bn3\") ?? at(\"bn4\");\n		if (bookNumber) {\n			roles.bookNum = bookNumber.value;\n			roles.bookType = (at(\"bm\") ?? at(\"bm2\") ?? at(\"bm3\") ?? at(\"bm4\"))?.word;\n		}\n		if (rule.kind === \"extrahead\") roles.extra = true;\n		if (rule.kind === \"half\") {\n			let numbered = at(\"hn\") ?? at(\"hn2\");\n			if (numbered) Object.assign(roles, {\n				halfNum: numbered.value,\n				halfType: \"tiết\",\n				half: numbered.value\n			});\n			else Object.assign(roles, {\n				half: at(\"hm\")?.value,\n				halfText: at(\"hm\")?.word,\n				halfBracketed: !!at(\"hl\")\n			});\n		}\n		return {\n			roles,\n			number,\n			marker\n		};\n	}\n	function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase, titled }) {\n		let base = rule.base;\n		if (rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? TUNING.base.decimal : 0) + (number?.digits ? TUNING.base.digits : 0);\n		else if (number?.book != null) base += TUNING.base.decimal;\n		if (marker?.cls === \"c\" && marker.word === \"Thiên\") base += TUNING.base.thien;\n		if (hasPhrase && whole) base += TUNING.base.phraseAlone;\n		let ending = /(?:^|\\s)(?:hoàn|xong|kết thúc)(?:$|[\\s.!)])/iu.test(title);\n		let bookMax = TUNING.base.bookTitleMax;\n		if (rule.kind === \"book\") base += whole || titled && title.length <= bookMax && !ending ? TUNING.base.bookAlone : title.length > bookMax || ending || roles.bookType === \"Giai đoạn\" ? TUNING.base.bookProse : 0;\n		base -= marker ? Math.min(proseCost(title), TUNING.base.markerProseMax) : proseCost(title);\n		if (/tác giả/.test(rest) || /^\\s*[-–~]\\s*\\d/.test(rest)) base += TUNING.base.titlePage;\n		if (hasRoman) base += TUNING.base.roman;\n		return base;\n	}\n	function shapeOf(tokens, length, whole) {\n		return tokens.slice(0, length).map((t) => t.cls !== \"N\" ? t.cls : t.book != null ? \"D\" : t.digits ? \"#\" : \"N\").join(\"\").replace(/x+/g, \"X\") + (whole ? \"\" : \"T\");\n	}\n	const SECTION_LABEL = /^\\s*chính văn\\s+(?=\\S)/iu;\n	function partOf(title) {\n		let alone = /^\\(\\s*(\\p{L}+(?: \\p{L}+)*)\\s*\\)$/u.exec(title);\n		if (alone) {\n			let value = valueOfPart(alone[1].toLowerCase());\n			if (value != null) return {\n				half: value,\n				halfText: alone[1].toLowerCase(),\n				title: \"\"\n			};\n		}\n		let ending = /\\s*\\((thượng|trung|hạ)\\)$/iu.exec(title);\n		if (ending) return {\n			half: HALF_WORDS[ending[1].toLowerCase()],\n			halfText: ending[1].toLowerCase(),\n			title\n		};\n		return null;\n	}\n	function valueOfPart(word) {\n		if (word in HALF_WORDS) return HALF_WORDS[word];\n		let words = word.split(\" \");\n		let number = readNumberWords(words, 0);\n		return number?.length === words.length ? number.value : null;\n	}\n	const BOOK_TITLE = /^\\s*tên sách\\s*[:：]\\s*(\\S.*?)\\s*$/iu;\n	function readHeading(line, lower, names) {\n		if (line.length > 400) return null;\n		let named = BOOK_TITLE.exec(line);\n		if (named) return heading({\n			kind: \"book\",\n			base: TUNING.base.bookTitle,\n			bookName: named[1],\n			title: named[1],\n			text: line.trim(),\n			start: line.search(/\\S/),\n			shape: \"named\"\n		});\n		let label = SECTION_LABEL.exec(line);\n		if (label) {\n			let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names);\n			return node && {\n				...node,\n				start: label[0].search(/\\S/)\n			};\n		}\n		let tokens = lexLine(line, lower, names);\n		if (!tokens.some((t) => \"NEhbp\".includes(t.cls))) return null;\n		let classes = tokens.map((t) => t.cls).join(\"\");\n		for (let rule of HEADING_RULES) {\n			let m = rule.re.exec(classes);\n			if (!m) continue;\n			let at = (group) => {\n				let span = spanOf(m, group);\n				return span ? tokens[span[0]] : null;\n			};\n			if (at(\"cm2\") && at(\"cm2\")?.word !== \"Chương\" && !at(\"tt\")) continue;\n			if (rule.sino && (!at(\"cn\")?.sino || at(\"sep\")?.text !== \",\")) continue;\n			let last = tokens[m[0].length - 1];\n			let rest = line.slice(last.e);\n			let whole = !/\\S/.test(rest);\n			let read = readRoles(rule, at);\n			let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);\n			if (at(\"bn4\")) title = title.replace(/^chi\\s+/iu, \"\");\n			if (read.roles.n != null) title = title.replace(new RegExp(`^(?:\\\\S+\\\\s+){0,3}?(?:chương|hồi)\\\\s+${read.roles.n}\\\\s*[:：.]*\\\\s*`, \"iu\"), \"\");\n			let part = read.roles.n != null && partOf(title);\n			let hasRoman = tokens.some((t) => t.roman);\n			let base = baseOf(rule, read, {\n				title,\n				rest,\n				whole,\n				hasRoman,\n				hasPhrase: !!at(\"ph\"),\n				titled: /^[:：]$/.test(last.text)\n			});\n			if (read.roles.n === 0 && !read.marker) continue;\n			if (part) title = part.title;\n			let kind = rule.kind === \"chap\" && read.roles.n === 0 ? \"interlude\" : rule.kind;\n			let inner = rule.kind === \"chap\" && read.roles.n != null && (/^(.*?)\\s*[|｜]\\s*(\\S.*)$/u.exec(rest) ?? /^(.*?)\\s*[【[]?\\s*(thứ\\s+\\S+\\s+hồi\\b.*)$/iu.exec(rest));\n			if (inner) {\n				let held = readHeading(inner[2].replace(/^[【[]\\s*/, \"\"), inner[2].replace(/^[【[]\\s*/, \"\").toLowerCase(), names);\n				if (held && held.kind === \"chap\" && held.n != null && !held.outer) {\n					let outer = `${read.marker?.word ?? \"Chương\"} ${read.roles.n}`;\n					return heading({\n						...held,\n						outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(\": \"),\n						start: tokens[0].s,\n						text: line.slice(tokens[0].s)\n					});\n				}\n			}\n			return heading({\n				...read.roles,\n				...part && {\n					half: part.half,\n					halfText: part.halfText,\n					halfBracketed: true\n				},\n				kind,\n				base,\n				rest,\n				title,\n				whole,\n				shape: shapeOf(tokens, m[0].length, whole),\n				text: line.slice(tokens[0].s, last.e),\n				start: tokens[0].s\n			});\n		}\n		return null;\n	}\n	const INLINE_HEADING = /(?<![\\p{L}\\p{N}])(?<word>chương|hồi)\\s+(?<n>\\d{1,4})(?![\\p{L}\\p{N}.])/giu;\n	function inlineHeadings(line, lineStart, ord) {\n		let found = [];\n		for (let m of line.matchAll(INLINE_HEADING)) {\n			if (!/\\S/.test(line.slice(0, m.index))) continue;\n			let rest = line.slice(m.index + m[0].length);\n			let { n, word } = m.groups;\n			found.push(heading({\n				kind: \"chap\",\n				n: Number(n),\n				chapType: CHAPTER_WORDS[word.toLowerCase()],\n				base: TUNING.base.inline,\n				inline: true,\n				text: m[0],\n				rest,\n				title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),\n				shape: \"inline\",\n				index: lineStart + m.index,\n				ord\n			}));\n		}\n		return found;\n	}\n	function findCandidates(text, name) {\n		let lowerName = name.toLowerCase().normalize();\n		let names = [.../* @__PURE__ */ new Set([lowerName, lowerName.replace(\"hệ liệt\", \"\").trim()])].filter(Boolean).sort((a, z) => z.length - a.length);\n		let nodes = [];\n		let ord = 0;\n		let lineStart = 0;\n		while (lineStart <= text.length) {\n			let lineEnd = text.indexOf(\"\\n\", lineStart);\n			if (lineEnd === -1) lineEnd = text.length;\n			let line = text.slice(lineStart, lineEnd);\n			if (/\\S/.test(line)) {\n				ord++;\n				let lower = line.toLowerCase();\n				let node = lower.length === line.length ? readHeading(line, lower, names) : null;\n				if (node) nodes.push(heading({\n					...node,\n					index: lineStart + node.start,\n					ord\n				}));\n				if (!(node && node.base >= TUNING.path.breakMinBase) && line.length < 4e3) nodes.push(...inlineHeadings(line, lineStart, ord));\n			}\n			lineStart = lineEnd + 1;\n		}\n		if (nodes.filter((node) => node.bookName).length < 2) nodes = nodes.filter((node) => !node.bookName);\n		return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);\n	}\n	const reached = (node, fields = {}) => ({\n		book: node.bookNum ?? 0,\n		word: node.bookType,\n		kind: null,\n		name: node.bookName,\n		extra: !!node.extra,\n		n: node.span ?? node.n ?? null,\n		half: null,\n		ended: false,\n		carry: 0,\n		...fields\n	});\n	function chooseHeadings(nodes, credit = {}, strongOnly = false, excluded = /* @__PURE__ */ new Set()) {\n		let score = new Array(nodes.length).fill(-Infinity);\n		let prev = new Array(nodes.length).fill(-1);\n		let joined = new Array(nodes.length).fill(false);\n		let state = new Array(nodes.length);\n		let byNumber = /* @__PURE__ */ new Map();\n		let bestByKey = /* @__PURE__ */ new Map();\n		let books = [];\n		let top = -1;\n		let remember = (i) => {\n			let { n, book, extra } = state[i];\n			if (n != null) {\n				if (!byNumber.has(n)) byNumber.set(n, []);\n				byNumber.get(n).push(i);\n			}\n			let key = `${book}/${extra ? 1 : 0}`;\n			if (!bestByKey.has(key) || score[i] > score[bestByKey.get(key)]) bestByKey.set(key, i);\n		};\n		let apart = (i, j) => nodes[i].ord - nodes[j].ord;\n		let goingOn = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			for (let d = 0; d <= TUNING.path.gapMax; d++) for (let j of byNumber.get(n - d) ?? []) {\n				let s = state[j];\n				if (s.ended || node.extra && !s.extra) continue;\n				if (book != null && s.book !== 0 && book !== s.book) continue;\n				if (d === 0) {\n					if (node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, {\n						...s,\n						half: node.half\n					});\n					else if (apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);\n				} else go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), {\n					...s,\n					n: node.span ?? n,\n					book: book ?? s.book,\n					word: node.bookType ?? s.word,\n					name: book != null ? null : s.name,\n					extra: s.extra || !!node.extra,\n					half: node.half ?? null\n				});\n			}\n		};\n		let afterBookHeading = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			for (let j of books) {\n				let s = state[j];\n				let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;\n				if (s.extra !== !!node.extra && !opensExtra) continue;\n				if (book != null && book !== s.book && !s.name) continue;\n				let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap);\n				let numbered = book != null && {\n					book,\n					word: node.bookType ?? s.word,\n					name: null\n				};\n				go(j, value, {\n					...s,\n					n: node.span ?? n,\n					half: node.half ?? null,\n					...numbered\n				});\n			}\n		};\n		let intoNewBook = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			if (n > TUNING.path.smallNumber || book == null && !node.extra) return;\n			for (let j of bestByKey.values()) {\n				let s = state[j];\n				if (s.extra === !!node.extra && (book == null || book === s.book)) continue;\n				go(j, TUNING.reward.boundary - 1, reached(node, {\n					book: book ?? s.book,\n					word: node.bookType ?? s.word,\n					kind: s.kind,\n					name: book == null ? s.name : null,\n					carry: s.n ?? 0\n				}));\n			}\n		};\n		let breakingOff = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			if (top < 0 || state[top].ended || node.base < TUNING.path.breakMinBase) return;\n			let s = state[top];\n			let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && (s.n ?? 0) >= TUNING.path.unnamedFrom;\n			go(top, TUNING.reward.restart, {\n				...s,\n				n: node.span ?? n,\n				book: book ?? (unnamed ? s.book + 1 : s.book),\n				word: node.bookType ?? s.word,\n				name: book != null ? null : s.name,\n				extra: !!node.extra,\n				half: node.half ?? null,\n				carry: s.n ?? 0\n			});\n		};\n		let startingHere = (i, n, { begin }) => {\n			let node = nodes[i];\n			let start = n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;\n			if (start > 0) begin(start, reached(node));\n			else begin(start, reached(node), true);\n		};\n		let into = {\n			chap(i, ways) {\n				let n = nodes[i].n;\n				if (n == null) return;\n				goingOn(i, n, ways);\n				afterBookHeading(i, n, ways);\n				intoNewBook(i, n, ways);\n				breakingOff(i, n, ways);\n				startingHere(i, n, ways);\n			},\n			end(i, { go }) {\n				let node = nodes[i];\n				let recent = [];\n				for (let j = i - 1; j >= 0 && recent.length < TUNING.path.endLookback; j--) if (score[j] > -Infinity) recent.push(j);\n				for (let j of recent) {\n					let s = state[j];\n					if (s.ended || s.n == null || s.extra !== !!node.extra) continue;\n					if (apart(i, j) <= TUNING.path.closeLines) go(j, TUNING.reward.repeat + 1, {\n						...s,\n						ended: true\n					}, true);\n					else if (s.n >= TUNING.path.endMin) go(j, TUNING.reward.end, {\n						...s,\n						n: s.n + 1,\n						ended: true\n					});\n				}\n			},\n			book(i, { go, begin }) {\n				let node = nodes[i];\n				let b = node.bookNum ?? 0;\n				let extra = node.kind === \"extrahead\" || !!node.extra;\n				if (node.bookName && node.bookNum == null) {\n					for (let j of bestByKey.values()) go(j, 0, reached(node, {\n						book: state[j].book + 1,\n						carry: state[j].n ?? 0,\n						n: null\n					}));\n					begin(TUNING.path.startAlone, reached(node, {\n						book: 1,\n						n: null\n					}), books.length > 0);\n					return;\n				}\n				for (let j of bestByKey.values()) {\n					let s = state[j];\n					let next = b > s.book || b <= 2 && s.book === 0;\n					let ofAnotherKind = !extra && !next && s.word != null && node.bookType != null && s.word !== node.bookType;\n					let follows = extra ? !s.extra : !s.extra && (next || ofAnotherKind);\n					let skipped = extra || ofAnotherKind ? 0 : Math.max(0, b - s.book - 1);\n					let kind = ofAnotherKind || !extra && node.bookType != null && node.bookType === s.kind ? node.bookType : null;\n					if (follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, {\n						book: extra ? s.book : b,\n						kind,\n						extra,\n						carry: s.n ?? 0,\n						n: null\n					}));\n				}\n				begin(TUNING.path.startAlone, reached(node, {\n					book: extra ? 0 : b,\n					extra,\n					n: null\n				}), books.length > 0);\n			},\n			interlude(_i, { go }) {\n				if (top >= 0) go(top, TUNING.reward.interlude, { ...state[top] });\n			},\n			half(i, { go }) {\n				let node = nodes[i];\n				for (let j = i - 1; j >= 0; j--) {\n					if (score[j] === -Infinity) continue;\n					let s = state[j];\n					if (s.n == null || s.ended) continue;\n					if (s.half == null || (node.half ?? 0) > s.half) go(j, TUNING.reward.half, {\n						...s,\n						half: node.half\n					});\n					break;\n				}\n			}\n		};\n		for (let i = 0; i < nodes.length; i++) {\n			let node = nodes[i];\n			let prior = node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold;\n			if (strongOnly && prior < 0 || excluded.has(i)) continue;\n			let best = {\n				value: -Infinity,\n				from: -1,\n				joined: false,\n				as: null\n			};\n			let go = (j, value, as, joins = false) => {\n				if (score[j] + value > best.value) best = {\n					value: score[j] + value,\n					from: j,\n					joined: joins,\n					as\n				};\n			};\n			let begin = (value, as, onlyIfAlone = false) => {\n				if (onlyIfAlone && best.value !== -Infinity) return;\n				if (!(best.value > value)) best = {\n					value,\n					from: -1,\n					joined: false,\n					as\n				};\n			};\n			let way = node.kind === \"chap\" ? node.end ? \"end\" : node.n != null ? \"chap\" : null : node.kind === \"extrahead\" ? \"book\" : node.kind;\n			if (way) into[way](i, {\n				go,\n				begin\n			});\n			if (best.value === -Infinity) continue;\n			score[i] = best.value + prior;\n			prev[i] = best.from;\n			joined[i] = best.joined;\n			state[i] = best.as;\n			let opensBook = node.kind === \"interlude\" && state[i].n == null;\n			if (node.kind === \"book\" || node.kind === \"extrahead\" || opensBook) books.push(i);\n			else remember(i);\n			if (top < 0 || score[i] > score[top]) top = i;\n		}\n		let path = [];\n		for (let i = top; i >= 0; i = prev[i]) path.push({\n			i,\n			joined: joined[i],\n			state: state[i]\n		});\n		return path.reverse();\n	}\n	function tinySections(nodes, path) {\n		let chapters = path.filter(({ i }) => nodes[i].kind === \"chap\");\n		let lengths = chapters.slice(1).map(({ i }, k) => nodes[i].ord - nodes[chapters[k].i].ord).sort((a, z) => a - z);\n		let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;\n		let tiny = /* @__PURE__ */ new Set();\n		if (typical < TUNING.tiny.typicalAtLeast) return tiny;\n		chapters.forEach(({ i }, k) => {\n			let next = chapters[k + 1];\n			if (next && !next.joined && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);\n		});\n		return tiny;\n	}\n	function frontContents(nodes, path) {\n		let chapters = path.filter(({ i, joined }) => !joined && nodes[i].kind !== \"book\" && nodes[i].kind !== \"extrahead\");\n		let lines = (k) => (chapters[k + 1] ? nodes[chapters[k + 1].i].ord : Infinity) - nodes[chapters[k].i].ord;\n		let number = (k) => chapters[k].state.n;\n		let lengths = chapters.slice(0, -1).map((_, k) => lines(k)).sort((a, z) => a - z);\n		let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;\n		for (let k = Math.min(chapters.length - 1, TUNING.contents.maxEntries); k >= TUNING.contents.minEntries; k--) {\n			let head = chapters.slice(0, k);\n			if (head.reduce((sum, _, j) => sum + lines(j), 0) >= Math.max(lines(k), typical)) continue;\n			let numbers = head.map((_, j) => number(j)).filter((n) => n != null);\n			let next = number(k);\n			if (!numbers.length || next == null || next > Math.min(...numbers) || next >= Math.max(...numbers)) continue;\n			let later = new Set(chapters.slice(k).map((_, j) => number(k + j)));\n			if (numbers.every((n) => later.has(n))) return new Set(head.map(({ i }) => i));\n		}\n		return /* @__PURE__ */ new Set();\n	}\n	function shapeCredit(nodes, path) {\n		let seen = {};\n		let taken = {};\n		for (let node of nodes) seen[node.shape] = (seen[node.shape] ?? 0) + 1;\n		for (let { i } of path) taken[nodes[i].shape] = (taken[nodes[i].shape] ?? 0) + 1;\n		let credit = {};\n		for (let shape in seen) credit[shape] = TUNING.trust.scale * (((taken[shape] ?? 0) + .5) / (seen[shape] + 1) - .5);\n		return credit;\n	}\n	function fillGaps(nodes, path, credit) {\n		let weak = [];\n		nodes.forEach((node, i) => {\n			if (node.kind === \"chap\" && node.n != null && node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold < 0) weak.push(i);\n		});\n		let filled = [];\n		let fill = (from, to, first, last, state) => {\n			let at = from;\n			for (let e = first; e <= last; e++) {\n				let found;\n				for (let i of weak) {\n					if (i <= at || i >= to) continue;\n					let node = nodes[i];\n					if (node.n !== e || node.extra && !state.extra) continue;\n					if (!found || node.base > nodes[found].base) found = i;\n				}\n				if (found != null) {\n					filled.push({\n						i: found,\n						joined: false,\n						state: {\n							...state,\n							n: e\n						}\n					});\n					at = found;\n				}\n			}\n		};\n		let previous;\n		let boundary = true;\n		for (let entry of path) {\n			let node = nodes[entry.i];\n			if (node.kind === \"book\" || node.kind === \"extrahead\") {\n				boundary = true;\n				continue;\n			}\n			let n = entry.state.n;\n			if (node.kind !== \"chap\" || n == null || entry.joined) continue;\n			if (previous && !boundary && entry.state.book === previous.state.book && entry.state.extra === previous.state.extra) {\n				if (n > previous.n + 1) fill(previous.i, entry.i, previous.n + 1, n - 1, previous.state);\n			} else if (n > 1 && n <= TUNING.fill.firstMax && !node.extra) fill(previous?.i ?? -1, entry.i, 1, n - 1, {\n				...entry.state,\n				n: 0\n			});\n			previous = {\n				i: entry.i,\n				n,\n				state: entry.state\n			};\n			boundary = false;\n		}\n		return [...path, ...filled].sort((a, z) => a.i - z.i);\n	}\n	const END_PHRASE = /^(chương\\s+)?(kết|cuối)$/i;\n	function pickTitle(members) {\n		let titles = members.map((m) => m.title).filter((t) => t && !END_PHRASE.test(t));\n		titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);\n		let title = titles[0];\n		return title && title.length > TUNING.drafts.titleMax ? `${title.slice(0, TUNING.drafts.titleMax).replace(/\\s+\\S*$/, \"\")}…` : title;\n	}\n	function buildChapters(nodes, path) {\n		let clusters = [];\n		let opening;\n		for (let { i, joined, state } of path) {\n			let node = nodes[i];\n			if (node.kind === \"book\" || node.kind === \"extrahead\") {\n				opening ??= node.index;\n				continue;\n			}\n			let last = clusters.at(-1);\n			if (joined && last) {\n				last.members.push(node);\n				last.state = state;\n				continue;\n			}\n			clusters.push({\n				members: [node],\n				state,\n				index: Math.min(opening ?? Infinity, node.index)\n			});\n			opening = void 0;\n		}\n		let mostSaid = (words) => {\n			let types = {};\n			for (let word of words) if (word) types[word] = (types[word] ?? 0) + 1;\n			return Object.keys(types).sort((a, z) => types[z] - types[a])[0];\n		};\n		let bookWord = mostSaid(path.map(({ i }) => nodes[i].kind === \"book\" ? nodes[i].bookType : null)) ?? mostSaid(path.map(({ i }) => nodes[i].bookNum != null ? nodes[i].bookType : null)) ?? \"Quyển\";\n		let drafts = [];\n		let section;\n		for (let { members, state, index } of clusters) {\n			let first = members[0];\n			let lead = members.reduce((best, m) => m.base > best.base ? m : best, first);\n			let end = members.find((m) => m.end);\n			let numbered = members.find((m) => m.n != null && m.kind !== \"interlude\");\n			let type = members.find((m) => m.chapType)?.chapType ?? (state.extra ? \"Phiên ngoại\" : void 0);\n			let heading = {\n				type,\n				title: pickTitle(members),\n				text: lead.text\n			};\n			if (end) heading.number = end.endWord ?? void 0;\n			else if (first.kind === \"half\") {\n				heading.number = String(state.n);\n				heading.part = first.halfNum != null ? {\n					text: `${first.halfType} ${first.halfNum}`,\n					leading: true\n				} : {\n					text: first.halfText,\n					bracketed: first.halfBracketed\n				};\n			} else if (numbered) {\n				heading.number = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);\n				if (numbered.half != null && numbered.kind === \"chap\") heading.part = {\n					text: numbered.halfText,\n					bracketed: numbered.halfBracketed\n				};\n			}\n			let inherited = section && !lead.outer && state.book === 0 && type === section.type ? section.name : void 0;\n			if (lead.outer) section = {\n				name: lead.outer,\n				type\n			};\n			else if (!inherited) section = void 0;\n			let group = lead.outer ?? inherited ?? state.name ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : void 0);\n			drafts.push({\n				offset: index,\n				group,\n				heading\n			});\n		}\n		let named = drafts.findIndex((d) => d.group);\n		if (named > 0) {\n			let [, type, number] = /^(.*) (\\d+)$/.exec(drafts[named].group) ?? [];\n			if (Number(number) === 2) for (let d of drafts.slice(0, named)) d.group = `${type} 1`;\n		}\n		return drafts;\n	}\n	function seriesChapters(text, { name }) {\n		let lines = [];\n		let start = 0;\n		for (let line of text.split(\"\\n\")) {\n			let found = line.length < 200 && /^\\s*((?:\\p{L}+ ){1,4}\\p{L}+) ?[—–:-]/u.exec(line);\n			if (found) lines.push({\n				key: found[1].toLowerCase(),\n				index: start + line.search(/\\S/),\n				line: line.trim(),\n				length: found[0].trim().length\n			});\n			start += line.length + 1;\n		}\n		let counts = /* @__PURE__ */ new Map();\n		for (let { key } of lines) counts.set(key, (counts.get(key) ?? 0) + 1);\n		let own = name.toLowerCase().normalize();\n		let [key, count = 0] = [...counts].filter(([words]) => own.startsWith(words)).sort((a, z) => z[1] - a[1])[0] ?? [];\n		if (!key || count < TUNING.drafts.seriesMin) return [];\n		let drafts = [];\n		for (let { key: lineKey, index, line, length } of lines) {\n			if (lineKey !== key) continue;\n			let title = cleanTitle(line.slice(length)).replace(/\\s*\\(\\s*\\S{1,12}\\s*\\)\\s*$/, \"\");\n			drafts.push({\n				offset: index,\n				heading: {\n					number: String(drafts.length + 1),\n					title,\n					text: line\n				}\n			});\n		}\n		return drafts;\n	}\n	function pagesOf(text, paragraphsPerPage = TUNING.drafts.pageParagraphs) {\n		let pattern = `(.*\\n){1,${paragraphsPerPage}}`;\n		return [...text.matchAll(new RegExp(pattern, \"gimu\"))].map((m) => ({\n			offset: m.index,\n			heading: { text: m[0] }\n		}));\n	}\n	function extractChapters(filename, text, { name }) {\n		let nodes = findCandidates(text, name);\n		let first = chooseHeadings(nodes);\n		let credit = shapeCredit(nodes, first);\n		let path = chooseHeadings(nodes, credit, true, tinySections(nodes, first));\n		path = fillGaps(nodes, path, credit);\n		let listed = frontContents(nodes, path);\n		path = path.filter(({ i }) => !listed.has(i));\n		let drafts = buildChapters(nodes, path);\n		let series = seriesChapters(text, { name });\n		if (series.length >= TUNING.drafts.seriesMin && series.length > drafts.length * TUNING.drafts.seriesOver) drafts = series;\n		if (drafts.length < 2) drafts = pagesOf(text);\n		return finishChapters(withPrologue(drafts, filename, text), text);\n	}\n	function withPrologue(drafts, filename, text) {\n		if (!text.slice(0, drafts[0]?.offset ?? text.length).trim()) return drafts;\n		return [{\n			offset: 0,\n			heading: {\n				title: filename,\n				text: filename\n			}\n		}, ...drafts];\n	}\n	function slug(text) {\n		return latinize(text).replace(/\\W+/g, \"-\").replace(/^-+|-+$/g, \"\").toLowerCase();\n	}\n	function latinize(source) {\n		let s = source;\n		s = s.replace(/[ÁĂẮẶẰẲẴǍÂẤẬẦẨẪÄǞȦǠẠȀÀẢȂĀĄÅǺḀȺÃⱯᴀ]/g, \"A\");\n		s = s.replace(/[Ꜳ]/g, \"AA\");\n		s = s.replace(/[ÆǼǢᴁ]/g, \"AE\");\n		s = s.replace(/[Ꜵ]/g, \"AO\");\n		s = s.replace(/[Ꜷ]/g, \"AU\");\n		s = s.replace(/[ꜸꜺ]/g, \"AV\");\n		s = s.replace(/[Ꜽ]/g, \"AY\");\n		s = s.replace(/[ḂḄƁḆɃƂʙᴃБ]/g, \"B\");\n		s = s.replace(/[ĆČÇḈĈĊƇȻꜾᴄ]/g, \"C\");\n		s = s.replace(/[ĎḐḒḊḌƊḎǲǅĐÐƋꝹᴅД]/g, \"D\");\n		s = s.replace(/[ǱǄ]/g, \"DZ\");\n		s = s.replace(/[ÉĔĚȨḜÊẾỆỀỂỄḘËĖẸȄÈẺȆĒḖḔĘɆẼḚƐƎᴇⱻЕЭ]/g, \"E\");\n		s = s.replace(/[Ꝫ]/g, \"ET\");\n		s = s.replace(/[ḞƑꝻꜰФ]/g, \"F\");\n		s = s.replace(/[ǴĞǦĢĜĠƓḠǤꝽɢʛГҐ]/g, \"G\");\n		s = s.replace(/[ḪȞḨĤⱧḦḢḤĦʜХ]/g, \"H\");\n		s = s.replace(/[ÍĬǏÎÏḮİỊȈÌỈȊĪĮƗĨḬІɪЙЫИ]/g, \"I\");\n		s = s.replace(/[ꞂŔŘŖṘṚṜȐȒṞɌⱤʁʀᴙᴚР]/g, \"R\");\n		s = s.replace(/[ꞄŚṤŠṦŞŜȘṠṢṨꜱС]/g, \"S\");\n		s = s.replace(/[ꞆŤŢṰȚȾṪṬƬṮƮŦᴛТ]/g, \"T\");\n		s = s.replace(/[Ꝭ]/g, \"IS\");\n		s = s.replace(/[ĴɈᴊ]/g, \"J\");\n		s = s.replace(/[ḰǨĶⱩꝂḲƘḴꝀꝄᴋК]/g, \"K\");\n		s = s.replace(/[ĹȽĽĻḼḶḸⱠꝈḺĿⱢǈŁꞀʟᴌЛ]/g, \"L\");\n		s = s.replace(/[Ǉ]/g, \"LJ\");\n		s = s.replace(/[ḾṀṂⱮƜᴍМ]/g, \"M\");\n		s = s.replace(/[ŃŇŅṊṄṆǸƝṈȠǋÑɴᴎН]/g, \"N\");\n		s = s.replace(/[Ǌ]/g, \"NJ\");\n		s = s.replace(/[ÓŎǑÔỐỘỒỔỖÖȪȮȰỌŐȌÒỎƠỚỢỜỞỠȎꝊꝌŌṒṐƟǪǬØǾÕṌṎȬƆᴏᴐО]/g, \"O\");\n		s = s.replace(/[Ƣ]/g, \"OI\");\n		s = s.replace(/[Ꝏ]/g, \"OO\");\n		s = s.replace(/[Ȣᴕ]/g, \"OU\");\n		s = s.replace(/[ṔṖꝒƤꝔⱣꝐᴘП]/g, \"P\");\n		s = s.replace(/[ꝘꝖ]/g, \"Q\");\n		s = s.replace(/[ß]/g, \"ss\");\n		s = s.replace(/[ɅꝞṾƲṼᴠВ]/g, \"V\");\n		s = s.replace(/[Ꜩ]/g, \"TZ\");\n		s = s.replace(/[ÚŬǓÛṶÜǗǙǛǕṲỤŰȔÙỦƯỨỰỪỬỮȖŪṺŲŮŨṸṴᴜУ]/g, \"U\");\n		s = s.replace(/[Ꝡ]/g, \"VY\");\n		s = s.replace(/[ẂŴẄẆẈẀⱲᴡ]/g, \"W\");\n		s = s.replace(/[ẌẊ]/g, \"X\");\n		s = s.replace(/[ÝŶŸẎỴỲƳỶỾȲɎỸʏ]/g, \"Y\");\n		s = s.replace(/[Ї]/g, \"YI\");\n		s = s.replace(/[ŹŽẐⱫŻẒȤẔƵᴢЗ]/g, \"Z\");\n		s = s.replace(/[Þ]/g, \"TH\");\n		s = s.replace(/[Ĳ]/g, \"IJ\");\n		s = s.replace(/[Œɶ]/g, \"OE\");\n		s = s.replace(/[áăắặằẳẵǎâấậầẩẫäǟȧǡạȁàảȃāąᶏẚåǻḁⱥãɐₐАа]/g, \"a\");\n		s = s.replace(/[ꜳ]/g, \"aa\");\n		s = s.replace(/[æǽǣᴂ]/g, \"ae\");\n		s = s.replace(/[ꜵ]/g, \"ao\");\n		s = s.replace(/[ꜷ]/g, \"au\");\n		s = s.replace(/[ꜹꜻ]/g, \"av\");\n		s = s.replace(/[ꜽ]/g, \"ay\");\n		s = s.replace(/[ḃḅɓḇᵬᶀƀƃб]/g, \"b\");\n		s = s.replace(/[ɵóŏǒôốộồổỗöȫȯȱọőȍòỏơớợờởỡȏꝋꝍⱺōṓṑǫǭøǿõṍṏȭɔᶗᴑᴓₒо]/g, \"o\");\n		s = s.replace(/[ćčçḉĉɕċƈȼↄꜿ]/g, \"c\");\n		s = s.replace(/[ďḑḓȡḋḍɗᶑḏᵭᶁđɖƌðꝺд]/g, \"d\");\n		s = s.replace(/[ıíĭǐîïḯịȉìỉȋīįᶖɨĩḭіᴉᵢйыи]/g, \"i\");\n		s = s.replace(/[ȷɟʄǰĵʝɉⱼ]/g, \"j\");\n		s = s.replace(/[ǳǆ]/g, \"dz\");\n		s = s.replace(/[éĕěȩḝêếệềểễḙëėẹȅèẻȇēḗḕⱸęᶒɇẽḛɛᶓɘǝₑеэ]/g, \"e\");\n		s = s.replace(/[ꝫ]/g, \"et\");\n		s = s.replace(/[ḟƒᵮᶂꝼф]/g, \"f\");\n		s = s.replace(/[ǵğǧģĝġɠḡᶃǥᵹɡᵷгґ]/g, \"g\");\n		s = s.replace(/[ḫȟḩĥⱨḧḣḥɦẖħɥʮʯх]/g, \"h\");\n		s = s.replace(/[ƕ]/g, \"hv\");\n		s = s.replace(/[ꞃŕřŗṙṛṝȑɾᵳȓṟɼᵲᶉɍɽɿɹɻɺⱹᵣр]/g, \"r\");\n		s = s.replace(/[ꞅſẜẛẝśṥšṧşŝșṡṣṩʂᵴᶊȿс]/g, \"s\");\n		s = s.replace(/[ꞇťţṱțȶẗⱦṫṭƭṯᵵƫʈŧʇт]/g, \"t\");\n		s = s.replace(/[ꝭ]/g, \"is\");\n		s = s.replace(/[ḱǩķⱪꝃḳƙḵᶄꝁꝅʞк]/g, \"k\");\n		s = s.replace(/[ĺƚɬľļḽȴḷḹⱡꝉḻŀɫᶅɭłꞁл]/g, \"l\");\n		s = s.replace(/[ǉ]/g, \"lj\");\n		s = s.replace(/[ḿṁṃɱᵯᶆɯɰм]/g, \"m\");\n		s = s.replace(/[ńňņṋȵṅṇǹɲṉƞᵰᶇɳñн]/g, \"n\");\n		s = s.replace(/[ǌ]/g, \"nj\");\n		s = s.replace(/[ƣ]/g, \"oi\");\n		s = s.replace(/[ꝏ]/g, \"oo\");\n		s = s.replace(/[ȣ]/g, \"ou\");\n		s = s.replace(/[ṕṗꝓƥᵱᶈꝕᵽꝑп]/g, \"p\");\n		s = s.replace(/[ꝙʠɋꝗ]/g, \"q\");\n		s = s.replace(/[ᴝúŭǔûṷüǘǚǜǖṳụűȕùủưứựừửữȗūṻųᶙůũṹṵᵤу]/g, \"u\");\n		s = s.replace(/[ᵺþ]/g, \"th\");\n		s = s.replace(/[ᴔœ]/g, \"oe\");\n		s = s.replace(/[ʌⱴꝟṿʋᶌⱱṽᵥв]/g, \"v\");\n		s = s.replace(/[ʍẃŵẅẇẉẁⱳẘ]/g, \"w\");\n		s = s.replace(/[ʎýŷÿẏỵỳƴỷỿȳẙɏỹ]/g, \"y\");\n		s = s.replace(/[ꜩ]/g, \"tz\");\n		s = s.replace(/[ᵫ]/g, \"ue\");\n		s = s.replace(/[ꝸ]/g, \"um\");\n		s = s.replace(/[ꝡ]/g, \"vy\");\n		s = s.replace(/[ẍẋᶍₓ]/g, \"x\");\n		s = s.replace(/[ї]/g, \"yi\");\n		s = s.replace(/[źžẑʑⱬżẓȥẕᵶᶎʐƶɀз]/g, \"z\");\n		s = s.replace(/[ﬀ]/g, \"ff\");\n		s = s.replace(/[ﬃ]/g, \"ffi\");\n		s = s.replace(/[ﬄ]/g, \"ffl\");\n		s = s.replace(/[ﬁ]/g, \"fi\");\n		s = s.replace(/[ﬂ]/g, \"fl\");\n		s = s.replace(/[ĳ]/g, \"ij\");\n		s = s.replace(/[ﬆ]/g, \"st\");\n		s = s.replace(/[Ё]/g, \"YO\");\n		s = s.replace(/[Ц]/g, \"TS\");\n		s = s.replace(/[Ш]/g, \"SH\");\n		s = s.replace(/[Щ]/g, \"SCH\");\n		s = s.replace(/[ЪъЬь]/g, \"'\");\n		s = s.replace(/[ё]/g, \"yo\");\n		s = s.replace(/[ц]/g, \"ts\");\n		s = s.replace(/[ш]/g, \"sh\");\n		s = s.replace(/[щ]/g, \"sch\");\n		s = s.replace(/[Ж]/g, \"ZH\");\n		s = s.replace(/[ж]/g, \"zh\");\n		s = s.replace(/[Я]/g, \"Ya\");\n		s = s.replace(/[Ч]/g, \"CH\");\n		s = s.replace(/[Ю]/g, \"YU\");\n		s = s.replace(/[я]/g, \"ya\");\n		s = s.replace(/[ч]/g, \"ch\");\n		s = s.replace(/[ю]/g, \"yu\");\n		return s;\n	}\n	//#endregion\n	//#region src/parser-worker.ts\n	onmessage = ({ data: { id, name, text } }) => {\n		try {\n			postMessage({\n				id,\n				chapters: extractChapters(name, normalizeFileContent(text), { name })\n			});\n		} catch (error) {\n			postMessage({\n				id,\n				error: String(error?.message ?? error)\n			});\n		}\n	};\n	//#endregion\n})();\n";
+var blob = typeof self !== "undefined" && self.Blob && new Blob(["(self.URL || self.webkitURL).revokeObjectURL(self.location.href);", jsContent], { type: "text/javascript;charset=utf-8" });
+function WorkerWrapper(options) {
+	let objURL;
+	try {
+		objURL = blob && (self.URL || self.webkitURL).createObjectURL(blob);
+		if (!objURL) throw "";
+		const worker = new Worker(objURL, { name: options?.name });
+		worker.addEventListener("error", () => {
+			(self.URL || self.webkitURL).revokeObjectURL(objURL);
+		});
+		return worker;
+	} catch (e) {
+		return new Worker("data:text/javascript;charset=utf-8," + encodeURIComponent(jsContent), { name: options?.name });
+	}
 }
 //#endregion
-//#region src/reading.js
-function createReader({ parserSource, parser, Worker = globalThis.Worker, Blob = globalThis.Blob, URL = globalThis.URL, console = globalThis.console }) {
+//#region src/parser.ts
+function normalizeFileContent(source) {
+	let text = source.normalize();
+	text = text.replace(/[\r\n]+/g, "\n");
+	text = text.replace(/\t+/g, "\n");
+	text = text.replace(/(?<=\S) {2,}(?=\p{Lu})/gu, "\n");
+	text = text.replace(/(.+)/g, (s) => s.trim());
+	text = text.replace(/^'([^']+)'$/gm, "\"$1\"");
+	text = text.replace(/(\d)\s*(\.)\s*(\d)/gm, "$1$2$3");
+	text = text.replace(/\s+([.,;:?!\]】)])/gm, "$1");
+	text = text.replace(/([([【])\s+/gm, "$1");
+	text = text.replace(/([:—]{2,})/gm, (c) => c.slice(0, 1));
+	text = text.replace(/(:)[^\s\w]+\s*/gm, "$1 ");
+	text = text.replace(/^\s*"\s+|\s+"\s*$/gm, "\"");
+	text = text.replace(/\s?"?QQ Group \d+"?/gu, "");
+	text = text.replaceAll("  tìm sách a \"Cuộc đời này không phụ diên đuôi tình\" cá nhân cải biên", "");
+	text = text.replace(/\b(?<protocol>https?:)(?:\/\/)? (?<path>(?:\w+)(?:\. \w+)+(?:\/(?:(?:\. )?[\w/])+)?)/gm, (...args) => {
+		let { protocol, path } = args.pop();
+		path = path.replace(/\s/g, "");
+		if (protocol) return `${protocol}//${path}`;
+		return path;
+	});
+	text = text.replaceAll("cha mẹ vợ", "mẹ vợ");
+	return text;
+}
+function chapterTitle({ type = "Chương", number, part, title, text }, ordinal) {
+	title = title?.replace(/^[\s/|\\]+/, "") ?? "";
+	let isExtra = (s) => /phiên ngoại/iu.test(s ?? "");
+	let named = [[isExtra(text) && !isExtra(title) && !isExtra(type) ? "Phiên ngoại" : void 0, number != null && `${type} ${number}`].filter(Boolean).join(" "), title.replace(/./, (c) => c.toUpperCase())].filter(Boolean).join(": ");
+	let shown = part && !title.includes(`(${part.text})`) ? part : null;
+	return [
+		shown?.leading && `${shown.text}:`,
+		named,
+		shown && !shown.leading && `(${shown.text})`
+	].filter(Boolean).join(" ") || `${type} ${ordinal + 1}`;
+}
+var PART_MARK = /\s*[(（]\s*([^()（）]{1,16}?)\s*[)）]\s*(【[^】]*】)?\s*$/u;
+function partMark({ title = "", part }) {
+	let marked = PART_MARK.exec(title);
+	let bare = (written) => written?.toLowerCase().replace(/^[\s\p{P}]+|[\s\p{P}]+$/gu, "");
+	let word = bare(part?.text ?? marked?.[1]);
+	if (!word) return null;
+	let number = part?.leading ? Number(/\d+$/.exec(word)?.[0] ?? NaN) : /^\d+$/.test(word) ? Number(word) : word in HALF_WORDS ? null : valueOfPart(word);
+	if (Number.isNaN(number)) number = null;
+	let half = /^(thượng|trung|hạ)(?:\s+(\d+))?$/u.exec(word);
+	if (number == null && !half) return null;
+	let order = number ?? HALF_WORDS[half[1]] + Number(half[2] ?? 0) / 1e3;
+	let ours = marked && bare(marked[1]) === word ? marked : null;
+	return {
+		stem: (ours ? title.slice(0, ours.index) : title).trim(),
+		word,
+		number,
+		order,
+		bracketed: !!ours || !!part?.bracketed,
+		tag: ours?.[2]
+	};
+}
+function partsOf(drafts, text) {
+	let headingOnly = (i) => text.slice(drafts[i].offset, drafts[i + 1]?.offset ?? text.length).split("\n").filter((line) => line.trim()).length <= TUNING.drafts.headingLines;
+	let marks = drafts.map(({ heading }) => heading && partMark(heading));
+	let together = (a, b) => drafts[a].group === drafts[b].group && (drafts[a].heading.type ?? "Chương") === (drafts[b].heading.type ?? "Chương");
+	let numbers = (i) => String(drafts[i].heading.number ?? "").split("-").map(Number);
+	let step = (a, b) => drafts[a].heading.number === drafts[b].heading.number ? 0 : numbers(b)[0] - numbers(a).at(-1);
+	marks.forEach((mark, i) => {
+		let next = marks[i + 1];
+		let title = drafts[i].heading?.title?.trim();
+		if (mark || !next || !title || !together(i, i + 1) || step(i, i + 1) > 1) return;
+		let untitled = next.stem === "" && step(i, i + 1) === 0;
+		if (title.toLowerCase() !== next.stem.toLowerCase() && !untitled) return;
+		let second = next.number != null ? next.number === 2 : next.order > 1;
+		let first = next.number != null ? next.number === 1 : next.order === 1;
+		if (second) marks[i] = {
+			stem: title,
+			word: next.number != null ? "1" : "thượng",
+			number: next.number != null ? 1 : null,
+			order: 1,
+			bracketed: next.bracketed
+		};
+		else if (first && headingOnly(i)) marks[i] = {
+			stem: title,
+			head: true,
+			order: 0
+		};
+		else return;
+		for (let j = i + 1; untitled && marks[j]?.stem === "" && step(i, j) === 0; j++) marks[j] = {
+			...marks[j],
+			stem: title,
+			given: title
+		};
+	});
+	let follows = (a, b) => {
+		let [from, to] = [marks[a], marks[b]];
+		if (!from || !to || to.head || !together(a, b)) return false;
+		if (from.stem.toLowerCase() !== to.stem.toLowerCase()) return false;
+		let named = from.stem !== "";
+		let s = step(a, b);
+		if (!(s === 0 || s === 1 || named && s === 2)) return false;
+		return to.order > from.order || to.order === from.order && (s === 0 || named);
+	};
+	let parts = new Array(drafts.length);
+	for (let start = 0, end = 0; start < drafts.length; start = end) {
+		for (end = start + 1; end < drafts.length && follows(end - 1, end); end++);
+		if (end - start < 2) continue;
+		let [first, last] = [drafts[start].heading, drafts[end - 1].heading];
+		let number = first.number === last.number ? first.number : `${numbers(start)[0]}-${numbers(end - 1).at(-1)}`;
+		let run = marks.slice(start, end);
+		let of = chapterTitle({
+			...first,
+			number,
+			part: void 0,
+			title: run[0].stem
+		}, start);
+		let shown = run.filter((m) => !m.head);
+		let numbered = shown.every((m) => m.number != null);
+		let total = Math.max(new Set(shown.map((m) => m.order)).size, ...shown.map((m) => m.number ?? 0));
+		run.forEach((m, k) => {
+			let said = numbered ? `${m.number}/${total}` : m.word;
+			parts[start + k] = m.head ? {
+				of,
+				head: true
+			} : {
+				of,
+				text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(" "),
+				title: m.given
+			};
+		});
+	}
+	return parts;
+}
+function finishChapters(drafts, text) {
+	let parts = partsOf(drafts, text);
+	let kept = [];
+	drafts.forEach((draft, i) => {
+		let part = parts[i];
+		if (part?.head) return;
+		kept.push({
+			...draft,
+			offset: parts[i - 1]?.head ? drafts[i - 1].offset : draft.offset,
+			heading: part?.title ? {
+				...draft.heading,
+				title: part.title
+			} : draft.heading,
+			part: part && {
+				of: part.of,
+				text: part.text
+			}
+		});
+	});
+	return kept.map(({ offset, group, heading, part }, i) => {
+		let title = chapterTitle(heading, i);
+		let end = kept[i + 1]?.offset ?? text.length;
+		return {
+			id: `${slug(title)}-${i}`,
+			title,
+			offset,
+			group,
+			part,
+			content: text.slice(offset, end).trim()
+		};
+	});
+}
+var TUNING = {
+	base: {
+		decimal: 2,
+		digits: 1.5,
+		thien: -4,
+		phraseAlone: 1,
+		bookAlone: 3,
+		bookTitle: 8,
+		bookTitleMax: 40,
+		bookProse: -10,
+		markerProseMax: 2,
+		titlePage: -6,
+		roman: -2,
+		inline: 3,
+		inlineTitleMax: 80
+	},
+	prose: {
+		longerThan: 100,
+		long: 3,
+		commas: 2,
+		manyCommas: 2,
+		oneCommaOver: 40,
+		oneComma: 1,
+		sentenceOver: 50,
+		sentence: 2
+	},
+	reward: {
+		next: 8,
+		gap: 3,
+		repeat: 3,
+		boundary: 7,
+		carryOn: 4,
+		restart: -6,
+		half: 4,
+		end: 6,
+		interlude: 1
+	},
+	path: {
+		threshold: 4.5,
+		closeLines: 3,
+		gapMax: 4,
+		smallNumber: 3,
+		startAlone: 3,
+		startFar: -6,
+		lateStartCost: 4,
+		lateStartCap: 10,
+		opensExtraLines: 4,
+		breakMinBase: 6,
+		unnamedFrom: 6,
+		unnamedUpTo: 2,
+		endLookback: 40,
+		endMin: 2,
+		skippedBooksMax: 3
+	},
+	trust: { scale: 6 },
+	tiny: {
+		typicalAtLeast: 30,
+		lines: 2
+	},
+	contents: {
+		minEntries: 3,
+		maxEntries: 60
+	},
+	fill: { firstMax: 4 },
+	drafts: {
+		titleMax: 100,
+		seriesMin: 8,
+		seriesOver: 1.2,
+		pageParagraphs: 60,
+		headingLines: 2
+	}
+};
+var WORD_DIGITS = {
+	một: 1,
+	mốt: 1,
+	hai: 2,
+	ba: 3,
+	bốn: 4,
+	tư: 4,
+	năm: 5,
+	lăm: 5,
+	sáu: 6,
+	bảy: 7,
+	tám: 8,
+	chín: 9
+};
+var SINO_DIGITS = {
+	nhất: 1,
+	nhị: 2,
+	tam: 3,
+	tứ: 4,
+	ngũ: 5,
+	lục: 6,
+	thất: 7,
+	bát: 8,
+	cửu: 9
+};
+var TENS_UNITS = [
+	"mốt",
+	"hai",
+	"ba",
+	"bốn",
+	"tư",
+	"lăm",
+	"sáu",
+	"bảy",
+	"tám",
+	"chín"
+];
+function readNumberWords(words, i) {
+	let w = (k) => words[i + k];
+	let best = null;
+	let take = (value, length) => {
+		if (!best || length > best.length) best = {
+			value,
+			length
+		};
+	};
+	if (w(0) === "nhất") {
+		let digit = (x) => x === "lẻ" || x === "linh" ? 0 : SINO_DIGITS[x] ?? WORD_DIGITS[x];
+		if (w(1) === "lẻ" && w(2) === "loi") take(100, 3);
+		if ([
+			"lẻ",
+			"linh",
+			...Object.keys(SINO_DIGITS)
+		].includes(w(1)) && digit(w(2)) != null) take(100 + 10 * digit(w(1)) + digit(w(2)), 3);
+	}
+	if (w(0) === "mười") {
+		take(10, 1);
+		if (w(1) in WORD_DIGITS && w(1) !== "tư") take(10 + WORD_DIGITS[w(1)], 2);
+	}
+	if (w(0) in WORD_DIGITS) {
+		take(WORD_DIGITS[w(0)], 1);
+		if (w(1) === "mươi") {
+			let tens = 10 * WORD_DIGITS[w(0)];
+			take(tens, 2);
+			if (TENS_UNITS.includes(w(2))) take(tens + WORD_DIGITS[w(2)], 3);
+		}
+	}
+	let sino = (k) => SINO_DIGITS[w(k)];
+	if (w(0) === "thập") {
+		take(10, 1);
+		if (sino(1)) take(10 + sino(1), 2);
+	}
+	if (sino(0)) {
+		take(sino(0), 1);
+		if (w(1) === "thập") {
+			take(sino(0) * 10, 2);
+			if (sino(2)) take(sino(0) * 10 + sino(2), 3);
+		}
+	}
+	return best;
+}
+var ROMAN_VALUES = {
+	I: 1,
+	V: 5,
+	X: 10,
+	L: 50,
+	C: 100,
+	D: 500,
+	M: 1e3
+};
+function readRoman(word) {
+	if (!/^[IVXLCDM]+$/.test(word)) return null;
+	let total = 0;
+	for (let k = 0; k < word.length; k++) {
+		let [a, b] = [ROMAN_VALUES[word[k]], ROMAN_VALUES[word[k + 1]] ?? 0];
+		total += a < b ? -a : a;
+	}
+	return total > 0 && total < 4e3 ? total : null;
+}
+var CHAPTER_WORDS = {
+	chương: "Chương",
+	hồi: "Hồi",
+	thiên: "Thiên"
+};
+var BOOK_WORDS = {
+	quyển: "Quyển",
+	tập: "Tập",
+	bộ: "Bộ",
+	cuốn: "Cuốn",
+	quý: "Quý"
+};
+var HALF_WORDS = {
+	thượng: 1,
+	trung: 2,
+	hạ: 3
+};
+var KNOWN_WORDS = new Map([
+	...Object.entries(CHAPTER_WORDS).map(([word, shown]) => [word, ["c", { word: shown }]]),
+	...Object.entries(BOOK_WORDS).map(([word, shown]) => [word, ["b", { word: shown }]]),
+	...Object.entries(HALF_WORDS).map(([word, value]) => [word, ["h", {
+		value,
+		word
+	}]]),
+	["thứ", ["t", {}]],
+	["đệ", ["t", {}]],
+	["tiết", ["f", {}]]
+]);
+var KNOWN_PHRASES = [
+	[
+		"phiên ngoại",
+		"p",
+		"Phiên ngoại"
+	],
+	[
+		"ngoại truyện",
+		"p",
+		"Ngoại truyện"
+	],
+	[
+		"giai đoạn",
+		"b",
+		"Giai đoạn"
+	]
+];
+function readKnownWord(word, lower, pos) {
+	for (let [phrase, cls, shown] of KNOWN_PHRASES) if (lower.startsWith(phrase, pos)) return [
+		cls,
+		{ word: shown },
+		phrase.length
+	];
+	let known = KNOWN_WORDS.get(word);
+	return known && [...known, word.length];
+}
+var OPENERS = "【[(（《“\"«";
+var CLOSERS = "】])）》”\"»";
+function lexLine(line, lower, names) {
+	let tokens = [];
+	let pos = 0;
+	while (pos < line.length && tokens.length < 18) {
+		let ch = line[pos];
+		if (/\s/.test(ch)) {
+			pos++;
+			continue;
+		}
+		let add = (cls, end, extra = {}) => {
+			tokens.push({
+				cls,
+				s: pos,
+				e: end,
+				text: line.slice(pos, end),
+				...extra
+			});
+			pos = end;
+		};
+		let name = names.find((n) => lower.startsWith(n, pos) && !/\p{L}/u.test(lower[pos + n.length] ?? ""));
+		if (name) {
+			add("n", pos + name.length);
+			continue;
+		}
+		if (OPENERS.includes(ch)) {
+			add("L", pos + 1);
+			continue;
+		}
+		if (CLOSERS.includes(ch)) {
+			add("R", pos + 1);
+			continue;
+		}
+		if (/\d/.test(ch)) {
+			let m = /^\d+(?:\.\d+)?/.exec(line.slice(pos));
+			let [major, minor] = m[0].split(".");
+			if (minor != null && Number(major) === 0) {
+				add("x", pos + m[0].length);
+				continue;
+			}
+			add("N", pos + m[0].length, {
+				value: Number(minor ?? major),
+				book: minor == null ? null : Number(major),
+				digits: true
+			});
+			continue;
+		}
+		let letters = /^\p{L}+/u.exec(line.slice(pos));
+		if (!letters) {
+			add("S", pos + 1);
+			continue;
+		}
+		let word = letters[0];
+		let words = [lower.slice(pos, pos + word.length)];
+		let ahead = pos + word.length;
+		for (let k = 0; k < 4; k++) {
+			let next = /^ \p{L}+/u.exec(line.slice(ahead));
+			if (!next) break;
+			words.push(lower.slice(ahead + 1, ahead + next[0].length));
+			ahead += next[0].length;
+		}
+		let number = readNumberWords(words, 0);
+		if (number) {
+			let end = pos;
+			for (let k = 0; k < number.length; k++) end += (k ? 1 : 0) + words[k].length;
+			add("N", end, {
+				value: number.value,
+				sino: words[0] in SINO_DIGITS || words[0] === "thập"
+			});
+			continue;
+		}
+		let roman = readRoman(word);
+		let lowered = words[0];
+		let end = pos + word.length;
+		let known = readKnownWord(lowered, lower, pos);
+		if (roman != null && word.length <= 7) add("N", end, {
+			value: roman,
+			roman: true
+		});
+		else if (known) add(known[0], pos + known[2], known[1]);
+		else if (lowered === "kết" || lowered === "cuối") {
+			let after = /^\s*(\S)/.exec(line.slice(end));
+			add(!after || /[^\p{L}\p{N}]/u.test(after[1]) ? "E" : "x", end, { word: lowered });
+		} else add("x", end);
+	}
+	return tokens;
+}
+var HEADING_DEFAULTS = {
+	kind: "chap",
+	base: 0,
+	index: 0,
+	start: 0,
+	ord: 0,
+	text: "",
+	title: "",
+	rest: "",
+	whole: false,
+	shape: "",
+	n: null,
+	span: null,
+	end: false,
+	endWord: null,
+	chapType: null,
+	extra: false,
+	half: null,
+	halfText: null,
+	halfBracketed: false,
+	halfNum: null,
+	halfType: null,
+	bookNum: null,
+	bookType: null,
+	bookName: null,
+	outer: null,
+	inline: false
+};
+function heading(fields) {
+	return {
+		...HEADING_DEFAULTS,
+		...fields
+	};
+}
+var DECOR = "[LS]*";
+var NAME_PART = "(?:nR?S?)?";
+var BOOK_PART = "(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?";
+var HEADING_RULES = [
+	{
+		kind: "chap",
+		base: 9,
+		re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))(?:L(?<bm4>b)t?(?<bn4>N)R)?`
+	},
+	{
+		kind: "chap",
+		base: 9,
+		re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?`
+	},
+	{
+		kind: "chap",
+		base: 9,
+		re: `^${DECOR}(?<tt>t)?(?<cn>N)S(?<cn3>N)(?<cm2>c)`
+	},
+	{
+		kind: "chap",
+		base: 7,
+		re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?`
+	},
+	{
+		kind: "chap",
+		base: 7,
+		re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}${DECOR}(?<cn>N)`
+	},
+	{
+		kind: "book",
+		base: 6,
+		re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}`
+	},
+	{
+		kind: "extrahead",
+		base: 5,
+		re: "^[LS]*x{1,8}(?<pm>p)$"
+	},
+	{
+		kind: "half",
+		base: 5,
+		re: "^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)"
+	},
+	{
+		kind: "chap",
+		base: 5,
+		weakTitled: 4.5,
+		sino: true,
+		re: "^(?<cn>N)(?<sep>S)"
+	},
+	{
+		kind: "chap",
+		base: 5,
+		weakTitled: 3,
+		re: "^L?(?<cn>N)R?"
+	},
+	{
+		kind: "chap",
+		base: 6,
+		re: "^[LS]*(?<pre>[xc]{1,6})(?<cm>c)(?<cn>N)(?![xNE])"
+	},
+	{
+		kind: "chap",
+		base: 4,
+		re: "^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R"
+	},
+	{
+		kind: "half",
+		base: 5,
+		re: "^(?<hl>L)?(?<hm>h)R?$"
+	}
+].map((rule) => ({
+	...rule,
+	re: new RegExp(rule.re, "d")
+}));
+var spanOf = (m, group) => m.indices?.groups?.[group];
+function cleanTitle(rest) {
+	let title = rest.replace(/^[\s:：.,\-—–/|)\]】”"»*#!]+/u, "").trimEnd();
+	while (/[】\]”"»]$/u.test(title) && (title.match(/[】\]”"»]/gu) || []).length > (title.match(/[【[“«]/gu) || []).length) title = title.slice(0, -1).trimEnd();
+	return title;
+}
+function proseCost(rest) {
+	let t = TUNING.prose;
+	let cost = 0;
+	let commas = (rest.match(/[,;]/g) || []).length;
+	if (rest.length > t.longerThan) cost += t.long;
+	if (commas >= t.commas) cost += t.manyCommas;
+	else if (commas === 1 && rest.length > t.oneCommaOver) cost += t.oneComma;
+	if (rest.length > t.sentenceOver && /[.!?…"”]$/.test(rest)) cost += t.sentence;
+	return cost;
+}
+function leadingTitle(m, tokens, line, rest) {
+	let span = spanOf(m, "pre") ?? spanOf(m, "ph");
+	if (!span) return null;
+	let words = tokens.slice(span[0], span[1]);
+	let from = words[(spanOf(m, "ph") ? words.findLastIndex((t) => t.cls === "S") : -1) + 1] ?? words[0];
+	return cleanTitle([line.slice(from.s, words.at(-1).e), cleanTitle(rest)].filter(Boolean).join(" "));
+}
+function readRoles(rule, at) {
+	let roles = {};
+	let number = at("cn") ?? at("cn2");
+	let marker = at("cm") ?? at("cm2");
+	if (rule.kind === "chap" && number) {
+		if (number.cls === "E") Object.assign(roles, {
+			end: true,
+			endWord: number.word
+		});
+		else {
+			roles.n = number.value;
+			if (number.book != null) roles.bookNum = number.book;
+		}
+		if (marker) {
+			roles.chapType = marker.word ?? marker.text;
+			if (marker.cls === "p" || at("pm0")) {
+				roles.extra = true;
+				roles.chapType = (at("pm0") ?? marker).word;
+			}
+		}
+	}
+	let span = at("cn3");
+	if (span) roles.span = span.value;
+	let bookNumber = at("bn") ?? at("bn2") ?? at("bn3") ?? at("bn4");
+	if (bookNumber) {
+		roles.bookNum = bookNumber.value;
+		roles.bookType = (at("bm") ?? at("bm2") ?? at("bm3") ?? at("bm4"))?.word;
+	}
+	if (rule.kind === "extrahead") roles.extra = true;
+	if (rule.kind === "half") {
+		let numbered = at("hn") ?? at("hn2");
+		if (numbered) Object.assign(roles, {
+			halfNum: numbered.value,
+			halfType: "tiết",
+			half: numbered.value
+		});
+		else Object.assign(roles, {
+			half: at("hm")?.value,
+			halfText: at("hm")?.word,
+			halfBracketed: !!at("hl")
+		});
+	}
+	return {
+		roles,
+		number,
+		marker
+	};
+}
+function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase, titled }) {
+	let base = rule.base;
+	if (rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? TUNING.base.decimal : 0) + (number?.digits ? TUNING.base.digits : 0);
+	else if (number?.book != null) base += TUNING.base.decimal;
+	if (marker?.cls === "c" && marker.word === "Thiên") base += TUNING.base.thien;
+	if (hasPhrase && whole) base += TUNING.base.phraseAlone;
+	let ending = /(?:^|\s)(?:hoàn|xong|kết thúc)(?:$|[\s.!)])/iu.test(title);
+	let bookMax = TUNING.base.bookTitleMax;
+	if (rule.kind === "book") base += whole || titled && title.length <= bookMax && !ending ? TUNING.base.bookAlone : title.length > bookMax || ending || roles.bookType === "Giai đoạn" ? TUNING.base.bookProse : 0;
+	base -= marker ? Math.min(proseCost(title), TUNING.base.markerProseMax) : proseCost(title);
+	if (/tác giả/.test(rest) || /^\s*[-–~]\s*\d/.test(rest)) base += TUNING.base.titlePage;
+	if (hasRoman) base += TUNING.base.roman;
+	return base;
+}
+function shapeOf(tokens, length, whole) {
+	return tokens.slice(0, length).map((t) => t.cls !== "N" ? t.cls : t.book != null ? "D" : t.digits ? "#" : "N").join("").replace(/x+/g, "X") + (whole ? "" : "T");
+}
+var SECTION_LABEL = /^\s*chính văn\s+(?=\S)/iu;
+function partOf(title) {
+	let alone = /^\(\s*(\p{L}+(?: \p{L}+)*)\s*\)$/u.exec(title);
+	if (alone) {
+		let value = valueOfPart(alone[1].toLowerCase());
+		if (value != null) return {
+			half: value,
+			halfText: alone[1].toLowerCase(),
+			title: ""
+		};
+	}
+	let ending = /\s*\((thượng|trung|hạ)\)$/iu.exec(title);
+	if (ending) return {
+		half: HALF_WORDS[ending[1].toLowerCase()],
+		halfText: ending[1].toLowerCase(),
+		title
+	};
+	return null;
+}
+function valueOfPart(word) {
+	if (word in HALF_WORDS) return HALF_WORDS[word];
+	let words = word.split(" ");
+	let number = readNumberWords(words, 0);
+	return number?.length === words.length ? number.value : null;
+}
+var BOOK_TITLE = /^\s*tên sách\s*[:：]\s*(\S.*?)\s*$/iu;
+function readHeading(line, lower, names) {
+	if (line.length > 400) return null;
+	let named = BOOK_TITLE.exec(line);
+	if (named) return heading({
+		kind: "book",
+		base: TUNING.base.bookTitle,
+		bookName: named[1],
+		title: named[1],
+		text: line.trim(),
+		start: line.search(/\S/),
+		shape: "named"
+	});
+	let label = SECTION_LABEL.exec(line);
+	if (label) {
+		let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names);
+		return node && {
+			...node,
+			start: label[0].search(/\S/)
+		};
+	}
+	let tokens = lexLine(line, lower, names);
+	if (!tokens.some((t) => "NEhbp".includes(t.cls))) return null;
+	let classes = tokens.map((t) => t.cls).join("");
+	for (let rule of HEADING_RULES) {
+		let m = rule.re.exec(classes);
+		if (!m) continue;
+		let at = (group) => {
+			let span = spanOf(m, group);
+			return span ? tokens[span[0]] : null;
+		};
+		if (at("cm2") && at("cm2")?.word !== "Chương" && !at("tt")) continue;
+		if (rule.sino && (!at("cn")?.sino || at("sep")?.text !== ",")) continue;
+		let last = tokens[m[0].length - 1];
+		let rest = line.slice(last.e);
+		let whole = !/\S/.test(rest);
+		let read = readRoles(rule, at);
+		let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);
+		if (at("bn4")) title = title.replace(/^chi\s+/iu, "");
+		if (read.roles.n != null) title = title.replace(new RegExp(`^(?:\\S+\\s+){0,3}?(?:chương|hồi)\\s+${read.roles.n}\\s*[:：.]*\\s*`, "iu"), "");
+		let part = read.roles.n != null && partOf(title);
+		let hasRoman = tokens.some((t) => t.roman);
+		let base = baseOf(rule, read, {
+			title,
+			rest,
+			whole,
+			hasRoman,
+			hasPhrase: !!at("ph"),
+			titled: /^[:：]$/.test(last.text)
+		});
+		if (read.roles.n === 0 && !read.marker) continue;
+		if (part) title = part.title;
+		let kind = rule.kind === "chap" && read.roles.n === 0 ? "interlude" : rule.kind;
+		let inner = rule.kind === "chap" && read.roles.n != null && (/^(.*?)\s*[|｜]\s*(\S.*)$/u.exec(rest) ?? /^(.*?)\s*[【[]?\s*(thứ\s+\S+\s+hồi\b.*)$/iu.exec(rest));
+		if (inner) {
+			let held = readHeading(inner[2].replace(/^[【[]\s*/, ""), inner[2].replace(/^[【[]\s*/, "").toLowerCase(), names);
+			if (held && held.kind === "chap" && held.n != null && !held.outer) {
+				let outer = `${read.marker?.word ?? "Chương"} ${read.roles.n}`;
+				return heading({
+					...held,
+					outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(": "),
+					start: tokens[0].s,
+					text: line.slice(tokens[0].s)
+				});
+			}
+		}
+		return heading({
+			...read.roles,
+			...part && {
+				half: part.half,
+				halfText: part.halfText,
+				halfBracketed: true
+			},
+			kind,
+			base,
+			rest,
+			title,
+			whole,
+			shape: shapeOf(tokens, m[0].length, whole),
+			text: line.slice(tokens[0].s, last.e),
+			start: tokens[0].s
+		});
+	}
+	return null;
+}
+var INLINE_HEADING = /(?<![\p{L}\p{N}])(?<word>chương|hồi)\s+(?<n>\d{1,4})(?![\p{L}\p{N}.])/giu;
+function inlineHeadings(line, lineStart, ord) {
+	let found = [];
+	for (let m of line.matchAll(INLINE_HEADING)) {
+		if (!/\S/.test(line.slice(0, m.index))) continue;
+		let rest = line.slice(m.index + m[0].length);
+		let { n, word } = m.groups;
+		found.push(heading({
+			kind: "chap",
+			n: Number(n),
+			chapType: CHAPTER_WORDS[word.toLowerCase()],
+			base: TUNING.base.inline,
+			inline: true,
+			text: m[0],
+			rest,
+			title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),
+			shape: "inline",
+			index: lineStart + m.index,
+			ord
+		}));
+	}
+	return found;
+}
+function findCandidates(text, name) {
+	let lowerName = name.toLowerCase().normalize();
+	let names = [.../* @__PURE__ */ new Set([lowerName, lowerName.replace("hệ liệt", "").trim()])].filter(Boolean).sort((a, z) => z.length - a.length);
+	let nodes = [];
+	let ord = 0;
+	let lineStart = 0;
+	while (lineStart <= text.length) {
+		let lineEnd = text.indexOf("\n", lineStart);
+		if (lineEnd === -1) lineEnd = text.length;
+		let line = text.slice(lineStart, lineEnd);
+		if (/\S/.test(line)) {
+			ord++;
+			let lower = line.toLowerCase();
+			let node = lower.length === line.length ? readHeading(line, lower, names) : null;
+			if (node) nodes.push(heading({
+				...node,
+				index: lineStart + node.start,
+				ord
+			}));
+			if (!(node && node.base >= TUNING.path.breakMinBase) && line.length < 4e3) nodes.push(...inlineHeadings(line, lineStart, ord));
+		}
+		lineStart = lineEnd + 1;
+	}
+	if (nodes.filter((node) => node.bookName).length < 2) nodes = nodes.filter((node) => !node.bookName);
+	return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);
+}
+var reached = (node, fields = {}) => ({
+	book: node.bookNum ?? 0,
+	word: node.bookType,
+	kind: null,
+	name: node.bookName,
+	extra: !!node.extra,
+	n: node.span ?? node.n ?? null,
+	half: null,
+	ended: false,
+	carry: 0,
+	...fields
+});
+function chooseHeadings(nodes, credit = {}, strongOnly = false, excluded = /* @__PURE__ */ new Set()) {
+	let score = new Array(nodes.length).fill(-Infinity);
+	let prev = new Array(nodes.length).fill(-1);
+	let joined = new Array(nodes.length).fill(false);
+	let state = new Array(nodes.length);
+	let byNumber = /* @__PURE__ */ new Map();
+	let bestByKey = /* @__PURE__ */ new Map();
+	let books = [];
+	let top = -1;
+	let remember = (i) => {
+		let { n, book, extra } = state[i];
+		if (n != null) {
+			if (!byNumber.has(n)) byNumber.set(n, []);
+			byNumber.get(n).push(i);
+		}
+		let key = `${book}/${extra ? 1 : 0}`;
+		if (!bestByKey.has(key) || score[i] > score[bestByKey.get(key)]) bestByKey.set(key, i);
+	};
+	let apart = (i, j) => nodes[i].ord - nodes[j].ord;
+	let goingOn = (i, n, { go }) => {
+		let node = nodes[i];
+		let { bookNum: book } = node;
+		for (let d = 0; d <= TUNING.path.gapMax; d++) for (let j of byNumber.get(n - d) ?? []) {
+			let s = state[j];
+			if (s.ended || node.extra && !s.extra) continue;
+			if (book != null && s.book !== 0 && book !== s.book) continue;
+			if (d === 0) {
+				if (node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, {
+					...s,
+					half: node.half
+				});
+				else if (apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
+			} else go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), {
+				...s,
+				n: node.span ?? n,
+				book: book ?? s.book,
+				word: node.bookType ?? s.word,
+				name: book != null ? null : s.name,
+				extra: s.extra || !!node.extra,
+				half: node.half ?? null
+			});
+		}
+	};
+	let afterBookHeading = (i, n, { go }) => {
+		let node = nodes[i];
+		let { bookNum: book } = node;
+		for (let j of books) {
+			let s = state[j];
+			let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;
+			if (s.extra !== !!node.extra && !opensExtra) continue;
+			if (book != null && book !== s.book && !s.name) continue;
+			let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap);
+			let numbered = book != null && {
+				book,
+				word: node.bookType ?? s.word,
+				name: null
+			};
+			go(j, value, {
+				...s,
+				n: node.span ?? n,
+				half: node.half ?? null,
+				...numbered
+			});
+		}
+	};
+	let intoNewBook = (i, n, { go }) => {
+		let node = nodes[i];
+		let { bookNum: book } = node;
+		if (n > TUNING.path.smallNumber || book == null && !node.extra) return;
+		for (let j of bestByKey.values()) {
+			let s = state[j];
+			if (s.extra === !!node.extra && (book == null || book === s.book)) continue;
+			go(j, TUNING.reward.boundary - 1, reached(node, {
+				book: book ?? s.book,
+				word: node.bookType ?? s.word,
+				kind: s.kind,
+				name: book == null ? s.name : null,
+				carry: s.n ?? 0
+			}));
+		}
+	};
+	let breakingOff = (i, n, { go }) => {
+		let node = nodes[i];
+		let { bookNum: book } = node;
+		if (top < 0 || state[top].ended || node.base < TUNING.path.breakMinBase) return;
+		let s = state[top];
+		let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && (s.n ?? 0) >= TUNING.path.unnamedFrom;
+		go(top, TUNING.reward.restart, {
+			...s,
+			n: node.span ?? n,
+			book: book ?? (unnamed ? s.book + 1 : s.book),
+			word: node.bookType ?? s.word,
+			name: book != null ? null : s.name,
+			extra: !!node.extra,
+			half: node.half ?? null,
+			carry: s.n ?? 0
+		});
+	};
+	let startingHere = (i, n, { begin }) => {
+		let node = nodes[i];
+		let start = n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;
+		if (start > 0) begin(start, reached(node));
+		else begin(start, reached(node), true);
+	};
+	let into = {
+		chap(i, ways) {
+			let n = nodes[i].n;
+			if (n == null) return;
+			goingOn(i, n, ways);
+			afterBookHeading(i, n, ways);
+			intoNewBook(i, n, ways);
+			breakingOff(i, n, ways);
+			startingHere(i, n, ways);
+		},
+		end(i, { go }) {
+			let node = nodes[i];
+			let recent = [];
+			for (let j = i - 1; j >= 0 && recent.length < TUNING.path.endLookback; j--) if (score[j] > -Infinity) recent.push(j);
+			for (let j of recent) {
+				let s = state[j];
+				if (s.ended || s.n == null || s.extra !== !!node.extra) continue;
+				if (apart(i, j) <= TUNING.path.closeLines) go(j, TUNING.reward.repeat + 1, {
+					...s,
+					ended: true
+				}, true);
+				else if (s.n >= TUNING.path.endMin) go(j, TUNING.reward.end, {
+					...s,
+					n: s.n + 1,
+					ended: true
+				});
+			}
+		},
+		book(i, { go, begin }) {
+			let node = nodes[i];
+			let b = node.bookNum ?? 0;
+			let extra = node.kind === "extrahead" || !!node.extra;
+			if (node.bookName && node.bookNum == null) {
+				for (let j of bestByKey.values()) go(j, 0, reached(node, {
+					book: state[j].book + 1,
+					carry: state[j].n ?? 0,
+					n: null
+				}));
+				begin(TUNING.path.startAlone, reached(node, {
+					book: 1,
+					n: null
+				}), books.length > 0);
+				return;
+			}
+			for (let j of bestByKey.values()) {
+				let s = state[j];
+				let next = b > s.book || b <= 2 && s.book === 0;
+				let ofAnotherKind = !extra && !next && s.word != null && node.bookType != null && s.word !== node.bookType;
+				let follows = extra ? !s.extra : !s.extra && (next || ofAnotherKind);
+				let skipped = extra || ofAnotherKind ? 0 : Math.max(0, b - s.book - 1);
+				let kind = ofAnotherKind || !extra && node.bookType != null && node.bookType === s.kind ? node.bookType : null;
+				if (follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, {
+					book: extra ? s.book : b,
+					kind,
+					extra,
+					carry: s.n ?? 0,
+					n: null
+				}));
+			}
+			begin(TUNING.path.startAlone, reached(node, {
+				book: extra ? 0 : b,
+				extra,
+				n: null
+			}), books.length > 0);
+		},
+		interlude(_i, { go }) {
+			if (top >= 0) go(top, TUNING.reward.interlude, { ...state[top] });
+		},
+		half(i, { go }) {
+			let node = nodes[i];
+			for (let j = i - 1; j >= 0; j--) {
+				if (score[j] === -Infinity) continue;
+				let s = state[j];
+				if (s.n == null || s.ended) continue;
+				if (s.half == null || (node.half ?? 0) > s.half) go(j, TUNING.reward.half, {
+					...s,
+					half: node.half
+				});
+				break;
+			}
+		}
+	};
+	for (let i = 0; i < nodes.length; i++) {
+		let node = nodes[i];
+		let prior = node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold;
+		if (strongOnly && prior < 0 || excluded.has(i)) continue;
+		let best = {
+			value: -Infinity,
+			from: -1,
+			joined: false,
+			as: null
+		};
+		let go = (j, value, as, joins = false) => {
+			if (score[j] + value > best.value) best = {
+				value: score[j] + value,
+				from: j,
+				joined: joins,
+				as
+			};
+		};
+		let begin = (value, as, onlyIfAlone = false) => {
+			if (onlyIfAlone && best.value !== -Infinity) return;
+			if (!(best.value > value)) best = {
+				value,
+				from: -1,
+				joined: false,
+				as
+			};
+		};
+		let way = node.kind === "chap" ? node.end ? "end" : node.n != null ? "chap" : null : node.kind === "extrahead" ? "book" : node.kind;
+		if (way) into[way](i, {
+			go,
+			begin
+		});
+		if (best.value === -Infinity) continue;
+		score[i] = best.value + prior;
+		prev[i] = best.from;
+		joined[i] = best.joined;
+		state[i] = best.as;
+		let opensBook = node.kind === "interlude" && state[i].n == null;
+		if (node.kind === "book" || node.kind === "extrahead" || opensBook) books.push(i);
+		else remember(i);
+		if (top < 0 || score[i] > score[top]) top = i;
+	}
+	let path = [];
+	for (let i = top; i >= 0; i = prev[i]) path.push({
+		i,
+		joined: joined[i],
+		state: state[i]
+	});
+	return path.reverse();
+}
+function tinySections(nodes, path) {
+	let chapters = path.filter(({ i }) => nodes[i].kind === "chap");
+	let lengths = chapters.slice(1).map(({ i }, k) => nodes[i].ord - nodes[chapters[k].i].ord).sort((a, z) => a - z);
+	let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;
+	let tiny = /* @__PURE__ */ new Set();
+	if (typical < TUNING.tiny.typicalAtLeast) return tiny;
+	chapters.forEach(({ i }, k) => {
+		let next = chapters[k + 1];
+		if (next && !next.joined && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);
+	});
+	return tiny;
+}
+function frontContents(nodes, path) {
+	let chapters = path.filter(({ i, joined }) => !joined && nodes[i].kind !== "book" && nodes[i].kind !== "extrahead");
+	let lines = (k) => (chapters[k + 1] ? nodes[chapters[k + 1].i].ord : Infinity) - nodes[chapters[k].i].ord;
+	let number = (k) => chapters[k].state.n;
+	let lengths = chapters.slice(0, -1).map((_, k) => lines(k)).sort((a, z) => a - z);
+	let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;
+	for (let k = Math.min(chapters.length - 1, TUNING.contents.maxEntries); k >= TUNING.contents.minEntries; k--) {
+		let head = chapters.slice(0, k);
+		if (head.reduce((sum, _, j) => sum + lines(j), 0) >= Math.max(lines(k), typical)) continue;
+		let numbers = head.map((_, j) => number(j)).filter((n) => n != null);
+		let next = number(k);
+		if (!numbers.length || next == null || next > Math.min(...numbers) || next >= Math.max(...numbers)) continue;
+		let later = new Set(chapters.slice(k).map((_, j) => number(k + j)));
+		if (numbers.every((n) => later.has(n))) return new Set(head.map(({ i }) => i));
+	}
+	return /* @__PURE__ */ new Set();
+}
+function shapeCredit(nodes, path) {
+	let seen = {};
+	let taken = {};
+	for (let node of nodes) seen[node.shape] = (seen[node.shape] ?? 0) + 1;
+	for (let { i } of path) taken[nodes[i].shape] = (taken[nodes[i].shape] ?? 0) + 1;
+	let credit = {};
+	for (let shape in seen) credit[shape] = TUNING.trust.scale * (((taken[shape] ?? 0) + .5) / (seen[shape] + 1) - .5);
+	return credit;
+}
+function fillGaps(nodes, path, credit) {
+	let weak = [];
+	nodes.forEach((node, i) => {
+		if (node.kind === "chap" && node.n != null && node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold < 0) weak.push(i);
+	});
+	let filled = [];
+	let fill = (from, to, first, last, state) => {
+		let at = from;
+		for (let e = first; e <= last; e++) {
+			let found;
+			for (let i of weak) {
+				if (i <= at || i >= to) continue;
+				let node = nodes[i];
+				if (node.n !== e || node.extra && !state.extra) continue;
+				if (!found || node.base > nodes[found].base) found = i;
+			}
+			if (found != null) {
+				filled.push({
+					i: found,
+					joined: false,
+					state: {
+						...state,
+						n: e
+					}
+				});
+				at = found;
+			}
+		}
+	};
+	let previous;
+	let boundary = true;
+	for (let entry of path) {
+		let node = nodes[entry.i];
+		if (node.kind === "book" || node.kind === "extrahead") {
+			boundary = true;
+			continue;
+		}
+		let n = entry.state.n;
+		if (node.kind !== "chap" || n == null || entry.joined) continue;
+		if (previous && !boundary && entry.state.book === previous.state.book && entry.state.extra === previous.state.extra) {
+			if (n > previous.n + 1) fill(previous.i, entry.i, previous.n + 1, n - 1, previous.state);
+		} else if (n > 1 && n <= TUNING.fill.firstMax && !node.extra) fill(previous?.i ?? -1, entry.i, 1, n - 1, {
+			...entry.state,
+			n: 0
+		});
+		previous = {
+			i: entry.i,
+			n,
+			state: entry.state
+		};
+		boundary = false;
+	}
+	return [...path, ...filled].sort((a, z) => a.i - z.i);
+}
+var END_PHRASE = /^(chương\s+)?(kết|cuối)$/i;
+function pickTitle(members) {
+	let titles = members.map((m) => m.title).filter((t) => t && !END_PHRASE.test(t));
+	titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);
+	let title = titles[0];
+	return title && title.length > TUNING.drafts.titleMax ? `${title.slice(0, TUNING.drafts.titleMax).replace(/\s+\S*$/, "")}…` : title;
+}
+function buildChapters(nodes, path) {
+	let clusters = [];
+	let opening;
+	for (let { i, joined, state } of path) {
+		let node = nodes[i];
+		if (node.kind === "book" || node.kind === "extrahead") {
+			opening ??= node.index;
+			continue;
+		}
+		let last = clusters.at(-1);
+		if (joined && last) {
+			last.members.push(node);
+			last.state = state;
+			continue;
+		}
+		clusters.push({
+			members: [node],
+			state,
+			index: Math.min(opening ?? Infinity, node.index)
+		});
+		opening = void 0;
+	}
+	let mostSaid = (words) => {
+		let types = {};
+		for (let word of words) if (word) types[word] = (types[word] ?? 0) + 1;
+		return Object.keys(types).sort((a, z) => types[z] - types[a])[0];
+	};
+	let bookWord = mostSaid(path.map(({ i }) => nodes[i].kind === "book" ? nodes[i].bookType : null)) ?? mostSaid(path.map(({ i }) => nodes[i].bookNum != null ? nodes[i].bookType : null)) ?? "Quyển";
+	let drafts = [];
+	let section;
+	for (let { members, state, index } of clusters) {
+		let first = members[0];
+		let lead = members.reduce((best, m) => m.base > best.base ? m : best, first);
+		let end = members.find((m) => m.end);
+		let numbered = members.find((m) => m.n != null && m.kind !== "interlude");
+		let type = members.find((m) => m.chapType)?.chapType ?? (state.extra ? "Phiên ngoại" : void 0);
+		let heading = {
+			type,
+			title: pickTitle(members),
+			text: lead.text
+		};
+		if (end) heading.number = end.endWord ?? void 0;
+		else if (first.kind === "half") {
+			heading.number = String(state.n);
+			heading.part = first.halfNum != null ? {
+				text: `${first.halfType} ${first.halfNum}`,
+				leading: true
+			} : {
+				text: first.halfText,
+				bracketed: first.halfBracketed
+			};
+		} else if (numbered) {
+			heading.number = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);
+			if (numbered.half != null && numbered.kind === "chap") heading.part = {
+				text: numbered.halfText,
+				bracketed: numbered.halfBracketed
+			};
+		}
+		let inherited = section && !lead.outer && state.book === 0 && type === section.type ? section.name : void 0;
+		if (lead.outer) section = {
+			name: lead.outer,
+			type
+		};
+		else if (!inherited) section = void 0;
+		let group = lead.outer ?? inherited ?? state.name ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : void 0);
+		drafts.push({
+			offset: index,
+			group,
+			heading
+		});
+	}
+	let named = drafts.findIndex((d) => d.group);
+	if (named > 0) {
+		let [, type, number] = /^(.*) (\d+)$/.exec(drafts[named].group) ?? [];
+		if (Number(number) === 2) for (let d of drafts.slice(0, named)) d.group = `${type} 1`;
+	}
+	return drafts;
+}
+function seriesChapters(text, { name }) {
+	let lines = [];
+	let start = 0;
+	for (let line of text.split("\n")) {
+		let found = line.length < 200 && /^\s*((?:\p{L}+ ){1,4}\p{L}+) ?[—–:-]/u.exec(line);
+		if (found) lines.push({
+			key: found[1].toLowerCase(),
+			index: start + line.search(/\S/),
+			line: line.trim(),
+			length: found[0].trim().length
+		});
+		start += line.length + 1;
+	}
+	let counts = /* @__PURE__ */ new Map();
+	for (let { key } of lines) counts.set(key, (counts.get(key) ?? 0) + 1);
+	let own = name.toLowerCase().normalize();
+	let [key, count = 0] = [...counts].filter(([words]) => own.startsWith(words)).sort((a, z) => z[1] - a[1])[0] ?? [];
+	if (!key || count < TUNING.drafts.seriesMin) return [];
+	let drafts = [];
+	for (let { key: lineKey, index, line, length } of lines) {
+		if (lineKey !== key) continue;
+		let title = cleanTitle(line.slice(length)).replace(/\s*\(\s*\S{1,12}\s*\)\s*$/, "");
+		drafts.push({
+			offset: index,
+			heading: {
+				number: String(drafts.length + 1),
+				title,
+				text: line
+			}
+		});
+	}
+	return drafts;
+}
+function pagesOf(text, paragraphsPerPage = TUNING.drafts.pageParagraphs) {
+	let pattern = `(.*\n){1,${paragraphsPerPage}}`;
+	return [...text.matchAll(new RegExp(pattern, "gimu"))].map((m) => ({
+		offset: m.index,
+		heading: { text: m[0] }
+	}));
+}
+function extractChapters(filename, text, { name }) {
+	let nodes = findCandidates(text, name);
+	let first = chooseHeadings(nodes);
+	let credit = shapeCredit(nodes, first);
+	let path = chooseHeadings(nodes, credit, true, tinySections(nodes, first));
+	path = fillGaps(nodes, path, credit);
+	let listed = frontContents(nodes, path);
+	path = path.filter(({ i }) => !listed.has(i));
+	let drafts = buildChapters(nodes, path);
+	let series = seriesChapters(text, { name });
+	if (series.length >= TUNING.drafts.seriesMin && series.length > drafts.length * TUNING.drafts.seriesOver) drafts = series;
+	if (drafts.length < 2) drafts = pagesOf(text);
+	return finishChapters(withPrologue(drafts, filename, text), text);
+}
+function withPrologue(drafts, filename, text) {
+	if (!text.slice(0, drafts[0]?.offset ?? text.length).trim()) return drafts;
+	return [{
+		offset: 0,
+		heading: {
+			title: filename,
+			text: filename
+		}
+	}, ...drafts];
+}
+function slug(text) {
+	return latinize(text).replace(/\W+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+}
+function latinize(source) {
+	let s = source;
+	s = s.replace(/[ÁĂẮẶẰẲẴǍÂẤẬẦẨẪÄǞȦǠẠȀÀẢȂĀĄÅǺḀȺÃⱯᴀ]/g, "A");
+	s = s.replace(/[Ꜳ]/g, "AA");
+	s = s.replace(/[ÆǼǢᴁ]/g, "AE");
+	s = s.replace(/[Ꜵ]/g, "AO");
+	s = s.replace(/[Ꜷ]/g, "AU");
+	s = s.replace(/[ꜸꜺ]/g, "AV");
+	s = s.replace(/[Ꜽ]/g, "AY");
+	s = s.replace(/[ḂḄƁḆɃƂʙᴃБ]/g, "B");
+	s = s.replace(/[ĆČÇḈĈĊƇȻꜾᴄ]/g, "C");
+	s = s.replace(/[ĎḐḒḊḌƊḎǲǅĐÐƋꝹᴅД]/g, "D");
+	s = s.replace(/[ǱǄ]/g, "DZ");
+	s = s.replace(/[ÉĔĚȨḜÊẾỆỀỂỄḘËĖẸȄÈẺȆĒḖḔĘɆẼḚƐƎᴇⱻЕЭ]/g, "E");
+	s = s.replace(/[Ꝫ]/g, "ET");
+	s = s.replace(/[ḞƑꝻꜰФ]/g, "F");
+	s = s.replace(/[ǴĞǦĢĜĠƓḠǤꝽɢʛГҐ]/g, "G");
+	s = s.replace(/[ḪȞḨĤⱧḦḢḤĦʜХ]/g, "H");
+	s = s.replace(/[ÍĬǏÎÏḮİỊȈÌỈȊĪĮƗĨḬІɪЙЫИ]/g, "I");
+	s = s.replace(/[ꞂŔŘŖṘṚṜȐȒṞɌⱤʁʀᴙᴚР]/g, "R");
+	s = s.replace(/[ꞄŚṤŠṦŞŜȘṠṢṨꜱС]/g, "S");
+	s = s.replace(/[ꞆŤŢṰȚȾṪṬƬṮƮŦᴛТ]/g, "T");
+	s = s.replace(/[Ꝭ]/g, "IS");
+	s = s.replace(/[ĴɈᴊ]/g, "J");
+	s = s.replace(/[ḰǨĶⱩꝂḲƘḴꝀꝄᴋК]/g, "K");
+	s = s.replace(/[ĹȽĽĻḼḶḸⱠꝈḺĿⱢǈŁꞀʟᴌЛ]/g, "L");
+	s = s.replace(/[Ǉ]/g, "LJ");
+	s = s.replace(/[ḾṀṂⱮƜᴍМ]/g, "M");
+	s = s.replace(/[ŃŇŅṊṄṆǸƝṈȠǋÑɴᴎН]/g, "N");
+	s = s.replace(/[Ǌ]/g, "NJ");
+	s = s.replace(/[ÓŎǑÔỐỘỒỔỖÖȪȮȰỌŐȌÒỎƠỚỢỜỞỠȎꝊꝌŌṒṐƟǪǬØǾÕṌṎȬƆᴏᴐО]/g, "O");
+	s = s.replace(/[Ƣ]/g, "OI");
+	s = s.replace(/[Ꝏ]/g, "OO");
+	s = s.replace(/[Ȣᴕ]/g, "OU");
+	s = s.replace(/[ṔṖꝒƤꝔⱣꝐᴘП]/g, "P");
+	s = s.replace(/[ꝘꝖ]/g, "Q");
+	s = s.replace(/[ß]/g, "ss");
+	s = s.replace(/[ɅꝞṾƲṼᴠВ]/g, "V");
+	s = s.replace(/[Ꜩ]/g, "TZ");
+	s = s.replace(/[ÚŬǓÛṶÜǗǙǛǕṲỤŰȔÙỦƯỨỰỪỬỮȖŪṺŲŮŨṸṴᴜУ]/g, "U");
+	s = s.replace(/[Ꝡ]/g, "VY");
+	s = s.replace(/[ẂŴẄẆẈẀⱲᴡ]/g, "W");
+	s = s.replace(/[ẌẊ]/g, "X");
+	s = s.replace(/[ÝŶŸẎỴỲƳỶỾȲɎỸʏ]/g, "Y");
+	s = s.replace(/[Ї]/g, "YI");
+	s = s.replace(/[ŹŽẐⱫŻẒȤẔƵᴢЗ]/g, "Z");
+	s = s.replace(/[Þ]/g, "TH");
+	s = s.replace(/[Ĳ]/g, "IJ");
+	s = s.replace(/[Œɶ]/g, "OE");
+	s = s.replace(/[áăắặằẳẵǎâấậầẩẫäǟȧǡạȁàảȃāąᶏẚåǻḁⱥãɐₐАа]/g, "a");
+	s = s.replace(/[ꜳ]/g, "aa");
+	s = s.replace(/[æǽǣᴂ]/g, "ae");
+	s = s.replace(/[ꜵ]/g, "ao");
+	s = s.replace(/[ꜷ]/g, "au");
+	s = s.replace(/[ꜹꜻ]/g, "av");
+	s = s.replace(/[ꜽ]/g, "ay");
+	s = s.replace(/[ḃḅɓḇᵬᶀƀƃб]/g, "b");
+	s = s.replace(/[ɵóŏǒôốộồổỗöȫȯȱọőȍòỏơớợờởỡȏꝋꝍⱺōṓṑǫǭøǿõṍṏȭɔᶗᴑᴓₒо]/g, "o");
+	s = s.replace(/[ćčçḉĉɕċƈȼↄꜿ]/g, "c");
+	s = s.replace(/[ďḑḓȡḋḍɗᶑḏᵭᶁđɖƌðꝺд]/g, "d");
+	s = s.replace(/[ıíĭǐîïḯịȉìỉȋīįᶖɨĩḭіᴉᵢйыи]/g, "i");
+	s = s.replace(/[ȷɟʄǰĵʝɉⱼ]/g, "j");
+	s = s.replace(/[ǳǆ]/g, "dz");
+	s = s.replace(/[éĕěȩḝêếệềểễḙëėẹȅèẻȇēḗḕⱸęᶒɇẽḛɛᶓɘǝₑеэ]/g, "e");
+	s = s.replace(/[ꝫ]/g, "et");
+	s = s.replace(/[ḟƒᵮᶂꝼф]/g, "f");
+	s = s.replace(/[ǵğǧģĝġɠḡᶃǥᵹɡᵷгґ]/g, "g");
+	s = s.replace(/[ḫȟḩĥⱨḧḣḥɦẖħɥʮʯх]/g, "h");
+	s = s.replace(/[ƕ]/g, "hv");
+	s = s.replace(/[ꞃŕřŗṙṛṝȑɾᵳȓṟɼᵲᶉɍɽɿɹɻɺⱹᵣр]/g, "r");
+	s = s.replace(/[ꞅſẜẛẝśṥšṧşŝșṡṣṩʂᵴᶊȿс]/g, "s");
+	s = s.replace(/[ꞇťţṱțȶẗⱦṫṭƭṯᵵƫʈŧʇт]/g, "t");
+	s = s.replace(/[ꝭ]/g, "is");
+	s = s.replace(/[ḱǩķⱪꝃḳƙḵᶄꝁꝅʞк]/g, "k");
+	s = s.replace(/[ĺƚɬľļḽȴḷḹⱡꝉḻŀɫᶅɭłꞁл]/g, "l");
+	s = s.replace(/[ǉ]/g, "lj");
+	s = s.replace(/[ḿṁṃɱᵯᶆɯɰм]/g, "m");
+	s = s.replace(/[ńňņṋȵṅṇǹɲṉƞᵰᶇɳñн]/g, "n");
+	s = s.replace(/[ǌ]/g, "nj");
+	s = s.replace(/[ƣ]/g, "oi");
+	s = s.replace(/[ꝏ]/g, "oo");
+	s = s.replace(/[ȣ]/g, "ou");
+	s = s.replace(/[ṕṗꝓƥᵱᶈꝕᵽꝑп]/g, "p");
+	s = s.replace(/[ꝙʠɋꝗ]/g, "q");
+	s = s.replace(/[ᴝúŭǔûṷüǘǚǜǖṳụűȕùủưứựừửữȗūṻųᶙůũṹṵᵤу]/g, "u");
+	s = s.replace(/[ᵺþ]/g, "th");
+	s = s.replace(/[ᴔœ]/g, "oe");
+	s = s.replace(/[ʌⱴꝟṿʋᶌⱱṽᵥв]/g, "v");
+	s = s.replace(/[ʍẃŵẅẇẉẁⱳẘ]/g, "w");
+	s = s.replace(/[ʎýŷÿẏỵỳƴỷỿȳẙɏỹ]/g, "y");
+	s = s.replace(/[ꜩ]/g, "tz");
+	s = s.replace(/[ᵫ]/g, "ue");
+	s = s.replace(/[ꝸ]/g, "um");
+	s = s.replace(/[ꝡ]/g, "vy");
+	s = s.replace(/[ẍẋᶍₓ]/g, "x");
+	s = s.replace(/[ї]/g, "yi");
+	s = s.replace(/[źžẑʑⱬżẓȥẕᵶᶎʐƶɀз]/g, "z");
+	s = s.replace(/[ﬀ]/g, "ff");
+	s = s.replace(/[ﬃ]/g, "ffi");
+	s = s.replace(/[ﬄ]/g, "ffl");
+	s = s.replace(/[ﬁ]/g, "fi");
+	s = s.replace(/[ﬂ]/g, "fl");
+	s = s.replace(/[ĳ]/g, "ij");
+	s = s.replace(/[ﬆ]/g, "st");
+	s = s.replace(/[Ё]/g, "YO");
+	s = s.replace(/[Ц]/g, "TS");
+	s = s.replace(/[Ш]/g, "SH");
+	s = s.replace(/[Щ]/g, "SCH");
+	s = s.replace(/[ЪъЬь]/g, "'");
+	s = s.replace(/[ё]/g, "yo");
+	s = s.replace(/[ц]/g, "ts");
+	s = s.replace(/[ш]/g, "sh");
+	s = s.replace(/[щ]/g, "sch");
+	s = s.replace(/[Ж]/g, "ZH");
+	s = s.replace(/[ж]/g, "zh");
+	s = s.replace(/[Я]/g, "Ya");
+	s = s.replace(/[Ч]/g, "CH");
+	s = s.replace(/[Ю]/g, "YU");
+	s = s.replace(/[я]/g, "ya");
+	s = s.replace(/[ч]/g, "ch");
+	s = s.replace(/[ю]/g, "yu");
+	return s;
+}
+function Book(file) {
+	let name = /(?<name>^[^(]*).*?\.txt/.exec(file.name.normalize())?.groups?.name.trim() ?? file.name;
+	let description = /(?<description>\(.*)\.txt/.exec(file.name.normalize())?.groups?.description?.trim();
+	return {
+		id: slug(name),
+		name,
+		description,
+		chapters: void 0
+	};
+}
+function bookRecord({ id, name, description, chapters }) {
+	return {
+		id,
+		name,
+		description,
+		parser: 12,
+		chapters: chapters.map(({ content, ...listed }) => listed)
+	};
+}
+//#endregion
+//#region src/reading.ts
+function createReader({ makeWorker, console = globalThis.console } = {}) {
 	let parserWorker;
 	let reading = /* @__PURE__ */ new Map();
 	let readings = 0;
 	function readInPage(name, text, why) {
 		console.info(`Chapters of "${name}": read in the page (${why})`);
-		return parser.extractChapters(name, parser.normalizeFileContent(text), { name });
+		return extractChapters(name, normalizeFileContent(text), { name });
 	}
 	function startParserWorker() {
+		if (!makeWorker) return null;
 		try {
-			let worker = new Worker(URL.createObjectURL(new Blob([parserSource + `
-        self.onmessage = ({ data: { id, name, text } }) => {
-          try { postMessage({ id, chapters: extractChapters(name, normalizeFileContent(text), { name }) }); }
-          catch (error) { postMessage({ id, error: String(error?.message ?? error) }); }
-        };`], { type: "text/javascript" })));
-			worker.onmessage = ({ data: { id, chapters, error } }) => {
+			let worker = makeWorker(({ id, chapters, error }) => {
 				let job = reading.get(id);
 				reading.delete(id);
-				if (error) job?.resolve(readInPage(job.name, job.text, `the worker failed: ${error}`));
+				if (!job) return;
+				if (error || !chapters) job.resolve(readInPage(job.name, job.text, `the worker failed: ${error}`));
 				else {
-					console.info(`Chapters of "${job?.name}": read in a worker`);
-					job?.resolve(chapters);
+					console.info(`Chapters of "${job.name}": read in a worker`);
+					job.resolve(chapters);
 				}
-			};
-			worker.onerror = () => {
+			}, () => {
 				worker.terminate();
 				parserWorker = null;
 				for (let job of reading.values()) job.resolve(readInPage(job.name, job.text, "the worker could not run"));
 				reading.clear();
-			};
+			});
 			return worker;
 		} catch (error) {
 			console.info("No worker for the parser:", error);
@@ -4339,6 +5795,7 @@ function createReader({ parserSource, parser, Worker = globalThis.Worker, Blob =
 	function chaptersOf(name, text) {
 		parserWorker ??= startParserWorker();
 		if (!parserWorker) return Promise.resolve(readInPage(name, text, "no worker could be made"));
+		let worker = parserWorker;
 		return new Promise((resolve) => {
 			let id = ++readings;
 			reading.set(id, {
@@ -4346,7 +5803,7 @@ function createReader({ parserSource, parser, Worker = globalThis.Worker, Blob =
 				text,
 				resolve
 			});
-			parserWorker.postMessage({
+			worker.postMessage({
 				id,
 				name,
 				text
@@ -4354,9 +5811,11 @@ function createReader({ parserSource, parser, Worker = globalThis.Worker, Blob =
 		});
 	}
 	async function readBook(file, text) {
-		let book = parser.Book(file);
-		book.chapters = await chaptersOf(book.name, text);
-		return book;
+		let book = Book(file);
+		return {
+			...book,
+			chapters: await chaptersOf(book.name, text)
+		};
 	}
 	return {
 		readBook,
@@ -4578,7 +6037,7 @@ replaceTraps((oldTraps) => ({
 }));
 //#endregion
 //#region src/backends.ts
-async function chooseBackend(reading) {
+async function chooseBackend(reader) {
 	if (location.protocol.startsWith("http")) try {
 		let hello = await fetch("/api/hello");
 		if (hello.ok && (await hello.json()).backend === "server") {
@@ -4588,7 +6047,7 @@ async function chooseBackend(reading) {
 	} catch (error) {
 		console.info("No server to keep the books, the browser keeps them:", error);
 	}
-	return browserBackend(reading);
+	return browserBackend(reader);
 }
 function serverBackend() {
 	let call = async (method, route, body) => {
@@ -4627,7 +6086,7 @@ function serverBackend() {
 		characters: (q) => call("GET", `characters?q=${id(q)}`)
 	};
 }
-async function browserBackend({ readBook, Book, bookRecord, PARSER_VERSION }) {
+async function browserBackend({ readBook }) {
 	let db = await openDB("text-reader", 23, {
 		upgrade(db, oldVersion, newVersion, transaction, events) {
 			console.log("upgrade db", {
@@ -4678,10 +6137,7 @@ async function browserBackend({ readBook, Book, bookRecord, PARSER_VERSION }) {
 					size
 				},
 				text,
-				book: await readBook({
-					name,
-					size
-				}, text)
+				book: await readBook({ name }, text)
 			})));
 			let tx = db.transaction([
 				"files",
@@ -4700,7 +6156,7 @@ async function browserBackend({ readBook, Book, bookRecord, PARSER_VERSION }) {
 		},
 		async book(id) {
 			let book = await db.get("books", id);
-			if (!(!book || book.parser !== PARSER_VERSION || !book.chapters.some((c) => c.offset != null))) return book;
+			if (!(!book || book.parser !== 12 || !book.chapters.some((c) => c.offset != null))) return book;
 			console.info("Book read again:", {
 				id,
 				parser: book?.parser
@@ -7713,7 +9169,7 @@ function getColorScheme() {
 	return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 //#endregion
-//#region src/name-patterns.js
+//#region src/name-patterns.ts
 var standaloneRelationships = [
 	"cô cô",
 	"thúc thúc",
@@ -7733,7 +9189,7 @@ var standaloneRelationships = [
 	"mẫu thân"
 ];
 function buildRegex(patterns, placeholders, flags) {
-	let source = patterns.filter(Boolean).map((p, i) => `(?<Case${i + 1}>${typeof p === "string" ? p : p.source})`).join("|");
+	let source = patterns.filter((p) => !!p).map((p, i) => `(?<Case${i + 1}>${typeof p === "string" ? p : p.source})`).join("|");
 	let counts = Object.fromEntries(Object.keys(placeholders).map((k) => [k, 0]));
 	for (let i = 1; i <= 10; i++) for (let [p, r] of Object.entries(placeholders)) source = source.replaceAll(`{${p}}`, () => `(?<${p}${++counts[p]}>${r.source})`);
 	return new RegExp(source, flags);
@@ -8259,7 +9715,7 @@ function applyDataset(key, value) {
 	if (value != null && typeof value === "object") return;
 	document.documentElement.dataset[key] = String(value ?? "");
 }
-function createStore({ parser, reader }) {
+function createStore({ reader }) {
 	const router = createRouter();
 	let backend;
 	const books = track([]);
@@ -8308,7 +9764,7 @@ function createStore({ parser, reader }) {
 				offset,
 				chapterId
 			},
-			term: parser.latinize(name).toLowerCase()
+			term: latinize(name).toLowerCase()
 		};
 	}));
 	const chapterCommands = track(() => {
@@ -8324,7 +9780,7 @@ function createStore({ parser, reader }) {
 					bookId: open.id,
 					offset: listed.offset
 				},
-				term: parser.latinize(`${label} | ${listed.title}`).toLowerCase()
+				term: latinize(`${label} | ${listed.title}`).toLowerCase()
 			};
 		});
 	});
@@ -8695,7 +10151,7 @@ function createStore({ parser, reader }) {
 		for (let link of document.querySelectorAll("#command-palette a")) {
 			let text = link.firstChild;
 			if (!text) continue;
-			let match = parser.latinize(text.textContent || "").toLowerCase();
+			let match = latinize(text.textContent || "").toLowerCase();
 			if (!match.includes(q)) continue;
 			let start = match.indexOf(q);
 			let range = new Range();
@@ -8759,12 +10215,7 @@ function createStore({ parser, reader }) {
 			"color:dark": "night",
 			"color:light": "white"
 		});
-		backend = await chooseBackend({
-			readBook: reader.readBook,
-			Book: parser.Book,
-			bookRecord: parser.bookRecord,
-			PARSER_VERSION: parser.PARSER_VERSION
-		});
+		backend = await chooseBackend(reader);
 		applySettings(await backend.settings());
 		searching.value = !!backend.searchBook;
 		loadProgress();
@@ -8792,7 +10243,6 @@ function createStore({ parser, reader }) {
 	}
 	return {
 		router,
-		parser,
 		books,
 		book,
 		chapter,
@@ -10401,17 +11851,13 @@ App[RENDER_ENTRY] = App_render;
 function App(page) {
 	return tsrx_element(App_render, page);
 }
-//#endregion
-//#region src/main.ts
-var parser = loadParser(parser_default, book_default, console);
 mount(App, {
-	props: {
-		parser,
-		reader: createReader({
-			parserSource: parser_default,
-			parser
-		})
-	},
+	props: { reader: createReader({ makeWorker(answered, failed) {
+		let worker = new WorkerWrapper();
+		worker.onmessage = ({ data }) => answered(data);
+		worker.onerror = () => failed();
+		return worker;
+	} }) },
 	target: document.body
 });
 //#endregion</script>

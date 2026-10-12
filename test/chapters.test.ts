@@ -1,39 +1,39 @@
-const { describe, it } = require('node:test');
-const assert = require('node:assert/strict');
-const { loadParser } = require('../lib/parser.js');
-
-const { extractChapters, finishChapters, normalizeFileContent, readNumberWords, cleanTitle, bookRecord, Book, chapterTitle } = loadParser();
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { extractChapters, finishChapters, normalizeFileContent, readNumberWords, cleanTitle, chapterTitle } from '../src/parser.ts';
+import type { Chapter } from '../src/parser.ts';
+import { bookRecord, Book, PARSER_VERSION } from '../src/book.ts';
 
 // -- helpers
 const words = ['gió', 'núi', 'mưa', 'đêm', 'trăng', 'suối', 'rừng', 'đường', 'nhà', 'bến'];
 // `count` paragraphs of plain story text, none of which looks like a heading
-const story = (count, seed = 0) => Array.from({ length: count }, (_, k) => (
+const story = (count: number, seed = 0) => Array.from({ length: count }, (_, k) => (
   `Nàng đi qua ${words[(k + seed) % 10]} ${words[(k * 3 + seed) % 10]} và nhớ lại chuyện cũ rất lâu trước kia ở nơi đó.`
 )).join('\n\n');
-const book = (...parts) => parts.flat().join('\n\n');
+const book = (...parts: (string | string[])[]) => parts.flat().join('\n\n');
 // every book here opens with a title page, as most do
-const prepare = (text, name = 'Sách thử') => normalizeFileContent(`${name} tác giả: ai đó\n\n${text}`);
-const parse = (text, name = 'Sách thử') => extractChapters(name, prepare(text, name), { name });
-const titles = (chapters) => chapters.map(c => c.title);
-const real = (chapters) => chapters.slice(1);   // without the title page the parser puts first
+const prepare = (text: string, name = 'Sách thử') => normalizeFileContent(`${name} tác giả: ai đó\n\n${text}`);
+const parse = (text: string, name = 'Sách thử') => extractChapters(name, prepare(text, name), { name });
+const titles = (chapters: Chapter[]) => chapters.map(c => c.title);
+const real = (chapters: Chapter[]) => chapters.slice(1);   // without the title page the parser puts first
 
 describe('numbers in words', () => {
-  const read = (s) => readNumberWords(s.split(' '), 0);
+  const read = (s: string) => readNumberWords(s.split(' '), 0);
   it('reads tens and units', () => {
     assert.deepEqual(read('hai mươi tư'), { value: 24, length: 3 });
     assert.deepEqual(read('mười lăm'), { value: 15, length: 2 });
-    assert.equal(read('ba mươi').value, 30);
-    assert.equal(read('mười').value, 10);
+    assert.equal(read('ba mươi')?.value, 30);
+    assert.equal(read('mười')?.value, 10);
   });
   it('reads Sino-Vietnamese digits and tens', () => {
-    assert.equal(read('tam').value, 3);
-    assert.equal(read('thập nhất').value, 11);
-    assert.equal(read('nhị thập tam').value, 23);
+    assert.equal(read('tam')?.value, 3);
+    assert.equal(read('thập nhất')?.value, 11);
+    assert.equal(read('nhị thập tam')?.value, 23);
   });
   it('reads 100-199 digit by digit', () => {
-    assert.equal(read('nhất lẻ loi').value, 100);
-    assert.equal(read('nhất lẻ một').value, 101);
-    assert.equal(read('nhất nhất linh').value, 110);
+    assert.equal(read('nhất lẻ loi')?.value, 100);
+    assert.equal(read('nhất lẻ một')?.value, 101);
+    assert.equal(read('nhất nhất linh')?.value, 110);
   });
   it('leaves a plain word alone', () => {
     assert.equal(read('giờ'), null);
@@ -75,7 +75,7 @@ describe('numbered chapters', () => {
 });
 
 describe('what is not a chapter', () => {
-  const chapterText = (n) => `Chương ${n}\n\n${story(8, n)}`;
+  const chapterText = (n: number) => `Chương ${n}\n\n${story(8, n)}`;
   it('a sentence that starts with a number word', () => {
     let text = book(chapterText(1), 'Một giờ sau, nàng mới biết chuyện gì đã xảy ra.', story(5), chapterText(2), 'Hai người nhìn nhau rất lâu không nói gì cả.', chapterText(3), chapterText(4));
     assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4']);
@@ -88,7 +88,7 @@ describe('what is not a chapter', () => {
     let text = book(chapterText(73), chapterText(74), chapterText(75), '(Chương 75: Xong, thỉnh mong chờ Chương 76: 《 hỉ thêm thiên kim 》.)', chapterText(76), chapterText(77));
     let chapters = parse(text);
     assert.deepEqual(titles(chapters).slice(-3), ['Chương 75', 'Chương 76', 'Chương 77']);
-    assert.ok(chapters.at(-3).content.includes('thỉnh mong chờ'));
+    assert.ok(chapters.at(-3)?.content.includes('thỉnh mong chờ'));
   });
   it('a contents list in front of long chapters', () => {
     let list = [1, 2, 3, 4].map(n => `Chương ${n}: Tên ${n}`).join('\n');
@@ -114,13 +114,13 @@ describe('the last chapter', () => {
   it('is one chapter when it is said twice', () => {
     let text = book([1, 2, 3].map(n => `Chương ${n}: Cũ ${'abc'[n - 1]}\n\n${story(6, n)}`), 'Chương 4: Chương kết', '【chương kết】', story(6));
     let chapters = parse(text);
-    assert.equal(chapters.at(-1).title, 'Chương kết');
+    assert.equal(chapters.at(-1)?.title, 'Chương kết');
     assert.equal(chapters.length, 5);
   });
 });
 
 describe('parts, ranges and extras', () => {
-  const parts = (chapters) => chapters.map(c => c.part && `${c.part.of} > ${c.part.text}`);
+  const parts = (chapters: Chapter[]) => chapters.map(c => c.part && `${c.part.of} > ${c.part.text}`);
   it('shows the parts of a chapter one by one, under the chapter named once', () => {
     let text = book([1, 2].map(n => `Chương ${n}\n\n${story(6, n)}`), ['thượng', 'trung', 'hạ'].map(p => `Chương 3: (${p})\n\n${story(6)}`), `Chương 4\n\n${story(6)}`);
     let chapters = real(parse(text));
@@ -197,7 +197,7 @@ describe('headings of other shapes', () => {
     let text = book(['nhất', 'nhị', 'tam', 'tứ', 'ngũ'].map((p, k) => `Chương 44: (${p})\n\n${story(8, k)}`));
     let chapters = real(parse(text));
     assert.deepEqual(titles(chapters), ['Chương 44 (nhất)', 'Chương 44 (nhị)', 'Chương 44 (tam)', 'Chương 44 (tứ)', 'Chương 44 (ngũ)']);
-    assert.deepEqual(chapters.map(c => c.part.text), ['(1/5)', '(2/5)', '(3/5)', '(4/5)', '(5/5)']);
+    assert.deepEqual(chapters.map(c => c.part?.text), ['(1/5)', '(2/5)', '(3/5)', '(4/5)', '(5/5)']);
   });
   it('keeps a piece set between two chapters outside their numbers', () => {
     let text = book([`Chương 1\n\n${story(8)}`, `Chương 2\n\n${story(8)}`, `Thứ 0 chương phiên ngoại: Cảnh riêng\n\n${story(8)}`, `Chương 3\n\n${story(8)}`, `Chương 4\n\n${story(8)}`]);
@@ -214,7 +214,7 @@ describe('headings of other shapes', () => {
 });
 
 describe('books', () => {
-  const volume = (name, first) => [`Quyển thứ ${name}: Tên ${name}`, ...[0, 1, 2].map(k => `Chương ${first + k}\n\n${story(6, k)}`)];
+  const volume = (name: string, first: number) => [`Quyển thứ ${name}: Tên ${name}`, ...[0, 1, 2].map(k => `Chương ${first + k}\n\n${story(6, k)}`)];
   it('groups chapters under the book that names itself', () => {
     let chapters = real(parse(book(volume('nhất', 1), volume('hai', 4))));
     assert.deepEqual(chapters.map(c => c.group), ['Quyển 1', 'Quyển 1', 'Quyển 1', 'Quyển 2', 'Quyển 2', 'Quyển 2']);
@@ -234,10 +234,10 @@ describe('books', () => {
     let mixed = [volume('nhất', 1), ['Cuốn 2: Tên hai', ...[4, 5, 6].map(n => `Chương ${n}\n\n${story(6, n)}`)], ['Quyển 3: Tên ba', ...[7, 8, 9].map(n => `Chương ${n}\n\n${story(6, n)}`)]];
     let groups = [...new Set(real(parse(book(...mixed))).map(c => c.group))];
     assert.equal(groups.length, 3);
-    assert.ok(new Set(groups.map(g => g.split(' ')[0])).size == 1);
+    assert.ok(new Set(groups.map(g => g?.split(' ')[0])).size == 1);
   });
   it('names the phase before the first one a heading names', () => {
-    let phase = (word, first) => [`【Sách thử】 giai đoạn thứ ${word}`, ...[0, 1, 2].map(k => `Chương ${first + k}\n\n${story(6, k)}`)];
+    let phase = (word: string, first: number) => [`【Sách thử】 giai đoạn thứ ${word}`, ...[0, 1, 2].map(k => `Chương ${first + k}\n\n${story(6, k)}`)];
     let chapters = real(parse(book(phase('nhất', 1), phase('hai', 4))));
     assert.deepEqual([...new Set(chapters.map(c => c.group))], ['Giai đoạn 1', 'Giai đoạn 2']);
   });
@@ -248,13 +248,13 @@ describe('books', () => {
     assert.deepEqual(titles(chapters).slice(0, 3), ['Chương 1: Nhân vật', 'Chương 2: Thế lực', 'Chương 1']);
   });
   it('reads the book a chapter names in brackets after it', () => {
-    let part = (b, name) => [`Thứ 1 chương (bộ 0${b}) chi ${name}\n\n${story(6, b)}`, ...[2, 3].map(n => `Thứ ${n} chương\n\n${story(6, n)}`)];
+    let part = (b: number, name: string) => [`Thứ 1 chương (bộ 0${b}) chi ${name}\n\n${story(6, b)}`, ...[2, 3].map(n => `Thứ ${n} chương\n\n${story(6, n)}`)];
     let chapters = real(parse(book(part(1, 'kỳ nghỉ'), part(2, 'du thuyền'))));
     assert.deepEqual(chapters.map(c => c.group), ['Bộ 1', 'Bộ 1', 'Bộ 1', 'Bộ 2', 'Bộ 2', 'Bộ 2']);
     assert.deepEqual(titles(chapters).slice(0, 4), ['Chương 1: Kỳ nghỉ', 'Chương 2', 'Chương 3', 'Chương 1: Du thuyền']);
   });
   it('groups the books a file holds under the names their title lines give', () => {
-    let titled = (title) => [`Tên sách: ${title}`, 'Tác giả: ai đó', ...[1, 2, 3].map(n => `Thứ ${n} chương\n\n${story(6, n)}`)];
+    let titled = (title: string) => [`Tên sách: ${title}`, 'Tác giả: ai đó', ...[1, 2, 3].map(n => `Thứ ${n} chương\n\n${story(6, n)}`)];
     let chapters = real(parse(book(titled('Ngoại truyện: Ba cô gái'), titled('Tiền truyện: Vịnh Văn'))));
     assert.deepEqual([...new Set(chapters.map(c => c.group))], ['Ngoại truyện: Ba cô gái', 'Tiền truyện: Vịnh Văn']);
     assert.ok(chapters[3].content.startsWith('Tên sách: Tiền truyện'));
@@ -285,7 +285,7 @@ describe('the model', () => {
   it('stores a book without the text of its chapters', () => {
     let record = bookRecord({ id: 'a', name: 'A', description: undefined, chapters: parse(book('Chương 1', story(4), 'Chương 2', story(4))) });
     assert.ok(record.chapters.every(c => !('content' in c)));
-    assert.equal(record.parser, loadParser().PARSER_VERSION);
+    assert.equal(record.parser, PARSER_VERSION);
   });
   it('is made from a file name', () => {
     let made = Book({ name: 'Tên sách (1-3 chương) (nón xanh).txt' });

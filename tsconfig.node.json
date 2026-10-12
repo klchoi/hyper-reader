@@ -1,0 +1,20 @@
+{
+  // what node runs as it is written (it strips the types): the server, the tests, the tools,
+  // and what of src/ they share with the page (the parser, the book, the names)
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ESNext"],
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": false,
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["server", "test", "tools", "vite.config.ts"]
+}

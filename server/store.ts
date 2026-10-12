@@ -12,14 +12,16 @@
 //                only, its rows are the chapters' rowids
 //   progress, settings, names   as the page sends them; progress and names outlive their book,
 //                so a file that comes back finds them again
-const { DatabaseSync } = require('node:sqlite');
+import { DatabaseSync } from 'node:sqlite';
+import type { StatementSync } from 'node:sqlite';
+import type { Part } from '../src/parser.ts';
 
 // what is searched is folded the same way on both sides. The index takes the text in lower case
 // and with `đ` as `d`, which the tokenizer's removal of diacritics leaves as it is (the tones and
 // the other marks it takes away itself); a name is kept with no marks at all, so `hoang dung`
 // finds `Hoàng Dung`
-const foldForIndex = (text) => text.toLowerCase().replaceAll('đ', 'd');
-const plain = (text) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replaceAll('đ', 'd').normalize('NFC');
+export const foldForIndex = (text: string) => text.toLowerCase().replaceAll('đ', 'd');
+export const plain = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replaceAll('đ', 'd').normalize('NFC');
 
 const MIGRATIONS = [
   `create table books (
@@ -71,11 +73,11 @@ const MIGRATIONS = [
   end;`,
 ];
 
-function openStore(file) {
+function openStore(file: string) {
   let db = new DatabaseSync(file);
   // one writer at a time, readers alongside; a writer waits for another rather than failing
   db.exec('pragma journal_mode = wal; pragma synchronous = normal; pragma foreign_keys = on; pragma busy_timeout = 30000;');
-  let version = db.prepare('pragma user_version').get().user_version;
+  let version = db.prepare('pragma user_version').get()!.user_version as number;
   for(let at = version; at < MIGRATIONS.length; at++) {
     transaction(db, () => {
       db.exec(MIGRATIONS[at]);
@@ -86,7 +88,7 @@ function openStore(file) {
 }
 
 // `work` all at once, or not at all
-function transaction(db, work) {
+function transaction<T>(db: DatabaseSync, work: () => T) {
   db.exec('begin immediate');
   try {
     let result = work();
@@ -100,28 +102,44 @@ function transaction(db, work) {
 
 // a book's row as the page knows it: its record without the chapters
 const BOOK_COLUMNS = 'id, root, path, name, description, size, mtime, parser, indexed, chapter_count as chapterCount';
+export type BookRow = {
+  id: string; root: string; path: string; name: string; description: string | null;
+  size: number; mtime: number; parser: number; indexed: number; chapterCount: number;
+};
+export type ChapterRow = {
+  rowid: number; n: number; id: string; title: string; offset: number; end: number;
+  grp: string | null; part_of: string | null; part_text: string | null;
+};
+// a book as a reader reads it (see read-worker.ts): what it is called, its size and time, the
+// parser that read it, its chapters (where each begins and ends in the text as read) and the
+// names it gives most
+export type BookRead = {
+  name: string; description?: string; size: number; mtime: number; parser: number;
+  chapters: { id: string; title: string; offset: number; end: number; group?: string; part?: Part }[];
+  characters: { name: string; mentions: number }[];
+};
 
-function createStore(file) {
+export function createStore(file: string) {
   let db = openStore(file);
-  let statements = new Map();
+  let statements = new Map<string, StatementSync>();
   // each statement is prepared once, the first time it is run
-  let sql = (text) => {
+  let sql = (text: string) => {
     if(!statements.has(text)) statements.set(text, db.prepare(text));
-    return statements.get(text);
+    return statements.get(text)!;
   };
 
   let store = {
     db,
     close: () => db.close(),
-    transaction: (work) => transaction(db, work),
+    transaction: <T>(work: () => T) => transaction(db, work),
 
     // ---- books
-    books: () => sql(`select ${BOOK_COLUMNS} from books order by name`).all(),
-    booksIn: (root) => sql(`select ${BOOK_COLUMNS} from books where root = ?`).all(root),
-    book: (id) => sql(`select ${BOOK_COLUMNS} from books where id = ?`).get(id) ?? null,
-    chapters: (id) => sql('select rowid, n, id, title, offset, "end", grp, part_of, part_text from chapters where book_id = ? order by n').all(id),
+    books: () => sql(`select ${BOOK_COLUMNS} from books order by name`).all() as BookRow[],
+    booksIn: (root: string) => sql(`select ${BOOK_COLUMNS} from books where root = ?`).all(root) as BookRow[],
+    book: (id: string) => (sql(`select ${BOOK_COLUMNS} from books where id = ?`).get(id) ?? null) as BookRow | null,
+    chapters: (id: string) => sql('select rowid, n, id, title, offset, "end", grp, part_of, part_text from chapters where book_id = ? order by n').all(id) as ChapterRow[],
     // a book read: its row, and its chapters and characters in place of what it had
-    keepBook({ id, root, path, name, description, size, mtime, parser, chapters, characters }) {
+    keepBook({ id, root, path, name, description, size, mtime, parser, chapters, characters }: BookRead & { id: string; root: string; path: string }) {
       transaction(db, () => {
         sql('delete from chapters where book_id = ?').run(id);
         sql('delete from characters where book_id = ?').run(id);
@@ -137,36 +155,36 @@ function createStore(file) {
         for(let { name: who, mentions } of characters) character.run(id, who, plain(who), mentions);
       });
     },
-    forgetBook: (id) => { sql('delete from books where id = ?').run(id); },
+    forgetBook: (id: string) => { sql('delete from books where id = ?').run(id); },
 
     // ---- what the page keeps
     progress() {
-      let all = {};
-      for(let { book_id, record } of sql('select book_id, record from progress').all()) all[book_id] = JSON.parse(record);
+      let all: Record<string, unknown> = {};
+      for(let { book_id, record } of sql('select book_id, record from progress').all() as { book_id: string; record: string }[]) all[book_id] = JSON.parse(record);
       return all;
     },
-    saveProgress: (id, record) => { sql('insert into progress values (?, ?) on conflict (book_id) do update set record = excluded.record').run(id, JSON.stringify(record)); },
+    saveProgress: (id: string, record: unknown) => { sql('insert into progress values (?, ?) on conflict (book_id) do update set record = excluded.record').run(id, JSON.stringify(record)); },
     settings() {
-      let all = {};
-      for(let { key, value } of sql('select key, value from settings').all()) all[key] = JSON.parse(value);
+      let all: Record<string, unknown> = {};
+      for(let { key, value } of sql('select key, value from settings').all() as { key: string; value: string }[]) all[key] = JSON.parse(value);
       return all;
     },
-    saveSettings(settings) {
+    saveSettings(settings: Record<string, unknown>) {
       transaction(db, () => {
         let setting = sql('insert into settings values (?, ?) on conflict (key) do update set value = excluded.value');
         for(let [key, value] of Object.entries(settings)) setting.run(key, JSON.stringify(value ?? null));
       });
     },
-    names: (id) => sql('select text from names where book_id = ?').get(id)?.text,
-    saveNames: (id, text) => { sql('insert into names values (?, ?) on conflict (book_id) do update set text = excluded.text').run(id, text); },
+    names: (id: string) => sql('select text from names where book_id = ?').get(id)?.text as string | undefined,
+    saveNames: (id: string, text: string) => { sql('insert into names values (?, ?) on conflict (book_id) do update set text = excluded.text').run(id, text); },
 
     // ---- the full text
     // the books still to index under this parser, in the order they came
-    toIndex: (parser, limit) => sql('select id from books where indexed != ? and parser = ? order by added_at limit ?').all(parser, parser, limit).map(row => row.id),
-    indexCount: (parser) => sql('select count(*) as total, coalesce(sum(indexed = ?), 0) as done from books').get(parser),
+    toIndex: (parser: number, limit: number) => (sql('select id from books where indexed != ? and parser = ? order by added_at limit ?').all(parser, parser, limit) as { id: string }[]).map(row => row.id),
+    indexCount: (parser: number) => sql('select count(*) as total, coalesce(sum(indexed = ?), 0) as done from books').get(parser) as { total: number; done: number },
     // chapters into the index, in place of what was there: [{ rowid, title, body }]. A chapter
     // gone since its text was cut (its book read again) is left out
-    indexChapters(chapters) {
+    indexChapters(chapters: { rowid: number; title: string; body: string }[]) {
       transaction(db, () => {
         let exists = sql('select 1 from chapters where rowid = ?');
         let remove = sql('delete from chapter_text where rowid = ?');
@@ -179,25 +197,25 @@ function createStore(file) {
       });
     },
     // a book indexed, as long as it is still the book that was read
-    markIndexed: ({ id, size, mtime }, parser) => {
+    markIndexed: ({ id, size, mtime }: BookRow, parser: number) => {
       sql('update books set indexed = ? where id = ? and size = ? and mtime = ? and parser = ?').run(parser, id, size, mtime, parser);
     },
 
     // ---- search
     // the characters whose names begin with `q`, as said in the books they are named in
-    characters: (q, limit = 500) => {
+    characters: (q: string, limit = 500) => {
       let key = plain(q.trim());
       return sql(`select c.name, c.mentions, b.id as bookId, b.name as bookName from characters c join books b on b.id = c.book_id
-                  where c.folded >= ? and c.folded < ? order by c.mentions desc limit ?`).all(key, `${key}\uffff`, limit);
+                  where c.folded >= ? and c.folded < ? order by c.mentions desc limit ?`).all(key, `${key}\uffff`, limit) as { name: string; mentions: number; bookId: string; bookName: string }[];
     },
     // the chapters a phrase is in: of one book, in order, or of the whole library, by book
-    chaptersSaying: (phrase, bookId) => sql(`select c.rowid, c.n, c.id, c.title, c.offset, c."end", c.book_id as bookId from chapter_text
-                  join chapters c on c.rowid = chapter_text.rowid where chapter_text match ? and c.book_id = ? order by c.n`).all(phrase, bookId),
-    booksSaying: (phrase, limit = 100) => sql(`select c.book_id as id, b.name, count(*) as chapters from chapter_text
+    chaptersSaying: (phrase: string, bookId: string) => sql(`select c.rowid, c.n, c.id, c.title, c.offset, c."end", c.book_id as bookId from chapter_text
+                  join chapters c on c.rowid = chapter_text.rowid where chapter_text match ? and c.book_id = ? order by c.n`).all(phrase, bookId) as (Omit<ChapterRow, 'grp' | 'part_of' | 'part_text'> & { bookId: string })[],
+    booksSaying: (phrase: string, limit = 100) => sql(`select c.book_id as id, b.name, count(*) as chapters from chapter_text
                   join chapters c on c.rowid = chapter_text.rowid join books b on b.id = c.book_id
-                  where chapter_text match ? group by c.book_id order by chapters desc limit ?`).all(phrase, limit),
+                  where chapter_text match ? group by c.book_id order by chapters desc limit ?`).all(phrase, limit) as { id: string; name: string; chapters: number }[],
   };
   return store;
 }
 
-module.exports = { createStore, plain, foldForIndex };
+export type Store = ReturnType<typeof createStore>;

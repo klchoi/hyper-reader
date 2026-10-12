@@ -30,8 +30,9 @@ page a path (`/books/<id>?at=<offset>`), which the server answers with the page.
 threads of their own, and their full text indexed behind them for search (`/api/search?q=`,
 `&book=` for every place in one book), a book opened first; the characters a book names most
 are kept with it (`/api/characters?q=`). Where a book was left and its names outlive it, so a
-file that goes and comes back finds them again. It needs nothing but Node (24, for `node:sqlite`),
-answers on this computer only, and reads the parser when it starts. Listing the fonts installed
+file that goes and comes back finds them again. It needs nothing but Node (24, for `node:sqlite`
+and for running TypeScript as it is written), answers on this computer only, and runs the page's
+own parser (`src/parser.ts`). Listing the fonts installed
 on the machine works here and not from the file.
 
 The two keep their books apart: a book dropped on the page opened as a file is not on the
@@ -51,13 +52,12 @@ The built page holds everything it needs, its libraries too, so it needs no netw
 ## What is in src/
 
 - `hyper-reader.html`, `styles.css` the page and its styles.
-- `parser.js` the chapter parser, a script with no imports or exports: the page runs it from its
-  text, a worker is made from that text, and node loads it the same way (`lib/parser.js`) for the
-  tests, the tools and the server. It touches nothing of the page.
-- `book.js` what a book is (`Book`) and what is kept of it (`bookRecord`, `PARSER_VERSION`),
-  run with the parser.
-- `main.ts` the page started: the parser run from its text, the reader of books, and the app
-  mounted on `<body>`.
+- `parser.ts` the chapter parser. It touches nothing of the page and nothing of node, so the
+  page, its worker, and node (the tests, the tools, the server) all run it as it is.
+- `book.ts` what a book is (`Book`) and what is kept of it (`bookRecord`, `PARSER_VERSION`).
+- `reading.ts` the page's reader of books, which hands a book to a worker (`parser-worker.ts`,
+  built into the page as a script of its own) and reads it in the page when no worker can run.
+- `main.ts` the page started: the reader of books, and the app mounted on `<body>`.
 - The app, in [Ripple](https://github.com/Ripple-TS/ripple) (TypeScript, `.tsrx`):
   - `App.tsrx` makes the store and lays the page out: `ChapterList`, `Library` or
     `ChapterText`, `Settings`, and the dialogs, `CommandPalette`, `FontPicker`,
@@ -68,11 +68,10 @@ The built page holds everything it needs, its libraries too, so it needs no netw
     pointer over a name.
   - `places.ts` the url, a place in a book, a chapter as its lines. `names.ts` the names list,
     the text corrected by it, the names coloured on the page.
-- `name-patterns.js` how a name is told in the text: the patterns the page colours names by, and
+- `name-patterns.ts` how a name is told in the text: the patterns the page colours names by, and
   the faster reading of them the server keeps a book's characters by.
 - `backends.ts` what the app asks of whatever keeps the books: the browser's backend
-  (IndexedDB, and `reading.js`, which hands a book to a worker) and the server's (calls to
-  `server/server.js`).
+  (IndexedDB, and the reader of books) and the server's (calls to `server/server.ts`).
 
 ## The chapter parser
 
@@ -81,7 +80,7 @@ could be a heading, then finds the best path through them: a number followed by 
 scores, a jump costs, a book or a phiên ngoại may start the numbers over. A line that only looks
 like a heading (`Một giờ sau...`) fits nowhere in the sequence and is left out.
 
-The parser's own comments say the rest; start with the contents at the head of `src/parser.js`,
+The parser's own comments say the rest; start with the contents at the head of `src/parser.ts`,
 and `TUNING`, where every number it was tuned with is named.
 
 A chapter is `{ id, title, offset, group, part, content }`, `part` being set on the parts of a
@@ -95,12 +94,16 @@ they are read again the next time they are opened.
 npm test                 the tests: the parser, read from the page, on small invented books,
                          the worker, and the server's answers
 npm start                the server
-npm run lint             oxlint over all the code: src/, lib/, server/, test/, tools/
-npm run typecheck        TypeScript over src/, the .tsrx too (tsrx-tsc)
+npm run lint             oxlint over all the code: src/, server/, test/, tools/
+npm run typecheck        TypeScript over the page (src/, the .tsrx too, with tsrx-tsc) and over
+                         what node runs (server/, test/, tools/, with tsc)
 npm run check:books -- <folder>
 ```
 
-`lib/parser.js` loads the parser from `src/` for the tests, the tools and the server.
+All of it is TypeScript. Node runs it as written, taking the types out as it loads it, so
+nothing is compiled for node, and what node runs keeps to the TypeScript it can strip
+(`erasableSyntaxOnly`: no enums, no namespaces) and imports its types with `import type`. The
+server, the tests and the tools import the parser from `src/` as the page does.
 
 `check:books` runs the parser over a folder of `.txt` books and compares each with the snapshot it
 saved earlier, naming the books a change moves and how (titles, groups, offsets). The first run, or
@@ -109,11 +112,11 @@ describes a private library.
 
 The usual round for a parser change:
 
-1. Write the case that fails in `test/chapters.test.js`.
+1. Write the case that fails in `test/chapters.test.ts`.
 2. Change the parser until it passes.
 3. `npm run check:books -- <folder>`: read what moved, and be sure it should have.
 4. `npm run check:books -- <folder> --update` to keep the new state as the one to compare with.
 
 Notes on the lint rules (`.oxlintrc.json`): oxlint's own set, with warnings failing the run, less
-`unicorn/no-new-array` (`new Array(n).fill(x)` always means a length here). The parser's and the
-book's functions are used from their text, so oxlint is told their names are used.
+`unicorn/no-new-array` (`new Array(n).fill(x)` always means a length here), and with the
+properties left out of a rest (`{ content, ...listed }`) counted as used.

@@ -2,14 +2,7 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "env": { "browser": true, "node": true, "es2024": true },
   "rules": {
-    "unicorn/no-new-array": "off"
-  },
-  "overrides": [
-    {
-      "files": ["src/parser.js", "src/book.js"],
-      "rules": {
-        "no-unused-vars": ["warn", { "varsIgnorePattern": "^(normalizeFileContent|extractChapters|Book|bookRecord)$", "ignoreRestSiblings": true }]
-      }
-    }
-  ]
+    "unicorn/no-new-array": "off",
+    "no-unused-vars": ["warn", { "ignoreRestSiblings": true }]
+  }
 }

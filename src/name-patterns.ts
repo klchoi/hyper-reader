@@ -1,6 +1,6 @@
 // How a name is told in the text, without the page: the patterns the page colours names by
 // (names.ts), and the names a book's text gives most often, which the server keeps of each
-// book for search (server/read-worker.js). Plain JavaScript, for both.
+// book for search (server/read-worker.ts).
 
 // how a reader is likely to have somebody addressed. The doubled and compound
 // ones stand on their own in the text, so they are worth detecting; a bare
@@ -13,9 +13,9 @@ export const standaloneRelationships = [
 
 // patterns with named holes in them: `{Word}` is filled from `placeholders`, each fill a group
 // of its own name, so the holes can be filled within each other
-export function buildRegex(patterns, placeholders, flags) {
-  let source = patterns.filter(Boolean).map((p, i) => `(?<Case${i + 1}>${typeof p === 'string' ? p : p.source})`).join('|');
-  let counts = Object.fromEntries(Object.keys(placeholders).map(k => [k, 0]));
+export function buildRegex(patterns: (RegExp | string | false | null | undefined)[], placeholders: Record<string, RegExp>, flags?: string) {
+  let source = patterns.filter((p): p is RegExp | string => !!p).map((p, i) => `(?<Case${i + 1}>${typeof p === 'string' ? p : p.source})`).join('|');
+  let counts: Record<string, number> = Object.fromEntries(Object.keys(placeholders).map(k => [k, 0]));
   for(let i = 1; i <= 10; i++) {
     for(let [p, r] of Object.entries(placeholders)) {
       source = source.replaceAll(`{${p}}`, () => `(?<${p}${++counts[p]}>${r.source})`);
@@ -57,11 +57,11 @@ export const nameRegexes = () => namePatterns.map(patterns => buildRegex(pattern
 const CAPITALIZED = /(?<![\p{L}\p{N}])\p{Lu}\p{Ll}*(?: \p{Lu}\p{Ll}*){1,3}(?![\p{L}\p{N}])/gu;
 const ADDRESSED = /(?<![\p{L}\p{N}])(?:a|tiểu|lão) \p{Lu}\p{Ll}*(?![\p{L}\p{N}]| \p{Lu})/gu;
 const OPENS_SENTENCE = /(?:^|[.:"'!?()[\]“”…])\s*$/u;
-export function findNames(text, { least = 3, most = 200 } = {}) {
-  let found = new Map();   // lowercased -> { spellings: Map, count }
-  let count = (name) => {
+export function findNames(text: string, { least = 3, most = 200 } = {}) {
+  let found = new Map<string, { spellings: Map<string, number>; count: number }>();   // lowercased -> how it is written, and how often
+  let count = (name: string) => {
     let key = name.toLowerCase();
-    let entry = found.get(key) ?? found.set(key, { spellings: new Map(), count: 0 }).get(key);
+    let entry = found.get(key) ?? found.set(key, { spellings: new Map(), count: 0 }).get(key)!;
     entry.count++;
     entry.spellings.set(name, (entry.spellings.get(name) ?? 0) + 1);
   };

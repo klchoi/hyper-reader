@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // The page's other backend (see backends.ts in src/). It serves the page as built
 // (hyper-reader.html), and keeps the books in a SQLite database in a folder of its own (see
-// store.js): those of the libraries it is given, folders of .txt files read where they are, and
+// store.ts): those of the libraries it is given, folders of .txt files read where they are, and
 // those dropped on the page, kept in <data>/uploads. The books are read by the page's own parser
-// (src/parser.js), on threads of their own (readers.js), and their full text indexed for search
-// behind them (indexer.js):
+// (src/parser.ts), on threads of their own (readers.ts), and their full text indexed for search
+// behind them (indexer.ts):
 //
-//   node server/server.js [--port 8080] [--data <folder>] [--library [name=]<folder>]...
+//   node server/server.ts [--port 8080] [--data <folder>] [--library [name=]<folder>]...
 //
 // A library is known by its name (the folder's own name if none is given), so a book keeps its
 // id, and where it was left, wherever the folder is mounted. The libraries are scanned when the
@@ -15,11 +15,15 @@
 // It answers on this computer only (127.0.0.1): it has no logins, and what it keeps is a private
 // library. So it answers only what is asked of it by this computer's name, and changes nothing
 // for a page of another site (see `foreign`).
-const http = require('node:http');
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { PAGE } = require('../lib/parser.js');
-const { createLibrary } = require('./library.js');
+import http from 'node:http';
+import type { IncomingMessage } from 'node:http';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createLibrary } from './library.ts';
+import type { Library, LibraryDir } from './library.ts';
+
+// the page, as built
+const PAGE = path.join(import.meta.dirname, '..', 'hyper-reader.html');
 
 // a book's id, a chapter's: nothing that could walk out of a folder
 const ID = /^[\w-]+$/;
@@ -30,7 +34,7 @@ const ID = /^[\w-]+$/;
 // - a form or a script of its page can send a change: one sent from another origin is refused,
 //   and a body that is JSON must say so, which a browser will not send across sites unasked
 const LOCAL_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
-function foreign(request) {
+function foreign(request: IncomingMessage) {
   let host = request.headers.host ?? '';
   if(!LOCAL_HOST.test(host)) return 'not asked by this computer\'s name';
   let origin = request.headers.origin;
@@ -38,8 +42,11 @@ function foreign(request) {
   return null;
 }
 
-// what the page's server backend asks, by method and path; the body each takes is JSON, or text
-function routes(library) {
+// what the page's server backend asks, by method and path; the body each takes is JSON (as sent,
+// which is the asker's to get right), or text
+type Answer = (params: string[], body: any, query: URLSearchParams) => unknown;
+type Route = [method: string, pattern: RegExp, answer: Answer, kind?: 'json' | 'text'];
+function routes(library: Library): Route[] {
   return [
     ['GET', /^\/api\/hello$/, () => ({ backend: 'server' })],
     ['GET', /^\/api\/settings$/, () => library.settings()],
@@ -50,7 +57,7 @@ function routes(library) {
     ['GET', /^\/api\/names\/([^/]+)$/, ([id]) => library.names(id), 'text'],
     ['PUT', /^\/api\/names\/([^/]+)$/, ([id], body) => library.saveNames(id, body), 'text'],
     ['GET', /^\/api\/books$/, () => library.books()],
-    ['POST', /^\/api\/books$/, (_, body) => library.addBook(body)],
+    ['POST', /^\/api\/books$/, (_, body) => library.addBook(body ?? {})],
     ['GET', /^\/api\/books\/([^/]+)$/, ([id]) => library.book(id)],
     ['GET', /^\/api\/books\/([^/]+)\/chapters\/([^/]+)$/, ([id, chapterId]) => library.chapter(id, chapterId)],
     ['POST', /^\/api\/books\/([^/]+)\/reread$/, ([id]) => library.rereadBook(id)],
@@ -61,17 +68,17 @@ function routes(library) {
     ['GET', /^\/api\/search$/, (_, __, query) => {
       let book = query.get('book');
       if(book != null && !ID.test(book)) throw Object.assign(new Error('not an id'), { status: 400 });
-      return library.search(query.get('q'), book);
+      return library.search(query.get('q') ?? '', book);
     }],
-    ['GET', /^\/api\/characters$/, (_, __, query) => library.characters(query.get('q'))],
+    ['GET', /^\/api\/characters$/, (_, __, query) => library.characters(query.get('q') ?? '')],
   ];
 }
 
 const LIMIT = 200 * 1024 * 1024;   // the longest body taken: a book of a few hundred MB is no book
 
-function readBody(request) {
-  return new Promise((resolve, reject) => {
-    let chunks = [];
+function readBody(request: IncomingMessage) {
+  return new Promise<string>((resolve, reject) => {
+    let chunks: Buffer[] = [];
     let length = 0;
     request.on('data', chunk => {
       length += chunk.length;
@@ -86,37 +93,37 @@ function readBody(request) {
   });
 }
 
-function createServer({ data, libraries = [] }) {
+export function createServer({ data, libraries = [] }: { data: string; libraries?: LibraryDir[] }) {
   let library = createLibrary({ data, libraries });
   let table = routes(library);
   let server = http.createServer(async (request, response) => {
-    let send = (status, body, type) => {
+    let send = (status: number, body?: string, type?: string) => {
       response.writeHead(status, body == null ? {} : { 'content-type': `${type}; charset=utf-8`, 'cache-control': 'no-store' });
       response.end(body);
     };
     try {
       let refused = foreign(request);
       if(refused) return send(403, refused, 'text/plain');
-      let { pathname, searchParams } = new URL(request.url, 'http://localhost');
+      let { pathname, searchParams } = new URL(request.url ?? '/', 'http://localhost');
       if(pathname.startsWith('/api/')) {
         for(let [method, pattern, answer, kind = 'json'] of table) {
           let found = pattern.exec(pathname);
           if(!found || request.method !== method) continue;
           let params = found.slice(1).map(decodeURIComponent);
           if(params.some(param => !ID.test(param))) return send(400, 'not an id', 'text/plain');
-          let body;
+          let body: unknown;
           if(['POST', 'PUT', 'PATCH'].includes(method)) {
             body = await readBody(request);
             if(kind === 'json' && body !== '') {
               if(!request.headers['content-type']?.startsWith('application/json')) return send(415, 'JSON is sent as application/json', 'text/plain');
-              try { body = JSON.parse(body); }
+              try { body = JSON.parse(body as string); }
               catch { return send(400, 'not JSON', 'text/plain'); }
             }
           }
           let result = await answer(params, body, searchParams);
           if(result === undefined) return send(204);
           if(result === null) return send(404, 'not found', 'text/plain');
-          return kind === 'text' ? send(200, result, 'text/plain') : send(200, JSON.stringify(result), 'application/json');
+          return kind === 'text' ? send(200, String(result), 'text/plain') : send(200, JSON.stringify(result), 'application/json');
         }
         return send(404, 'not found', 'text/plain');
       }
@@ -126,35 +133,33 @@ function createServer({ data, libraries = [] }) {
     } catch(error) {
       // a path badly escaped is the asker's fault; anything else not foreseen is ours (a file of
       // ours that is not JSON too), and what went wrong (a path on this disk) stays here
-      let status = error.status ?? (error instanceof URIError ? 400 : 500);
+      let status = (error as { status?: number }).status ?? (error instanceof URIError ? 400 : 500);
       if(status === 500) console.error(request.method, request.url, error);
-      send(status, status === 500 ? 'server error' : String(error.message), 'text/plain');
+      send(status, status === 500 ? 'server error' : String((error as Error).message), 'text/plain');
     }
   });
-  server.library = library;
   server.on('close', () => library.close());
-  return server;
+  return Object.assign(server, { library });
 }
 
 // `--library mega=/books` is a library named mega; `--library /books`, one named books
-function librariesOf(args) {
-  let libraries = [];
+function librariesOf(args: string[]) {
+  let libraries: LibraryDir[] = [];
   args.forEach((arg, at) => {
     if(arg !== '--library') return;
-    let given = args[at + 1];
-    let [, name, dir] = /^(?:([\w-]+)=)?(.+)$/.exec(given);
+    let given = /^(?:([\w-]+)=)?(.+)$/.exec(args[at + 1] ?? '');
+    if(!given) throw new Error('--library takes a folder: --library [name=]<folder>');
+    let [, name, dir] = given;
     libraries.push({ name: name ?? path.basename(path.resolve(dir)), dir: path.resolve(dir) });
   });
   return libraries;
 }
 
-module.exports = { createServer, createLibrary };
-
-if(require.main === module) {
+if(import.meta.main) {
   let args = process.argv.slice(2);
-  let option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
-  let port = Number(option('--port', 8080));
-  let data = path.resolve(option('--data', path.join(__dirname, '..', 'data')));
+  let option = (name: string, fallback: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
+  let port = Number(option('--port', '8080'));
+  let data = path.resolve(option('--data', path.join(import.meta.dirname, '..', 'data')));
   let libraries = librariesOf(args);
   let server = createServer({ data, libraries });
   server.listen(port, '127.0.0.1', () => {

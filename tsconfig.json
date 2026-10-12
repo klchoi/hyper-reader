@@ -1,9 +1,9 @@
 {
+  // the page: src/, built by vite
   "compilerOptions": {
     "target": "ESNext",
     "module": "ESNext",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "allowJs": true,
     "allowImportingTsExtensions": true,
     "allowArbitraryExtensions": true,
     "moduleResolution": "bundler",
@@ -12,6 +12,8 @@
     "strict": true,
     "noEmit": true,
     "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "skipLibCheck": true,
     "types": ["vite/client"],
     "plugins": [{ "name": "@tsrx/typescript-plugin" }]

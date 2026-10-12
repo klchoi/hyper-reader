@@ -1,28 +1,30 @@
 // The server's answers, as the page's server backend asks them: a server on a port of its own,
 // keeping its books in a folder made for the test, with a library of its own to scan.
-const { describe, it, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
-const { DatabaseSync } = require('node:sqlite');
-const { createServer } = require('../server/server.js');
-const { loadParser } = require('../lib/parser.js');
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { createServer } from '../server/server.ts';
+import { extractChapters, normalizeFileContent } from '../src/parser.ts';
+import { PARSER_VERSION } from '../src/book.ts';
 
-const { extractChapters, normalizeFileContent, PARSER_VERSION } = loadParser();
-
-const story = (count, who) => Array.from({ length: count }, (_, k) => (
+const story = (count: number, who: string) => Array.from({ length: count }, (_, k) => (
   `Hôm ấy nàng đi qua núi ${k % 7 ? 'rừng' : 'suối'} và gặp ${who} bên bờ, nhớ chuyện cũ rất lâu trước kia.`
 )).join('\n\n');
-const bookText = (who) => ['Sách thử tác giả: ai đó', ...[1, 2, 3].map(n => `Chương ${n}: Tiêu đề ${n}\n\n${story(8, who)}`)].join('\n\n');
+const bookText = (who: string) => ['Sách thử tác giả: ai đó', ...[1, 2, 3].map(n => `Chương ${n}: Tiêu đề ${n}\n\n${story(8, who)}`)].join('\n\n');
 const upload = { name: 'Sách tải lên (1-3 chương).txt', size: 0, text: bookText('Quách Tĩnh') };
-const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe('the server', () => {
-  let server, data, shelf, base;
+  let server: ReturnType<typeof createServer>;
+  let data: string, shelf: string, base: string;
+  let port = () => (server.address() as AddressInfo).port;
   // the answer as the page reads it: JSON, text, or the status alone
-  let call = async (method, route, body) => {
+  let call = async (method: string, route: string, body?: unknown): Promise<{ status: number; answer: any }> => {
     let sent = body !== undefined && {
       headers: { 'content-type': typeof body === 'string' ? 'text/plain' : 'application/json' },
       body: typeof body === 'string' ? body : JSON.stringify(body),
@@ -32,8 +34,9 @@ describe('the server', () => {
     let answer = type.startsWith('application/json') ? await response.json() : await response.text();
     return { status: response.status, answer };
   };
-  let books = async () => (await call('GET', 'books')).answer;
-  let bookNamed = async (name) => (await books()).find(book => book.name === name);
+  type Summary = { id: string; name: string; library: string; path: string; deletable: boolean };
+  let books = async (): Promise<Summary[]> => (await call('GET', 'books')).answer;
+  let bookNamed = async (name: string) => (await books()).find(book => book.name === name)!;
   // until the scan is done and every book indexed
   let settled = async () => {
     await server.library.scanned();
@@ -53,8 +56,8 @@ describe('the server', () => {
     fs.writeFileSync(path.join(shelf, 'nested', 'Sách thử (1-3 chương).txt'), bookText('Hoàng Dung'));
     fs.writeFileSync(path.join(shelf, 'notes.md'), 'not a book');
     server = createServer({ data, libraries: [{ name: 'shelf', dir: shelf }] });
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    base = `http://127.0.0.1:${server.address().port}`;
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${port()}`;
     server.library.scan();
     await settled();
   });
@@ -85,7 +88,7 @@ describe('the server', () => {
     let { id } = await bookNamed('Sách thử');
     let { answer: record } = await call('GET', `books/${id}`);
     assert.equal(record.parser, PARSER_VERSION);
-    assert.deepEqual(record.chapters.map(c => c.title), ['Sách thử', 'Chương 1: Tiêu đề 1', 'Chương 2: Tiêu đề 2', 'Chương 3: Tiêu đề 3']);
+    assert.deepEqual(record.chapters.map((c: { title: string }) => c.title), ['Sách thử', 'Chương 1: Tiêu đề 1', 'Chương 2: Tiêu đề 2', 'Chương 3: Tiêu đề 3']);
     let parsed = extractChapters('Sách thử', normalizeFileContent(bookText('Hoàng Dung')), { name: 'Sách thử' });
     let { answer: chapter } = await call('GET', `books/${id}/chapters/${parsed[2].id}`);
     assert.equal(chapter.content, parsed[2].content);
@@ -100,7 +103,7 @@ describe('the server', () => {
     assert.equal(kept.id, record.id);
     assert.equal(kept.library, 'uploads');
     assert.ok(kept.deletable);
-    let library = (await books()).find(book => book.library === 'shelf');
+    let library = (await books()).find(book => book.library === 'shelf')!;
     assert.equal((await call('DELETE', `books/${library.id}`)).status, 403);
     assert.equal((await call('DELETE', `books/${kept.id}`)).status, 204);
     assert.ok(!fs.existsSync(path.join(data, 'uploads', upload.name)));
@@ -108,7 +111,7 @@ describe('the server', () => {
   });
   it('reads a book again when an older parser read it, or its file changed', async () => {
     let file = path.join(shelf, 'Sách thử (1-3 chương).txt');
-    let { id } = (await books()).find(book => book.path === 'Sách thử (1-3 chương).txt');
+    let { id } = (await books()).find(book => book.path === 'Sách thử (1-3 chương).txt')!;
     let db = new DatabaseSync(path.join(data, 'library.db'));
     db.prepare('update books set parser = 1 where id = ?').run(id);
     db.close();
@@ -123,7 +126,7 @@ describe('the server', () => {
     await settled();
   });
   it('finds what came, changed and went in a library when scanned again', async () => {
-    let gone = (await books()).find(book => book.library === 'shelf');
+    let gone = (await books()).find(book => book.library === 'shelf')!;
     await call('PUT', `progress/${gone.id}`, { offset: 120 });
     fs.rmSync(path.join(shelf, 'nested'), { recursive: true });
     fs.writeFileSync(path.join(shelf, 'Mới (1-3 chương).txt'), bookText('Hoàng Dung'));
@@ -140,13 +143,13 @@ describe('the server', () => {
   it('finds the books a character is in', async () => {
     let [person] = (await call('GET', `characters?q=${encodeURIComponent('hoang dung')}`)).answer;
     assert.equal(person.name, 'Hoàng Dung');
-    assert.deepEqual(person.books.map(book => book.name).sort(), ['Mới', 'Sách thử']);
-    assert.ok(person.books.every(book => book.mentions === 24));
+    assert.deepEqual(person.books.map((book: { name: string }) => book.name).sort(), ['Mới', 'Sách thử']);
+    assert.ok(person.books.every((book: { mentions: number }) => book.mentions === 24));
     assert.deepEqual((await call('GET', 'characters?q=nobody')).answer, []);
   });
   it('finds what is said, in the library and in a book, however it is accented', async () => {
     let { answer: found } = await call('GET', `search?q=${encodeURIComponent('hoang dung')}`);
-    assert.deepEqual(found.map(book => [book.name, book.chapters]).sort(), [['Mới', 3], ['Sách thử', 3]]);
+    assert.deepEqual(found.map((book: { name: string; chapters: number }) => [book.name, book.chapters]).sort(), [['Mới', 3], ['Sách thử', 3]]);
     let { id } = await bookNamed('Sách thử');
     let { answer: inBook } = await call('GET', `search?q=${encodeURIComponent('Hoàng dung')}&book=${id}`);
     assert.ok(inBook.indexed);
@@ -167,7 +170,7 @@ describe('the server', () => {
     let accented = (await call('GET', `search?q=${encodeURIComponent('Hoàng Dung')}&book=${record.id}`)).answer;
     assert.equal(plain.total, 26);
     assert.equal(accented.total, 24);
-    assert.ok(accented.mentions.every(m => m.match === 'Hoàng Dung'));
+    assert.ok(accented.mentions.every((m: { match: string }) => m.match === 'Hoàng Dung'));
     let [person] = (await call('GET', `characters?q=${encodeURIComponent('Hoàng')}`)).answer;
     assert.equal(person.name, 'Hoàng Dung');
     assert.deepEqual((await call('GET', `characters?q=${encodeURIComponent('Hoảng')}`)).answer, []);
@@ -200,9 +203,9 @@ describe('the server', () => {
 
   // a request with the headers a browser would not let a page set: the name it is asked by, and
   // the origin of the page asking
-  let raw = (method, route, headers, body) => new Promise((resolve, reject) => {
+  let raw = (method: string, route: string, headers: http.OutgoingHttpHeaders, body?: string) => new Promise<{ status?: number; answer: string }>((resolve, reject) => {
     let request = http.request(`${base}${route}`, { method, headers }, (response) => {
-      let chunks = [];
+      let chunks: Buffer[] = [];
       response.on('data', chunk => chunks.push(chunk));
       response.on('end', () => resolve({ status: response.statusCode, answer: Buffer.concat(chunks).toString() }));
     });
@@ -212,11 +215,11 @@ describe('the server', () => {
   it('answers only what is asked by this computer\'s name', async () => {
     assert.equal((await raw('GET', '/api/progress', { host: 'rebound.example:8080' })).status, 403);
     assert.equal((await raw('GET', '/', { host: 'rebound.example' })).status, 403);
-    assert.equal((await raw('GET', '/api/progress', { host: `localhost:${server.address().port}` })).status, 200);
+    assert.equal((await raw('GET', '/api/progress', { host: `localhost:${port()}` })).status, 200);
   });
   it('changes nothing for a page of another site', async () => {
     let book = JSON.stringify(upload);
-    let asked = (origin) => raw('POST', '/api/books', { 'content-type': 'application/json', ...(origin && { origin }) }, book);
+    let asked = (origin: string) => raw('POST', '/api/books', { 'content-type': 'application/json', ...(origin && { origin }) }, book);
     assert.equal((await asked('https://another.example')).status, 403);
     assert.equal((await asked('null')).status, 403);
     assert.equal((await raw('POST', '/api/library/scan', { origin: 'https://another.example' })).status, 403);

@@ -19,17 +19,20 @@
 //   search(q, id?)              the books that say `q`; in book `id`, every place it says it
 //   characters(q)               the characters named `q`, with the books they are in
 //
-// Served by the server (`node server/server.js`), the page leaves its books to the server;
+// Served by the server (`node server/server.ts`), the page leaves its books to the server;
 // opened as a file, or served by anything else, it keeps them in the browser. The two keep
 // books apart: a book dropped on one is not in the other.
 import { openDB } from 'idb';
-import type { Chapter, Listed } from './places.ts';
+import { Book, bookRecord, PARSER_VERSION } from './book.ts';
+import type { BookRecord } from './book.ts';
+import type { Chapter, Listed } from './parser.ts';
+import type { Reader } from './reading.ts';
 
 export type FileInfo = { name: string; size: number };
 // a book as the library lists it. `library` and `path` say where it is, for a book of a library
 // the server reads where it is, which is not deleted from the page
 export type BookSummary = { id: string; name: string; description?: string; size: number; library?: string; path?: string; deletable: boolean };
-export type BookRecord = { id: string; name: string; description?: string; parser: number; chapters: Listed[] };
+export type { BookRecord };
 export type Progress = { offset?: number; chapterId?: string; chapterIndex?: number; chapterCount?: number; updatedAt?: string };
 
 export interface Backend {
@@ -62,15 +65,8 @@ export type BookSaying = { id: string; name: string; chapters: number };
 export type Mention = { chapterId: string; title: string; offset: number; before: string; match: string; after: string };
 export type Person = { name: string; mentions: number; books: { id: string; name: string; mentions: number }[] };
 
-// what the browser's backend needs of the page: the reader of books, and what is kept of one
-export type Reading = {
-  readBook(file: FileInfo, text: string): Promise<{ id: string; chapters: Chapter[] }>;
-  Book(file: { name: string }): { id: string; name: string; description?: string };
-  bookRecord(book: { id: string; chapters: Chapter[] }): BookRecord;
-  PARSER_VERSION: number;
-};
-
-export async function chooseBackend(reading: Reading): Promise<Backend> {
+// the browser's backend reads the books it keeps itself, with the page's reader
+export async function chooseBackend(reader: Reader): Promise<Backend> {
   if (location.protocol.startsWith('http')) {
     try {
       let hello = await fetch('/api/hello');
@@ -82,10 +78,10 @@ export async function chooseBackend(reading: Reading): Promise<Backend> {
       console.info('No server to keep the books, the browser keeps them:', error);
     }
   }
-  return browserBackend(reading);
+  return browserBackend(reader);
 }
 
-// the server's: it reads the books and keeps them (see server/server.js for its answers)
+// the server's: it reads the books and keeps them (see server/server.ts for its answers)
 function serverBackend(): Backend {
   // a body is sent as JSON, or as text when it is text; an answer of 404 is null
   let call = async (method: string, route: string, body?: unknown) => {
@@ -124,8 +120,8 @@ function serverBackend(): Backend {
   };
 }
 
-// the browser's: IndexedDB, and the parser in a worker (see reading.js)
-async function browserBackend({ readBook, Book, bookRecord, PARSER_VERSION }: Reading): Promise<Backend> {
+// the browser's: IndexedDB, and the parser in a worker (see reading.ts)
+async function browserBackend({ readBook }: Reader): Promise<Backend> {
   let db = await openDB('text-reader', 23, {
     upgrade(db, oldVersion, newVersion, transaction, events) {
       console.log('upgrade db', { oldVersion, newVersion, transaction, events });
@@ -161,7 +157,7 @@ async function browserBackend({ readBook, Book, bookRecord, PARSER_VERSION }: Re
     async addBooks(files) {
       let chapterKeys = (await db.getAllKeys('chapters')) as string[];
       // the books are read before the transaction opens: it would not wait for them
-      let read = await Promise.all(files.map(async ({ name, size, text }) => ({ file: { name, size }, text, book: await readBook({ name, size }, text) })));
+      let read = await Promise.all(files.map(async ({ name, size, text }) => ({ file: { name, size }, text, book: await readBook({ name }, text) })));
       let tx = db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
       await Promise.all([
         ...read.flatMap(({ file, text, book }) => [

@@ -3,7 +3,7 @@
 // from the list underlined, to be added with a click.
 import chromaJs from 'chroma-js';
 import { nextTick } from './places.ts';
-import { buildRegex, nameRegexes, namePatterns, standaloneRelationships } from './name-patterns.js';
+import { buildRegex, nameRegexes, namePatterns, standaloneRelationships } from './name-patterns.ts';
 
 // ---- words and their case -----------------------------------------------------------
 export function titleCase(s: string) {
@@ -413,7 +413,7 @@ export async function highlightNames(names: string, { selector, prefix }: Scope 
   let knowNameIds = new Set(knowNames.map(name => name.toLowerCase()));
 
   // collect names, by descending confidence: what the editor says, then the patterns
-  // (see name-patterns.js), each tier scanned apart
+  // (see name-patterns.ts), each tier scanned apart
   // the editor's own names need no collecting, they are already the whole tier
   let tiers: string[][] = [knowNames, ...namePatterns.map(() => [] as string[])];
   let seen = new Set(knowNameIds);

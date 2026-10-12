@@ -39,6 +39,32 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # the image tried before it is published: started on a library of one book, it answers
+      # that it is well, the page, and the book
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          target: app
+          load: true
+          tags: hyper-reader:try
+          cache-from: type=gha
+      - name: Try the image
+        run: |
+          mkdir -p try/books try/data && chmod 777 try/data
+          printf 'Chương 1: Một\n\nNàng đi qua núi.\n' > 'try/books/Thử (1-1 chương) (thử).txt'
+          docker run -d --name try -p 127.0.0.1:8080:8080 -v "$PWD/try/books:/books:ro" -v "$PWD/try/data:/data" hyper-reader:try
+          # (each answer is read whole before it is looked at: grep -q stops reading at what it
+          # looks for, and the shell takes curl's failing to finish for a failed step)
+          ask() { curl -fsS "http://127.0.0.1:8080$1" || true; }
+          for i in $(seq 1 30); do [ -n "$(ask /api/hello)" ] && break; sleep 1; done
+          for i in $(seq 1 30); do [[ "$(ask '/api/books?limit=1')" == *'"total":1'* ]] && break; sleep 1; done
+          [[ "$(ask '/api/books?q=thu')" == *'"title":"Thử"'* ]]
+          [[ "$(ask /)" == *'<title>Text Reader</title>'* ]]
+          test "$(docker inspect -f '{{.State.Running}}' try)" = true
+      - name: What the image said
+        if: always()
+        run: docker logs try || true
+
       - id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:

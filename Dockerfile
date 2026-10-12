@@ -32,7 +32,9 @@ WORKDIR /app
 # (package.json says the code is made of modules)
 COPY package.json ./
 COPY server ./server
-COPY src/parser.ts src/book.ts src/name-patterns.ts ./src/
+# the code of src/ the server runs (the parser, what a book is, the catalog): all of it, the few
+# KB of the page's own beside it, so a file it comes to need is never left out
+COPY src/*.ts ./src/
 COPY --from=page /app/hyper-reader.html ./
 USER node
 EXPOSE 8080

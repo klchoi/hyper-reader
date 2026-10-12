@@ -73,7 +73,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
   // changed or went
   let catalog: Entry[] | null = null;
   let catalogued = () => catalog ??= store.books().map(row => entryOf({
-    id: row.id, path: row.path, size: row.size, chapters: row.chapterCount, date: row.mtime, deletable: row.root === UPLOADS,
+    id: row.id, path: row.path, size: row.size, chapters: row.chapterCount, date: Math.round(row.mtime), deletable: row.root === UPLOADS,
   }));
   let forget = (id: string) => {
     store.forgetBook(id);

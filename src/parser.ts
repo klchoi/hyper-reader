@@ -565,7 +565,7 @@ const spanOf = (m: RegExpExecArray, group: string) => m.indices?.groups?.[group]
 
 // the title a line carries after its heading: no separator left in front, no bracket behind
 export function cleanTitle(rest: string) {
-  let title = rest.replace(/^[\s:：.,\-—–/|)\]】”"»*#!]+/u, '').trimEnd();
+  let title = rest.replace(/^[\s:：.,\-—–/|)\]】”"»*#!·•]+/u, '').trimEnd();
   // a closing bracket with nothing opened before it goes; one that closes a tag stays
   while(/[】\]”"»]$/u.test(title) && (title.match(/[】\]”"»]/gu) || []).length > (title.match(/[【[“«]/gu) || []).length) {
     title = title.slice(0, -1).trimEnd();
@@ -1180,9 +1180,13 @@ function fillGaps(nodes: Candidate[], path: Step[], credit: Record<string, numbe
 const END_PHRASE = /^(chương\s+)?(kết|cuối)$/i;
 
 // a title the heading itself carries, the plainest one when several headings stood together
+// the title of a heading said twice: the one the surer of the two gives (`Thứ 6 chương · bị kẻ thù
+// cấp lên!` over the book's name before `(06)` the line before), then the one that reads least
+// like a sentence, and the longer
 function pickTitle(members: Candidate[]) {
-  let titles = members.map(m => m.title).filter(t => t && !END_PHRASE.test(t));
-  titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);
+  let titled = members.filter(m => m.title && !END_PHRASE.test(m.title));
+  titled.sort((a, z) => z.base - a.base || proseCost(a.title) - proseCost(z.title) || z.title.length - a.title.length);
+  let titles = titled.map(m => m.title);
   // a paragraph that runs on behind the heading is not part of its title
   let title = titles[0];
   return title && title.length > TUNING.drafts.titleMax ? `${title.slice(0, TUNING.drafts.titleMax).replace(/\s+\S*$/, '')}…` : title;

@@ -1,0 +1,7 @@
+# the actions the workflows are pinned to, kept current once a week
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

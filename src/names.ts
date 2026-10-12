@@ -295,8 +295,15 @@ const nameDeltaE = 20;
 // the hue is judged at one fixed lightness, not on the paper in front of us: a
 // character keeps the hue they were given when the theme changes, so choosing it
 // against the paper of the moment would only space the cast for the theme it
-// happened to be assigned under, and crowd them on every other one
+// happened to be assigned under, and crowd them on every other one. Being fixed, it is
+// worked out once a hue
+const spacingColors = new Map<number, chromaJs.Color>();
 function spacingColor(hue: number) {
+  let color = spacingColors.get(hue);
+  if (!color) spacingColors.set(hue, color = spacingColorOf(hue));
+  return color;
+}
+function spacingColorOf(hue: number) {
   for (let c = 110; c >= 25; c -= 5) {
     let color = chromaJs.hcl(hue, c, 60);
     if (!color.clipped()) return color;
@@ -352,7 +359,16 @@ function mostChroma(hue: number, l: number) {
 // keeps a hue from landing on the very colour the words are written in
 const nameContrast = 4.5;
 const proseDeltaE = 15;
+// a few thousand colors tried for each name, and the next chapter names the same people on
+// the same paper: each is worked out once, a hue and a theme
+const nameColors = new Map<string, chromaJs.Color>();
 function nameColor(hue: number, paper: chromaJs.Color, prose: chromaJs.Color) {
+  let key = `${hue} ${paper.hex()} ${prose.hex()}`;
+  let color = nameColors.get(key);
+  if (!color) nameColors.set(key, color = nameColorOf(hue, paper, prose));
+  return color;
+}
+function nameColorOf(hue: number, paper: chromaJs.Color, prose: chromaJs.Color) {
   let best, readable;
   for (let l = 20; l <= 96; l += 2) {
     let found = mostChroma(hue, l);

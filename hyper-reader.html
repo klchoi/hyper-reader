@@ -9444,7 +9444,13 @@ function namesWith(names, { name, alias, relationship }) {
 }
 var nameHues = /* @__PURE__ */ new Map();
 var nameDeltaE = 20;
+var spacingColors = /* @__PURE__ */ new Map();
 function spacingColor(hue) {
+	let color = spacingColors.get(hue);
+	if (!color) spacingColors.set(hue, color = spacingColorOf(hue));
+	return color;
+}
+function spacingColorOf(hue) {
 	for (let c = 110; c >= 25; c -= 5) {
 		let color = chroma_js_default.hcl(hue, c, 60);
 		if (!color.clipped()) return color;
@@ -9502,7 +9508,14 @@ function mostChroma(hue, l) {
 }
 var nameContrast = 4.5;
 var proseDeltaE = 15;
+var nameColors = /* @__PURE__ */ new Map();
 function nameColor(hue, paper, prose) {
+	let key = `${hue} ${paper.hex()} ${prose.hex()}`;
+	let color = nameColors.get(key);
+	if (!color) nameColors.set(key, color = nameColorOf(hue, paper, prose));
+	return color;
+}
+function nameColorOf(hue, paper, prose) {
 	let best, readable;
 	for (let l = 20; l <= 96; l += 2) {
 		let found = mostChroma(hue, l);

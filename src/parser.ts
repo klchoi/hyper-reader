@@ -102,7 +102,9 @@ function partMark({ title = '', part }: Heading): Mark | null {
 // and a part after it (`Yoga (thượng)`, `Yoga (hạ)`), under the one number or numbers that
 // follow on. Each part is given `{ of, text }`: the title of the whole (`Chương 9-10: Yoga`),
 // and the part, as written or, when the parts are numbers, as `2/5`, in the brackets it was
-// written in: `(thượng)`, `(2/5)`. A chapter just before the parts with their title and no
+// written in: `(thượng)`, `(2/5)`. Parts written as numbers that are as many as the chapters
+// the whole runs over are those chapters, and are given their numbers: the four parts of
+// `Chương 24-27` are `(24)`, `(25)`, `(26)` and `(27)`. A chapter just before the parts with their title and no
 // part of its own is their first part when the next is the second (`Na Trát`, then `Na Trát
 // (2)`), and their heading when the next is the first and it holds nothing but its heading
 // (`Thứ 13 chương tam đối`): it is given `{ of, head: true }`, and parts that left the title
@@ -157,9 +159,16 @@ function partsOf(drafts: Draft[], text: string) {
     let shown = run.filter(m => !m.head);
     let numbered = shown.every(m => m.number != null);
     let total = Math.max(new Set(shown.map(m => m.order)).size, ...shown.map(m => m.number ?? 0));
+    let [from, to = from] = String(number ?? '').split('-').map(Number);
+    let chapters = numbered && to - from + 1 === shown.length;
+    let place = 0;
     run.forEach((m, k) => {
-      let said = numbered ? `${m.number}/${total}` : m.word;
-      parts[start + k] = m.head ? { of, head: true } : { of, text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(' '), title: m.given };
+      if(m.head) {
+        parts[start + k] = { of, head: true };
+        return;
+      }
+      let said = chapters ? String(from + place++) : numbered ? `${m.number}/${total}` : m.word;
+      parts[start + k] = { of, text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(' '), title: m.given };
     });
   }
   return parts;

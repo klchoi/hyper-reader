@@ -215,6 +215,7 @@ const TUNING = {
     titlePage: -6,       // `【NAME】1-74 tác giả: ...`
     roman: -2,           // roman numerals read as a word more often than as a number
     inline: 3,           // a heading in the middle of a line
+    runsOn: -1,          // one at the start of a line its chapter's text runs on in
     inlineTitleMax: 80,  // and the title it is given, in characters
   },
   // 3. how much a line reads like a sentence of the story and not like a title
@@ -239,7 +240,7 @@ const TUNING = {
   path: {
     threshold: 4.5,      // what a heading must be worth to be on the path by itself
     closeLines: 3,       // lines apart that two headings may still be one
-    gapMax: 4,           // numbers a jump may skip
+    gapMax: 10,          // how far a jump may go (each number it skips costs `reward.gap`)
     smallNumber: 3,      // a number up to this may be the first of a book
     startAlone: 3,       // worth of a path that starts at a small number...
     startFar: -6,        // ...and at any other
@@ -256,7 +257,7 @@ const TUNING = {
   // 4. how far a shape is trusted, by how much of it landed on the path
   trust: { scale: 6 },
   // 4. a heading with a line or so before the next, in a book of long chapters
-  tiny: { typicalAtLeast: 30, lines: 2 },
+  tiny: { typicalAtLeast: 30, lines: 2, chars: 3000 },
   // 4. a contents list at the head of a book: this many entries, from the least to the most
   contents: { minEntries: 3, maxEntries: 60 },
   // 4. weak headings taken back to fill a gap: the first of a book up to this number
@@ -403,6 +404,13 @@ const DIGITS = /\d+(?:\.\d+)?/y;
 const LETTERS = /\p{L}+/uy;
 const NEXT_WORD = / \p{L}+/uy;
 const NEXT_MARK = /\s*(\S)/y;
+// what a number says when it counts a chapter's words: `2.4 vạn chữ`, `8000 chữ`, `5 ngàn chữ`. Only
+// as many as a chapter has: `087 vạn chữ đại càng` (870,000 words) is chapter 87, its title saying
+// how long it is, and so is `Chương 87 vạn chữ ...`
+const WORD_COUNT = /\s*(vạn|ngàn|nghìn|k|w)?\s*chữ(?![\p{L}\p{N}])/uy;
+const countsWords = (value: number, decimal: boolean, unit?: string) => (
+  decimal || (unit === 'vạn' || unit === 'w' ? value < 20 : unit ? value < 100 : value >= 300)
+);
 const readAt = (re: RegExp, line: string, pos: number) => {
   re.lastIndex = pos;
   return re.exec(line);
@@ -425,8 +433,11 @@ function lexLine(line: string, lower: string, names: string[]) {
     if(/\d/.test(ch)) {
       let m = readAt(DIGITS, line, pos)!;
       let [major, minor] = m[0].split('.');
-      // `0.05` is a fraction (a countdown, a price), not chapter 5 of a book 0
+      // `0.05` is a fraction (a countdown, a price), not chapter 5 of a book 0; `1.2 vạn chữ` is
+      // how long the chapter is
       if(minor != null && Number(major) === 0) { add('x', pos + m[0].length); continue; }
+      let count = !['c', 't'].includes(tokens.at(-1)?.cls ?? '') && readAt(WORD_COUNT, lower, pos + m[0].length);
+      if(count && countsWords(Number(m[0]), minor != null, count[1])) { add('x', pos + m[0].length); continue; }
       // `3.40` is chapter 40 of book 3
       add('N', pos + m[0].length, { value: Number(minor ?? major), book: minor == null ? null : Number(major), digits: true });
       continue;
@@ -484,6 +495,7 @@ function lexLine(line: string, lower: string, names: string[]) {
 //             number (`Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`)
 //   outer     the section it is a part of: `Chương 2: Tiên tử chi ân | thứ 3 hồi ...`
 //   inline    found in the middle of a line, not at its start
+//   runsOn    at the start of a line too long to be a heading, its chapter's text running on
 type Candidate = {
   kind: 'chap' | 'book' | 'extrahead' | 'half' | 'interlude';
   base: number;
@@ -495,12 +507,13 @@ type Candidate = {
   bookNum: number | null; bookType: string | null; bookName: string | null;
   outer: string | null;
   inline: boolean;
+  runsOn: boolean;
 };
 const HEADING_DEFAULTS: Candidate = {
   kind: 'chap', base: 0, index: 0, start: 0, ord: 0, text: '', title: '', rest: '', whole: false, shape: '',
   n: null, span: null, end: false, endWord: null, chapType: null, extra: false,
   half: null, halfText: null, halfBracketed: false, halfNum: null, halfType: null,
-  bookNum: null, bookType: null, bookName: null, outer: null, inline: false,
+  bookNum: null, bookType: null, bookName: null, outer: null, inline: false, runsOn: false,
 };
 
 function heading(fields: Partial<Candidate>): Candidate {
@@ -649,8 +662,20 @@ function shapeOf(tokens: Token[], length: number, whole: boolean) {
   return spelled.replace(/x+/g, 'X') + (whole ? '' : 'T');
 }
 
-// `Chính văn` (the main text, as against the extras) labels a heading and is no part of it
-const SECTION_LABEL = /^\s*chính văn\s+(?=\S)/iu;
+// `Chính văn` (the main text, as against the extras) labels a heading and is no part of it, and
+// so does the day a chapter was posted, in front of the word that says it is one:
+// `2018-11-18【Chương 8: ...` (`2004.01.06 trễ cho trong nhà` is an entry of a diary, its date
+// all there is to number it by)
+const SECTION_LABEL = /^\s*(?:chính văn\s+|\d{4}[-./]\d{1,2}[-./]\d{1,2}\s*(?=[【[(（]?\s*(?:chương|hồi|thứ\s)))(?=\S)/iu;
+// a line too long to be a heading may still begin with one, the chapter's text running on behind it
+// on the one line (a chapter posted as a single paragraph), when it is set apart in front: by the
+// day it was posted, `Chính văn`, or a bracket (`2018-11-18【Chương 10: ...`). A bare `Chương 3: ...`
+// at the head of a paragraph is told from a sentence about chapter 3 by nothing, and a book of such
+// paragraphs is better read in pages than in the few chapters it would be cut into
+const LONG_LINE_HEADING = /^\s*(?:chính văn\s+|\d{4}[-./]\d{1,2}[-./]\d{1,2}\s*[【[(（]?|[【[(（])\s*(?:(?:chương|hồi)\s+\d{1,4}|thứ\s+\d{1,4}\s+(?:chương|hồi))(?![\p{L}\p{N}])/iu;
+const HEADING_READ = 400;
+// characters into such a line that its heading, found again in it, is still the same one
+const HEADING_SAME_WITHIN = 40;
 
 // a chapter in parts: `Chương 27: (thượng)`, `Chương 44: (nhất)`, or a title that ends in
 // `(hạ)`. The parts are shown one by one, each as the part of its chapter
@@ -676,15 +701,22 @@ function valueOfPart(word: string) {
 // `Tên sách: Ngoại truyện: Ba cái tiểu xử nữ`: the title of one of the books a file holds
 const BOOK_TITLE = /^\s*tên sách\s*[:：]\s*(\S.*?)\s*$/iu;
 
-function readHeading(line: string, lower: string, names: string[]): Candidate | null {
-  if(line.length > 400) return null;
+function readHeading(line: string, lower: string, names: string[], cut = false): Candidate | null {
+  // (what runs on behind the heading of a chapter posted as one paragraph is that paragraph, and
+  // no title)
+  let runsOn = cut || line.length > HEADING_READ;
+  if(line.length > HEADING_READ) {
+    if(!LONG_LINE_HEADING.test(line)) return null;
+    line = line.slice(0, HEADING_READ);
+    lower = lower.slice(0, HEADING_READ);
+  }
   let named = BOOK_TITLE.exec(line);
   if(named) {
     return heading({ kind: 'book', base: TUNING.base.bookTitle, bookName: named[1], title: named[1], text: line.trim(), start: line.search(/\S/), shape: 'named' });
   }
   let label = SECTION_LABEL.exec(line);
   if(label) {
-    let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names);
+    let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names, runsOn);
     return node && { ...node, start: label[0].search(/\S/) };
   }
   let tokens = lexLine(line, lower, names);
@@ -712,9 +744,16 @@ function readHeading(line: string, lower: string, names: string[]): Candidate | 
     if(read.roles.n != null) {
       title = title.replace(new RegExp(`^(?:\\S+\\s+){0,3}?(?:chương|hồi)\\s+${read.roles.n}\\s*[:：.]*\\s*`, 'iu'), '');
     }
-    let part = read.roles.n != null && partOf(title);
+    let part = read.roles.n != null && !runsOn && partOf(title);
     let hasRoman = tokens.some(t => t.roman);
     let base = baseOf(rule, read, { title, rest, whole, hasRoman, hasPhrase: !!at('ph'), titled: /^[:：]$/.test(last.text) });
+    // a heading the chapter's text runs on behind is weighed with that text, and a little less
+    // than one on its own line: a note that begins `Chương 7: ...` reads the same. What runs on
+    // is no title
+    if(runsOn) {
+      base += TUNING.base.runsOn;
+      title = '';
+    }
     // `Thứ 0 chương` sets a piece between two chapters; a bare 0 (a door code, a countdown) is nothing
     if(read.roles.n === 0 && !read.marker) continue;
     if(part) title = part.title;
@@ -734,6 +773,7 @@ function readHeading(line: string, lower: string, names: string[]): Candidate | 
       // (a part in the title is one in brackets: `(thượng)`)
       ...read.roles, ...(part && { half: part.half, halfText: part.halfText, halfBracketed: true }), kind, base, rest, title, whole,
       shape: shapeOf(tokens, m[0].length, whole),
+      runsOn,
       text: line.slice(tokens[0].s, last.e),
       start: tokens[0].s,
     });
@@ -778,8 +818,12 @@ function findCandidates(text: string, name: string) {
       let lower = line.toLowerCase();
       let node = lower.length === line.length ? readHeading(line, lower, names) : null;
       if(node) nodes.push(heading({ ...node, index: lineStart + node.start, ord }));
-      let opensWithHeading = node && node.base >= TUNING.path.breakMinBase;
-      if(!opensWithHeading && line.length < 4000) nodes.push(...inlineHeadings(line, lineStart, ord));
+      // (the heading a long line begins with is no surer than the ones in it, which are kept;
+      // but the same heading as it, found again, is not)
+      let opensWithHeading = node && !node.runsOn && node.base >= TUNING.path.breakMinBase;
+      let inline = !opensWithHeading && line.length < 4000 ? inlineHeadings(line, lineStart, ord) : [];
+      if(node?.runsOn) inline = inline.filter(other => other.n !== node.n || other.index - lineStart > HEADING_SAME_WITHIN);
+      nodes.push(...inline);
     }
     lineStart = lineEnd + 1;
   }
@@ -1021,9 +1065,12 @@ function tinySections(nodes: Candidate[], path: Step[]) {
   let tiny = new Set<number>();
   // a book of one-paragraph chapters has nothing to tell a list from
   if(typical < TUNING.tiny.typicalAtLeast) return tiny;
+  // (a heading its chapter's text runs on behind has a line or two however long the chapter: it
+  // is told by how much text it holds)
   chapters.forEach(({ i }, k) => {
     let next = chapters[k + 1];
-    if(next && !next.joined && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);
+    let little = !nodes[i].runsOn || nodes[next?.i]?.index - nodes[i].index < TUNING.tiny.chars;
+    if(next && !next.joined && little && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);
   });
   return tiny;
 }

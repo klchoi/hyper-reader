@@ -80,6 +80,19 @@ describe('what is not a chapter', () => {
     let text = book(chapterText(1), 'Một giờ sau, nàng mới biết chuyện gì đã xảy ra.', story(5), chapterText(2), 'Hai người nhìn nhau rất lâu không nói gì cả.', chapterText(3), chapterText(4));
     assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4']);
   });
+  it('a long paragraph that begins with its chapter, set apart by nothing', () => {
+    // as likely a note on chapter 3 as chapter 3 itself: a book of these is read in pages
+    let note = `Chương 3: vừa ra, ${story(8).replaceAll('\n\n', ' ')}`;
+    let text = book(chapterText(1), chapterText(2), story(3), note, story(3), chapterText(3), chapterText(4));
+    let chapters = real(parse(text));
+    assert.deepEqual(titles(chapters), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4']);
+    assert.ok(chapters[1].content.includes('vừa ra'));
+  });
+  it('a long paragraph that begins with a number', () => {
+    let long = `3 ${story(8).replaceAll('\n\n', ' ')}`;
+    let text = book(chapterText(1), long, story(3), chapterText(2), `Năm ${long}`, chapterText(3), chapterText(4));
+    assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4']);
+  });
   it('a fraction or a door code', () => {
     let text = book(chapterText(1), '【0.05】', story(4), '"0... 2... 1... 8 "', story(4), chapterText(2), chapterText(3), chapterText(4));
     assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4']);
@@ -182,6 +195,32 @@ describe('parts, ranges and extras', () => {
   it('lets `Chính văn` label a heading without being in its title', () => {
     let text = book([1, 2, 3].map(n => `Chính văn thứ ${n} chương cảnh ${'abc'[n - 1]}\n\n${story(6, n)}`));
     assert.deepEqual(titles(real(parse(text))), ['Chương 1: Cảnh a', 'Chương 2: Cảnh b', 'Chương 3: Cảnh c']);
+  });
+  it('lets the day a chapter was posted stand in front of its heading', () => {
+    let text = book([1, 2, 3, 4].map(n => `2018-11-${10 + n}【Chương ${n}: Cảnh ${'abcd'[n - 1]}\n\n${story(6, n)}`));
+    let chapters = real(parse(text));
+    assert.deepEqual(titles(chapters), ['Chương 1: Cảnh a', 'Chương 2: Cảnh b', 'Chương 3: Cảnh c', 'Chương 4: Cảnh d']);
+    assert.ok(chapters[1].content.startsWith('2018-11-12【Chương 2'));
+  });
+  it('reads the heading set apart in front of a chapter posted as one paragraph, and gives it no title of its text', () => {
+    // a whole chapter on one line, its heading in front: the line is far too long for a heading
+    let paragraph = (n: number) => story(8, n).replaceAll('\n\n', ' ');
+    let text = book(`Chương 1: Cảnh a\n\n${story(6, 1)}`, `【Chương 2: ${paragraph(2)}`, `2018-11-18【Chương 3: ${paragraph(3)}`, `Chương 4: Cảnh d\n\n${story(6, 4)}`);
+    assert.ok(paragraph(2).length > 400);
+    assert.deepEqual(titles(real(parse(text))), ['Chương 1: Cảnh a', 'Chương 2', 'Chương 3', 'Chương 4: Cảnh d']);
+  });
+  it('goes on past the chapters a book leaves out', () => {
+    let numbers = [1, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17];
+    let text = book(numbers.map(n => `(${n})\n\n${story(10, n)}`));
+    assert.deepEqual(titles(real(parse(text))), numbers.map(n => `Chương ${n}`));
+  });
+  it('reads a title that says how long its chapter is, and a title that begins with từ', () => {
+    let text = book(`086 Nhị thiếu gia\n\n${story(8, 1)}`, `087 vạn chữ đại càng chúc mừng!\n\n${story(8, 2)}`, `088 Ba người\n\n${story(8, 3)}`, `Chương 89 từ sau trở về\n\n${story(8, 4)}`, `Chương 90: Cuối\n\n${story(8, 5)}`);
+    assert.deepEqual(real(parse(text)).map(c => c.title.split(':')[0]), ['Chương 86', 'Chương 87', 'Chương 88', 'Chương 89', 'Chương 90']);
+  });
+  it('takes how long a chapter is for no number of it', () => {
+    let text = book([1, 2, 3, 4].map(n => `Chương ${n}:\n\n${n}.${n + 1} vạn chữ\n\n${story(6, n)}${n === 2 ? '\n\nMột cái mười lăm tuổi con lai.\n\nTam đại cùng đường, bà mẹ con.' : ''}`));
+    assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4']);
   });
 });
 

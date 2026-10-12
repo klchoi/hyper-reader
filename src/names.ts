@@ -373,7 +373,7 @@ const detectedNames: Record<string, Map<Node, Found[]>> = {};
 // the article and the command palette are highlighted independently, each pass
 // owning its own style ids, so one can be refreshed without redoing the other
 export type Scope = { selector: string; prefix: string };
-export const articleNames: Scope = { selector: 'article p, nav a', prefix: 'hl' };
+export const articleNames: Scope = { selector: 'article p, nav a .name', prefix: 'hl' };
 export const commandPaletteNames: Scope = { selector: '#command-palette a', prefix: 'cp' };
 
 // the colors of a pass, one stylesheet to a scope, holding the rules of the names it colored

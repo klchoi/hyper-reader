@@ -30,10 +30,10 @@ describe('the readers', () => {
   after(() => fs.rmSync(shelf, { recursive: true, force: true }));
 
   it('starts as many readers as it may for the books to read, and ends them once idle', async () => {
-    let readers = createReaders({ count: 2, idle: 100 });
+    let readers = createReaders({ count: 3, idle: 100 });
     try {
       let reads = files.map(file => readers.read(file));
-      // as many as it may, started as the jobs come
+      // as many as it may, started as the jobs come: one kept for a book someone waits on
       assert.equal(readers.running(), 2);
       let read = await Promise.all(reads);
       assert.deepEqual(read.map(book => book.chapters.at(-1)!.title), ['Chương 3: Tiêu đề 3', 'Chương 3: Tiêu đề 3', 'Chương 3: Tiêu đề 3']);
@@ -71,6 +71,19 @@ describe('the readers', () => {
       await Promise.all([...reads, again]);
       // the first read was under way already; the third, asked again, went before the second
       assert.deepEqual(done, ['read 0', 'read 2', 'read 1']);
+    } finally {
+      await readers.close();
+    }
+  });
+  it('keeps a reader for a book someone waits on, however many books are queued', async () => {
+    let readers = createReaders({ count: 2, idle: 100 });
+    try {
+      let reads = files.map(file => readers.read(file));
+      assert.deepEqual([readers.running(), readers.busy()], [1, 3]);
+      // the one kept takes it at once, the queued books still going through the other
+      let waited = readers.text(files[2]);
+      assert.equal(readers.running(), 2);
+      await Promise.all([...reads, waited]);
     } finally {
       await readers.close();
     }

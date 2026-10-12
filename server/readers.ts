@@ -36,7 +36,8 @@ export function startHelper(module: URL, args: string[] = []): Helper {
   };
 }
 
-type Job = { id: number; kind: Asked['kind']; file: string; resolve: (result: any) => void; reject: (error: Error) => void };
+// `first`: someone waits on it (see `run`)
+type Job = { id: number; kind: Asked['kind']; file: string; first: boolean; resolve: (result: any) => void; reject: (error: Error) => void };
 type Reader = Helper & { job: Job | null; timer?: ReturnType<typeof setTimeout> };
 
 export function createReaders({ count = Math.max(1, os.availableParallelism() - 1), idle = IDLE } = {}) {
@@ -60,13 +61,24 @@ export function createReaders({ count = Math.max(1, os.availableParallelism() - 
     readers.delete(reader);
     reader.process.kill();
   };
+  // the next job to give a reader: one someone waits on whenever there is one, the others only
+  // while a reader is left for those (a book opened during a scan of thousands starts at once)
+  let next = () => {
+    let job = waiting[0];
+    if(!job) return undefined;
+    let others = [...readers].filter(reader => reader.job && !reader.job.first).length;
+    if(!job.first && count > 1 && others >= count - 1) return undefined;
+    return waiting.shift();
+  };
   // the jobs waiting to the readers free, and to new ones while there is room for more
   let dispatch = () => {
     for(let reader of readers) {
-      if(!waiting.length) return;
-      if(!reader.job) give(reader, waiting.shift()!);
+      if(reader.job) continue;
+      let job = next();
+      if(!job) return;
+      give(reader, job);
     }
-    while(waiting.length && readers.size < count) give(start(), waiting.shift()!);
+    for(let job; readers.size < count && (job = next());) give(start(), job);
   };
   let start = () => {
     let reader: Reader = { ...startHelper(new URL('./read-worker.ts', import.meta.url)), job: null };
@@ -103,14 +115,16 @@ export function createReaders({ count = Math.max(1, os.availableParallelism() - 
     let key = `${kind}:${file}`;
     let known = queued.get(key);
     if(known) {
-      if(first && waiting[0] !== known.job) {
+      if(first && !known.job.first) {
+        known.job.first = true;
         waiting.splice(waiting.indexOf(known.job), 1);
         waiting.unshift(known.job);
+        dispatch();
       }
       return known.answer;
     }
     let job!: Job;
-    let answer = new Promise<T>((resolve, reject) => { job = { id: ++jobs, kind, file, resolve, reject }; });
+    let answer = new Promise<T>((resolve, reject) => { job = { id: ++jobs, kind, file, first, resolve, reject }; });
     queued.set(key, { job, answer });
     if(first) waiting.unshift(job);
     else waiting.push(job);

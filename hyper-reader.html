@@ -10404,24 +10404,56 @@ function render$9(__prev) {
 		__prev.a = __a;
 	}
 }
-var root_3$4 = template_el("li", null, [["a"]]);
+var root_4$4 = template_el("span", ["class", "number"]);
 function render_1$7(__prev) {
-	var __pattern = get(__prev._a);
-	var __a = __pattern.label;
+	var __a = get(__prev._a).number;
 	if (__prev.a !== __a) {
 		set_text_content(__prev._b, __a, __prev.a);
 		__prev.a = __a;
 	}
-	var __b = __pattern.href;
-	if (__prev.b !== __b) set_attribute(__prev._b, "href", __prev.b = __b);
-	var __c = __pattern.tip;
-	if (__prev.c !== __c) set_attribute(__prev._b, "title", __prev.c = __c);
-	var __d = {
-		active: __pattern.id !== void 0 && selector_match(__prev._c, __pattern.id),
+}
+function consequent_1$4(__anchor, pattern) {
+	var span_1 = root_4$4();
+	render$10(render_1$7, {
+		a: "",
+		_a: pattern,
+		_b: span_1
+	});
+	append(__anchor, span_1);
+}
+function if_1$7(pattern) {
+	if (get(pattern).number !== void 0) return consequent_1$4;
+}
+var root_3$4 = template_el("li", null, [[
+	"a",
+	null,
+	[[
+		"span",
+		["class", "entry"],
+		[["span", ["class", "name"]]]
+	]]
+]]);
+function render_2$6(__prev) {
+	var __pattern = get(__prev._a);
+	var __a = if_1$7(__prev._a);
+	if (__prev.a !== __a) if_update(__prev._b, __prev.a = __a);
+	var __b = __pattern.label;
+	if (__prev.b !== __b) {
+		set_text_content(__prev._c, __b, __prev.b);
+		__prev.b = __b;
+	}
+	var __c = __pattern.href;
+	if (__prev.c !== __c) set_attribute(__prev._d, "href", __prev.c = __c);
+	var __d = __pattern.tip;
+	if (__prev.d !== __d) set_attribute(__prev._d, "title", __prev.d = __d);
+	var __e = __pattern.tip;
+	if (__prev.e !== __e) set_attribute(__prev._d, "aria-label", __prev.e = __e);
+	var __f = {
+		active: __pattern.id !== void 0 && selector_match(__prev._e, __pattern.id),
 		part: __pattern.part,
-		reading: !!__prev._d.value && !!with_scope(__prev._e, () => get(__prev._a).parts?.includes(__prev._d.value))
+		reading: !!__prev._f.value && !!with_scope(__prev._g, () => get(__prev._a).parts?.includes(__prev._f.value))
 	};
-	if (__prev.d !== __d) set_class_value(__prev._f, __prev.d = __d);
+	if (__prev.f !== __f) set_class_value(__prev._h, __prev.f = __f);
 }
 function consequent$7(__anchor, { a: pattern, b: open, c: selector, d: activeId, e: __block }) {
 	var li = root_2$6();
@@ -10436,26 +10468,32 @@ function alternate$3(__anchor, { a: pattern, b: open, c: selector, d: activeId, 
 	var li_1 = root_3$4();
 	var a = hydrating ? hydrate_first_child() : li_1.firstChild;
 	a.__click = (event) => open(event, get(pattern).offset);
-	render$10(render_1$7, {
-		a: "",
-		b: void 0,
+	var span = hydrating ? hydrate_first_child() : a.firstChild;
+	var node_1 = hydrating ? hydrate_first_child() : span.firstChild;
+	render$10(render_2$6, {
+		a: UNINITIALIZED,
+		b: "",
 		c: void 0,
-		d: UNINITIALIZED,
+		d: void 0,
+		e: void 0,
+		f: UNINITIALIZED,
 		_a: pattern,
-		_b: a,
-		_c: selector,
-		_d: activeId,
-		_e: __block,
-		_f: li_1
+		_b: if_static(node_1, if_1$7, 2, pattern),
+		_c: hydrating ? hydrate_next_sibling() : node_1,
+		_d: a,
+		_e: selector,
+		_f: activeId,
+		_g: __block,
+		_h: li_1
 	});
 	append(__anchor, li_1);
 }
-function if_1$7({ a: pattern, b: open, c: selector, d: activeId, e: __block }) {
+function if_2$4({ a: pattern, b: open, c: selector, d: activeId, e: __block }) {
 	if (get(pattern).book) return consequent$7;
 	else return alternate$3;
 }
-function render_2$6(__prev) {
-	var __a = if_1$7({
+function render_3$4(__prev) {
+	var __a = if_2$4({
 		a: __prev._a,
 		b: __prev._b,
 		c: __prev._c,
@@ -10465,12 +10503,15 @@ function render_2$6(__prev) {
 	if (__prev.a !== __a) if_update(__prev._f, __prev.a = __a);
 }
 var root_1$8 = template_el("ol", ["start", "0"]);
-function consequent_1$4(__anchor, { a: rows, b: activeId, c: open, d: __block }) {
+function render_4$3(__prev) {
+	set_style(__prev._a, `--number-width: ${__prev._b.value}ch`, void 0);
+}
+function consequent_2$3(__anchor, { a: rows, b: activeId, c: open, d: __block, e: numberWidth }) {
 	var ol = root_1$8();
 	{
 		const selector$4 = selector(() => activeId.value);
 		for_block_keyed(ol, () => rows.value, (__anchor, pattern) => {
-			var ifs = if_static(__anchor, if_1$7, 3, {
+			var ifs_1 = if_static(__anchor, if_2$4, 3, {
 				a: pattern,
 				b: open,
 				c: selector$4,
@@ -10484,24 +10525,29 @@ function consequent_1$4(__anchor, { a: rows, b: activeId, c: open, d: __block })
 				_c: selector$4,
 				_d: activeId,
 				_e: __block,
-				_f: ifs
+				_f: ifs_1
 			});
-		}, 4, (pattern) => pattern.key, void 0, void 0, render_2$6);
+		}, 4, (pattern) => pattern.key, void 0, void 0, render_3$4);
 	}
+	render$10(render_4$3, {
+		_a: ol,
+		_b: numberWidth
+	});
 	append(__anchor, ol);
 }
-function if_2$4({ a: rows, b: activeId, c: open, d: __block }) {
-	if (rows.value.length > 0) return consequent_1$4;
+function if_3$2({ a: rows, b: activeId, c: open, d: __block, e: numberWidth }) {
+	if (rows.value.length > 0) return consequent_2$3;
 }
 var root$8 = template_el("nav", null, [null]);
-function render_3$4(__prev) {
-	var __a = if_2$4({
+function render_5$2(__prev) {
+	var __a = if_3$2({
 		a: __prev._a,
 		b: __prev._b,
 		c: __prev._c,
-		d: __prev._d
+		d: __prev._d,
+		e: __prev._e
 	});
-	if (__prev.a !== __a) if_update(__prev._e, __prev.a = __a);
+	if (__prev.a !== __a) if_update(__prev._f, __prev.a = __a);
 }
 function ChapterList_render(__anchor, __block) {
 	const store = with_scope(__block, () => StoreContext.get());
@@ -10524,24 +10570,31 @@ function ChapterList_render(__anchor, __block) {
 			part: false,
 			...fields
 		});
+		let chapter = (title) => ({
+			...with_scope(__block, () => numbered(fix(title))),
+			tip: with_scope(__block, () => fix(title))
+		});
 		with_scope(__block, () => open.chapters.forEach((c, i) => {
 			if (c.group && c.group !== group) with_scope(__block, () => rows.push(row(`book:${i}`, c.offset, { book: group = c.group })));
 			if (c.part && c.part.of !== open.chapters[i - 1]?.part?.of) with_scope(__block, () => rows.push(whole = row(`whole:${i}`, c.offset, {
-				label: fix(c.part.of),
-				tip: fix(c.part.of),
+				...chapter(c.part.of),
 				parts: []
 			})));
 			if (c.part) with_scope(__block, () => whole?.parts?.push(c.id));
+			let shown = c.part ? {
+				label: with_scope(__block, () => fix(c.part.text)),
+				tip: with_scope(__block, () => fix(c.title))
+			} : chapter(c.title);
 			with_scope(__block, () => rows.push(row(c.id, c.offset, {
 				id: c.id,
-				label: fix(c.part ? c.part.text : c.title),
-				tip: fix(c.title),
+				...shown,
 				part: !!c.part
 			})));
 		}));
 		return rows;
 	}, __block, "ulty7c");
-	const activeId = track(() => store.chapter.value?.id, __block, "1w3h6mr");
+	const numberWidth = track(() => with_scope(__block, () => Math.max(1, ...rows.value.map((row) => with_scope(__block, () => /^\d+$/.test(row.number ?? "")) ? row.number.length : 0))), __block, "1w3h6mr");
+	const activeId = track(() => store.chapter.value?.id, __block, "krcoh8");
 	const open = (event, offset) => {
 		with_scope(__block, () => event.preventDefault());
 		with_scope(__block, () => store.openBook({
@@ -10550,22 +10603,32 @@ function ChapterList_render(__anchor, __block) {
 		}));
 	};
 	var nav = root$8();
-	render$10(render_3$4, {
+	render$10(render_5$2, {
 		a: UNINITIALIZED,
 		_a: rows,
 		_b: activeId,
 		_c: open,
 		_d: __block,
-		_e: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_2$4, 0, {
+		_e: numberWidth,
+		_f: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_3$2, 0, {
 			a: rows,
 			b: activeId,
 			c: open,
-			d: __block
+			d: __block,
+			e: numberWidth
 		})
 	});
 	append(__anchor, nav);
 }
 ChapterList[RENDER_ENTRY] = ChapterList_render;
+var NUMBERED = /^Chương (\S+?)(?::\s+|\s+(?=\()|$)(.*)$/u;
+var numbered = (title) => {
+	let found = NUMBERED.exec(title);
+	return found ? {
+		number: found[1],
+		label: found[2]
+	} : { label: title };
+};
 function ChapterList() {
 	return tsrx_element(ChapterList_render);
 }
@@ -12363,39 +12426,55 @@ nav {
     display: flex;
     flex-direction: column;
     gap: 0.5em;
-    align-items: start;
     li {
-      max-width: 100%;
       /* the chapter read, and the name of the one whose part is read, are written out whole */
       &:not(.active, .reading) {
         white-space: nowrap;
       }
-      padding-top: 0.1ex;
-      padding-bottom: 0.1ex;
-      padding-left: calc(var(--gap) * 0.25);
-      padding-right: calc(var(--gap) * 0.25);
-      &.active {
-        background: var(--body-font-color);
-        outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
-        border-radius: 0.5ex;
-        color: var(--body-background-color);
-        a {
-          pointer-events: none;
-          color: inherit;
-        }
-      }
+      /* the link takes the whole row and half the gap on either side, so there is nowhere
+         in the list that a click falls through; the entry in it (and its highlight) is as
+         wide as its text */
       a {
         display: block;
-        /* the link reaches out over its item's padding and half the gap on either side,
-           so there is nowhere between two entries that a click falls through; the item
-           (and its highlight) stays the size it was */
-        margin: calc(-0.1ex - 0.25em) calc(var(--gap) * -0.25);
-        padding: calc(0.1ex + 0.25em) calc(var(--gap) * 0.25);
-        overflow: hidden;
-        text-overflow: ellipsis;
+        margin: -0.25em 0;
+        padding: 0.25em 0;
         color: var(--body-font-color);
         &:hover {
           color: var(--link-color);
+        }
+      }
+      .entry {
+        display: inline-flex;
+        vertical-align: top;
+        max-width: 100%;
+        padding: 0.1ex calc(var(--gap) * 0.25);
+      }
+      /* the chapter's number, in a column of its own (see ChapterList.tsrx) */
+      .number {
+        flex: none;
+        min-width: var(--number-width, 2ch);
+        margin-right: 0.6em;
+        text-align: right;
+        font-variant-numeric: lining-nums tabular-nums;
+        opacity: 0.55;
+      }
+      .name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      &.active {
+        a {
+          pointer-events: none;
+          color: var(--body-background-color);
+        }
+        .entry {
+          background: var(--body-font-color);
+          outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
+          border-radius: 0.5ex;
+        }
+        .number {
+          opacity: 0.7;
         }
       }
       &:first-child a {
@@ -12405,11 +12484,14 @@ nav {
       &.part {
         position: relative;
         margin-left: 1em;
-        max-width: calc(100% - 1em);
+        /* its number (`(25)`, `(2/5)`) set as the chapters' numbers are */
+        .name {
+          font-variant-numeric: lining-nums tabular-nums;
+        }
         &::before {
           content: '';
           position: absolute;
-          /* under the start of the chapter's name, and over half the gap on either side,
+          /* under the start of the chapter's entry, and over half the gap on either side,
              so the guides of its parts join into one line */
           left: calc(var(--gap) * 0.25 - 1em);
           top: -0.25em;
@@ -12423,7 +12505,7 @@ nav {
       &.book {
         font-size: 0.75em;
         opacity: 0.6;
-        padding-top: calc(var(--gap) * 0.5);
+        padding: calc(var(--gap) * 0.5) calc(var(--gap) * 0.25) 0.1ex;
         overflow: hidden;
         text-overflow: ellipsis;
       }

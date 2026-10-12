@@ -209,6 +209,23 @@ describe('parts, ranges and extras', () => {
     assert.ok(paragraph(2).length > 400);
     assert.deepEqual(titles(real(parse(text))), ['Chương 1: Cảnh a', 'Chương 2', 'Chương 3', 'Chương 4: Cảnh d']);
   });
+  it('reads a bracketed number run on behind a paragraph, in a book of bracketed numbers', () => {
+    // (4) at the end of the paragraph before it, (6) between two paragraphs on one line
+    let text = book(
+      [1, 2, 3].map(n => `(${n})\n\n${story(8, n)}`),
+      `Nàng đi ngủ sớm một chút.       (4)\n\n${story(8, 4)}`,
+      `(5)\n\n${story(8, 5)}`,
+      `Nàng cầm súng lên. (6) Nàng đi qua núi rừng và nhớ chuyện cũ.\n\n${story(8, 6)}`,
+      [7, 8].map(n => `(${n})\n\n${story(8, n)}`),
+    );
+    let chapters = real(parse(text));
+    assert.deepEqual(titles(chapters), [1, 2, 3, 4, 5, 6, 7, 8].map(n => `Chương ${n}`));
+    assert.ok(chapters[5].content.startsWith('(6) Nàng đi qua'));
+  });
+  it('takes a bracketed number behind a paragraph for a note where headings are not those', () => {
+    let text = book(`Một cái tay đỡ lấy nàng.\n\n${story(8, 1)}`, `Hai người ôm nhau. (2)\n\n${story(8, 2)}`, `(3) Ba ngày sau\n\n${story(8, 3)}`, `Nàng đi. (4) Rồi về.\n\n${story(8, 4)}`);
+    assert.ok(parse(text).every(c => !/Chương [124]$/.test(c.title)));
+  });
   it('goes on past the chapters a book leaves out', () => {
     let numbers = [1, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 16, 17];
     let text = book(numbers.map(n => `(${n})\n\n${story(10, n)}`));

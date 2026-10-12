@@ -216,6 +216,7 @@ const TUNING = {
     roman: -2,           // roman numerals read as a word more often than as a number
     inline: 3,           // a heading in the middle of a line
     runsOn: -1,          // one at the start of a line its chapter's text runs on in
+    inlineNumbersAmong: 5, // `(12)` alone on a line, as often as this, for `... (13)` to be one too
     inlineTitleMax: 80,  // and the title it is given, in characters
   },
   // 3. how much a line reads like a sentence of the story and not like a title
@@ -783,6 +784,11 @@ function readHeading(line: string, lower: string, names: string[], cut = false):
 
 // a heading written into the middle of a paragraph: `... Chương 101 ...`
 const INLINE_HEADING = /(?<![\p{L}\p{N}])(?<word>chương|hồi)\s+(?<n>\d{1,4})(?![\p{L}\p{N}.])/giu;
+// a bracketed number run on behind a paragraph, or between two: `... một chút a.      (2)`,
+// `... đột đột lên. (19) Linh tỷ ...`. Only after a sentence's end (or spaces run on), and before
+// a space or the line's end: in the middle of a sentence `(19)` is somebody's age. What follows it
+// is the next paragraph, no title
+const INLINE_NUMBER = /(?<=[.!?…。！？"”'’)\]】~*]\s*|\S\s{3,})[(（]\s*(?<n>\d{1,3})\s*[)）](?=\s|$)/gu;
 
 // headings written into the middle of a line, which a line that opens with a heading
 // of its own does not have: `(Chương 75: Xong, thỉnh mong chờ Chương 76: ...)` points at the
@@ -797,6 +803,12 @@ function inlineHeadings(line: string, lineStart: number, ord: number) {
       kind: 'chap', n: Number(n), chapType: CHAPTER_WORDS[word.toLowerCase()],
       base: TUNING.base.inline, inline: true, text: m[0], rest, title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),
       shape: 'inline', index: lineStart + m.index, ord,
+    }));
+  }
+  for(let m of line.matchAll(INLINE_NUMBER)) {
+    found.push(heading({
+      kind: 'chap', n: Number(m.groups!.n), base: TUNING.base.inline, inline: true, text: m[0], rest: line.slice(m.index + m[0].length), title: '',
+      shape: 'inline()', index: lineStart + m.index, ord,
     }));
   }
   return found;
@@ -829,6 +841,12 @@ function findCandidates(text: string, name: string) {
   }
   // one title line is the title page's own: it takes two for the file to hold books
   if(nodes.filter(node => node.bookName).length < 2) nodes = nodes.filter(node => !node.bookName);
+  // a bracketed number run on behind a paragraph is a heading only in a book whose headings are
+  // bracketed numbers, alone on their lines: elsewhere `(4)` is a note, and a few of them are
+  // enough to string a book's sentences that begin `Một ...`, `Hai ...` into chapters
+  if(nodes.filter(node => !node.inline && node.shape === 'L#R').length < TUNING.base.inlineNumbersAmong) {
+    nodes = nodes.filter(node => node.shape !== 'inline()');
+  }
   return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);
 }
 

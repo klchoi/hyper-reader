@@ -459,6 +459,19 @@ dialog {
 }
 
 /** nav **/
+/* the column of the chapters' numbers and the gap after it, as lengths in the list's own size,
+   so what lines up with them (a part's name, the guide down its side) does, whatever size
+   the numbers are set in */
+@property --number-column {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+@property --number-gap {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
 nav {
   height: 100vh;
   overflow-y: auto;
@@ -476,6 +489,10 @@ nav {
     flex-direction: column;
     gap: 0.5em;
     li {
+      /* as wide as the longest number (`--digits`, see ChapterList.tsrx) and its dot, set
+         smaller than the names */
+      --number-column: calc((var(--digits, 2) + 1) * 0.8ch);
+      --number-gap: 0.5em;
       /* the chapter read, and the name of the one whose part is read, are written out whole */
       &:not(.active, .reading) {
         white-space: nowrap;
@@ -501,6 +518,7 @@ nav {
       }
       .entry {
         display: inline-flex;
+        align-items: baseline;
         vertical-align: top;
         max-width: 100%;
         padding: 0.1ex calc(var(--gap) * 0.25);
@@ -508,14 +526,30 @@ nav {
         border-radius: 0.5ex;
         transition: background-color 0.1s, outline-color 0.1s;
       }
-      /* the chapter's number, in a column of its own (see ChapterList.tsrx) */
+      /* the chapter's number, in a column of its own: `12.` */
       .number {
         flex: none;
-        min-width: var(--number-width, 2ch);
-        margin-right: 0.6em;
+        min-width: var(--number-column);
+        margin-right: var(--number-gap);
         text-align: right;
+        font-size: 0.8em;
+        /* inside the name's line, on its baseline, so a row is as tall with a number as without */
+        line-height: 1;
         font-variant-numeric: lining-nums tabular-nums;
         opacity: 0.55;
+        &:not(:empty)::after {
+          content: '.';
+        }
+        /* a part listed by its number alone: the number is all it says, and its highlight
+           ends with it */
+        &:has(+ .name:empty) {
+          margin-right: 0;
+          opacity: 0.85;
+        }
+      }
+      /* a name, even none, keeps the row a line tall */
+      .name:empty::before {
+        content: '\200b';
       }
       .name {
         min-width: 0;
@@ -538,20 +572,23 @@ nav {
       &:first-child a {
         font-weight: bold;
       }
-      /* one part of the chapter named above it, with a guide down its left */
+      /* one part of the chapter named above it, with a guide down its side just after the
+         column of numbers: the chapter it is in that column, or the part as it is written
+         under the chapters' names */
       &.part {
         position: relative;
-        margin-left: 1em;
-        /* its number (`(25)`, `(2/5)`) set as the chapters' numbers are */
+        &.named .entry {
+          margin-left: calc(var(--number-column) + var(--number-gap));
+        }
         .name {
           font-variant-numeric: lining-nums tabular-nums;
         }
         &::before {
           content: '';
           position: absolute;
-          /* under the start of the chapter's entry, and over half the gap on either side,
+          /* in the gap after the numbers, and over half the gap between rows on either side,
              so the guides of its parts join into one line */
-          left: calc(var(--gap) * 0.25 - 1em);
+          left: calc(var(--gap) * 0.25 + var(--number-column) + var(--number-gap) / 2 - 2px);
           top: -0.25em;
           bottom: -0.25em;
           border-left: 4px solid var(--body-font-color);

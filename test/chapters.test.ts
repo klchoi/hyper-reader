@@ -120,7 +120,8 @@ describe('the last chapter', () => {
 });
 
 describe('parts, ranges and extras', () => {
-  const parts = (chapters: Chapter[]) => chapters.map(c => c.part && `${c.part.of} > ${c.part.text}`);
+  // a part as the list shows it: the chapter it is, or as it is written
+  const parts = (chapters: Chapter[]) => chapters.map(c => c.part && `${c.part.of} > ${c.part.chapter != null ? `#${[c.part.chapter, c.part.text].filter(Boolean).join(' ')}` : c.part.text}`);
   it('shows the parts of a chapter one by one, under the chapter named once', () => {
     let text = book([1, 2].map(n => `Chương ${n}\n\n${story(6, n)}`), ['thượng', 'trung', 'hạ'].map(p => `Chương 3: (${p})\n\n${story(6)}`), `Chương 4\n\n${story(6)}`);
     let chapters = real(parse(text));
@@ -131,11 +132,11 @@ describe('parts, ranges and extras', () => {
     let text = book([`Chương 8: Quà\n\n${story(6)}`, `Chương 9: Yoga (thượng)\n\n${story(6, 1)}`, `Chương 10: Yoga (hạ)\n\n${story(6, 2)}`, `Chương 11: Học bù\n\n${story(6, 3)}`]);
     let chapters = real(parse(text));
     assert.deepEqual(titles(chapters), ['Chương 8: Quà', 'Chương 9: Yoga (thượng)', 'Chương 10: Yoga (hạ)', 'Chương 11: Học bù']);
-    assert.deepEqual(parts(chapters), [undefined, 'Chương 9-10: Yoga > (9)', 'Chương 9-10: Yoga > (10)', undefined]);
+    assert.deepEqual(parts(chapters), [undefined, 'Chương 9-10: Yoga > #9', 'Chương 9-10: Yoga > #10', undefined]);
   });
   it('gives the parts the numbers of the chapters they are, when they are as many', () => {
     let text = book(['nhất', 'nhị', 'tam'].map((p, k) => `Chương ${5 + k}: Dạ tập (${p})\n\n${story(6, k)}`), `Chương 8: Sáng\n\n${story(6)}`);
-    assert.deepEqual(parts(real(parse(text))), ['Chương 5-7: Dạ tập > (5)', 'Chương 5-7: Dạ tập > (6)', 'Chương 5-7: Dạ tập > (7)', undefined]);
+    assert.deepEqual(parts(real(parse(text))), ['Chương 5-7: Dạ tập > #5', 'Chương 5-7: Dạ tập > #6', 'Chương 5-7: Dạ tập > #7', undefined]);
     // one number skipped: three parts over four chapters are not those chapters, and are
     // counted out of all of them
     let skipping = book([5, 7, 8].map((n, k) => `Chương ${n}: Dạ tập (${k + 1})\n\n${story(6, k)}`), `Chương 9: Sáng\n\n${story(6)}`);
@@ -143,13 +144,13 @@ describe('parts, ranges and extras', () => {
     // parts written as words are given the numbers too, and keep their words where they are
     // not as many as the chapters
     let words = book(['thượng', 'trung', 'hạ'].map((p, k) => `Chương ${5 + k}: Dạ tập (${p})\n\n${story(6, k)}`), `Chương 8: Sáng\n\n${story(6)}`);
-    assert.deepEqual(parts(real(parse(words))), ['Chương 5-7: Dạ tập > (5)', 'Chương 5-7: Dạ tập > (6)', 'Chương 5-7: Dạ tập > (7)', undefined]);
+    assert.deepEqual(parts(real(parse(words))), ['Chương 5-7: Dạ tập > #5', 'Chương 5-7: Dạ tập > #6', 'Chương 5-7: Dạ tập > #7', undefined]);
     let fewer = book([5, 7].map((n, k) => `Chương ${n}: Dạ tập (${['thượng', 'hạ'][k]})\n\n${story(6, k)}`), `Chương 8: Sáng\n\n${story(6)}`);
     assert.deepEqual(parts(real(parse(fewer))), ['Chương 5-7: Dạ tập > (thượng)', 'Chương 5-7: Dạ tập > (hạ)', undefined]);
   });
   it('takes a chapter with the title of the parts after it for the first of them', () => {
     let text = book([`Chương 88: Na Trát\n\n${story(6)}`, `Chương 89: Na Trát (2)\n\n${story(6, 1)}`, `Chương 90: Na Trát (3)\n\n${story(6, 2)}`, `Chương 91: Đi\n\n${story(6, 3)}`]);
-    assert.deepEqual(parts(real(parse(text))), ['Chương 88-90: Na Trát > (88)', 'Chương 88-90: Na Trát > (89)', 'Chương 88-90: Na Trát > (90)', undefined]);
+    assert.deepEqual(parts(real(parse(text))), ['Chương 88-90: Na Trát > #88', 'Chương 88-90: Na Trát > #89', 'Chương 88-90: Na Trát > #90', undefined]);
   });
   it('begins the first part with the heading that names the parts', () => {
     let text = book(`Chương 12: Trước\n\n${story(6)}`, 'Thứ 13 chương tam đối', ['thượng', 'trung', 'hạ'].map(p => `Chương 13: (${p})\n\n${story(6)}`), `Chương 14: Sau\n\n${story(6)}`);

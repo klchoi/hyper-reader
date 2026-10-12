@@ -21,11 +21,13 @@ const UPLOADS = 'uploads';
 const hashOf = (text: string) => crypto.createHash('sha1').update(text).digest('hex').slice(0, 8);
 
 // what the page shows of a chapter
-function listedOf(chapter: Pick<ChapterRow, 'id' | 'title' | 'offset' | 'grp' | 'part_of' | 'part_text'>) {
+function listedOf(chapter: Pick<ChapterRow, 'id' | 'title' | 'offset' | 'grp' | 'part_of' | 'part_text' | 'part_chapter'>) {
   return {
     id: chapter.id, title: chapter.title, offset: chapter.offset,
     ...(chapter.grp != null && { group: chapter.grp }),
-    ...(chapter.part_of != null && { part: { of: chapter.part_of, text: chapter.part_text ?? '' } }),
+    ...(chapter.part_of != null && { part: {
+      of: chapter.part_of, text: chapter.part_text ?? '', ...(chapter.part_chapter != null && { chapter: chapter.part_chapter }),
+    } }),
   };
 }
 

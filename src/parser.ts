@@ -45,7 +45,13 @@ export function normalizeFileContent(source: string) {
 //           `(thượng)`), { text: 'tiết 2', leading: true } before it
 //   title   what the heading says besides, as written
 //   text    the heading as it stands in the book
-export type Part = { of: string; text: string };
+//
+// part: { of, text, chapter }
+//   of       the title of the whole the part is of (`Chương 9-10: Yoga`)
+//   text     the part as it is listed: `(thượng)`, `(2/5)`
+//   chapter  for a part that is one of the chapters the whole runs over, its number (and
+//            `text` is then only what is written beside it, a tag, if anything)
+export type Part = { of: string; text: string; chapter?: number };
 export type Listed = { id: string; title: string; offset: number; group?: string; part?: Part };
 export type Chapter = Listed & { content: string };
 export type Heading = {
@@ -103,14 +109,14 @@ function partMark({ title = '', part }: Heading): Mark | null {
 // follow on. Each part is given `{ of, text }`: the title of the whole (`Chương 9-10: Yoga`),
 // and the part, as written or, when the parts are numbers, as `2/5`, in the brackets it was
 // written in: `(thượng)`, `(2/5)`. Parts that are as many as the chapters the whole runs over
-// are those chapters, and are given their numbers, however they were written: the four parts
-// of `Chương 24-27` are `(24)`, `(25)`, `(26)` and `(27)`, the three `thượng`, `trung`, `hạ`
-// of `Chương 43-45` are `(43)`, `(44)`, `(45)`. A chapter just before the parts with their title and no
+// are those chapters, and are given their numbers as `chapter`, however they were written: the
+// four parts of `Chương 24-27` are chapters 24, 25, 26 and 27, the three `thượng`, `trung`,
+// `hạ` of `Chương 43-45` chapters 43, 44 and 45. A chapter just before the parts with their title and no
 // part of its own is their first part when the next is the second (`Na Trát`, then `Na Trát
 // (2)`), and their heading when the next is the first and it holds nothing but its heading
 // (`Thứ 13 chương tam đối`): it is given `{ of, head: true }`, and parts that left the title
 // out are given the one it says as `title`. One with a text of its own stays a chapter
-type PartOf = { of: string; head: true } | { of: string; head?: false; text: string; title?: string };
+type PartOf = { of: string; head: true } | { of: string; head?: false; text: string; chapter?: number; title?: string };
 function partsOf(drafts: Draft[], text: string) {
   let headingOnly = (i: number) => text.slice(drafts[i].offset, drafts[i + 1]?.offset ?? text.length)
     .split('\n').filter(line => line.trim()).length <= TUNING.drafts.headingLines;
@@ -168,7 +174,11 @@ function partsOf(drafts: Draft[], text: string) {
         parts[start + k] = { of, head: true };
         return;
       }
-      let said = chapters ? String(from + place++) : numbered ? `${m.number}/${total}` : m.word;
+      if(chapters) {
+        parts[start + k] = { of, text: m.tag ?? '', chapter: from + place++, title: m.given };
+        return;
+      }
+      let said = numbered ? `${m.number}/${total}` : m.word;
       parts[start + k] = { of, text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(' '), title: m.given };
     });
   }
@@ -188,7 +198,7 @@ export function finishChapters(drafts: Draft[], text: string): Chapter[] {
       ...draft,
       offset: parts[i - 1]?.head ? drafts[i - 1].offset : draft.offset,
       heading: part?.title ? { ...draft.heading, title: part.title } : draft.heading,
-      part: part && { of: part.of, text: part.text },
+      part: part && { of: part.of, text: part.text, ...(part.chapter != null && { chapter: part.chapter }) },
     });
   });
   return kept.map(({ offset, group, heading, part }, i) => {

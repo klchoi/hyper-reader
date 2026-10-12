@@ -95,6 +95,15 @@ describe('the server', () => {
     assert.equal(chapter.offset, parsed[2].offset);
     assert.equal((await call('GET', `books/${id}/chapters/no-such-chapter`)).status, 404);
   });
+  it('keeps the parts of a chapter as the parser gives them, with the chapter each is', async () => {
+    let text = ['Sách phần tác giả: ai đó', 'Chương 1: Trước', story(8, 'A'), ...['thượng', 'trung', 'hạ'].flatMap((p, k) => [`Chương ${2 + k}: Yoga (${p})`, story(8, 'B')]), 'Chương 5: Sau', story(8, 'C')].join('\n\n');
+    let { answer: record } = await call('POST', 'books', { name: 'Sách phần (1-5 chương).txt', size: 0, text });
+    assert.deepEqual(record.chapters.map((c: { part?: unknown }) => c.part ?? null).slice(1), [
+      null, { of: 'Chương 2-4: Yoga', text: '', chapter: 2 }, { of: 'Chương 2-4: Yoga', text: '', chapter: 3 }, { of: 'Chương 2-4: Yoga', text: '', chapter: 4 }, null,
+    ]);
+    await call('DELETE', `books/${record.id}`);
+    await settled();
+  });
   it('keeps a book dropped on the page with the uploads, and deletes only that', async () => {
     let { status, answer: record } = await call('POST', 'books', upload);
     assert.equal(status, 200);

@@ -7,6 +7,7 @@
 // behind them (indexer.ts); the processes end when they have nothing left to do:
 //
 //   node server/server.ts [--port 8080] [--host 127.0.0.1] [--data <folder>] [--library [name=]<folder>]...
+//                         [--allow-host <name>]...
 //
 // A library is known by its name (the folder's own name if none is given), so a book keeps its
 // id, and where it was left, wherever the folder is mounted. The libraries are scanned when the
@@ -16,6 +17,8 @@
 // library. So it answers only what is asked of it by this computer's name, and changes nothing
 // for a page of another site (see `foreign`). In a container it listens on every address of the
 // container (`--host 0.0.0.0`), and the port is published to this computer only (compose.yaml).
+// Behind a proxy that asks who is asking (a login), it answers the name the proxy is reached by
+// too (`--allow-host reader.example.com`), its page served over https or not.
 import http from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import fs from 'node:fs/promises';
@@ -31,15 +34,17 @@ const ID = /^[\w-]+$/;
 
 // What a page of another site could make a browser here ask, and is turned away:
 // - a name of its own pointed at 127.0.0.1 (DNS rebinding) makes its page this server's, by
-//   that name: only this computer's names for the server are answered
+//   that name: only this computer's names for the server are answered, and those it is given
+//   (`allowed`, the names of a proxy in front of it)
 // - a form or a script of its page can send a change: one sent from another origin is refused,
-//   and a body that is JSON must say so, which a browser will not send across sites unasked
+//   and a body that is JSON must say so, which a browser will not send across sites unasked.
+//   Its own page may be served over https, by a proxy
 const LOCAL_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
-function foreign(request: IncomingMessage) {
+function foreign(request: IncomingMessage, allowed: string[]) {
   let host = request.headers.host ?? '';
-  if(!LOCAL_HOST.test(host)) return 'not asked by this computer\'s name';
+  if(!LOCAL_HOST.test(host) && !allowed.includes(host.replace(/:\d+$/, '').toLowerCase())) return 'not asked by this computer\'s name';
   let origin = request.headers.origin;
-  if(request.method !== 'GET' && origin != null && origin !== `http://${host}`) return 'not asked by this page';
+  if(request.method !== 'GET' && origin != null && origin !== `http://${host}` && origin !== `https://${host}`) return 'not asked by this page';
   return null;
 }
 
@@ -94,7 +99,8 @@ function readBody(request: IncomingMessage) {
   });
 }
 
-export function createServer({ data, libraries = [] }: { data: string; libraries?: LibraryDir[] }) {
+export function createServer({ data, libraries = [], allowedHosts = [] }: { data: string; libraries?: LibraryDir[]; allowedHosts?: string[] }) {
+  let allowed = allowedHosts.map(name => name.toLowerCase());
   let library = createLibrary({ data, libraries });
   let table = routes(library);
   let server = http.createServer(async (request, response) => {
@@ -103,7 +109,7 @@ export function createServer({ data, libraries = [] }: { data: string; libraries
       response.end(body);
     };
     try {
-      let refused = foreign(request);
+      let refused = foreign(request, allowed);
       if(refused) return send(403, refused, 'text/plain');
       let { pathname, searchParams } = new URL(request.url ?? '/', 'http://localhost');
       if(pathname.startsWith('/api/')) {
@@ -164,10 +170,16 @@ if(import.meta.main) {
   let host = option('--host', '127.0.0.1');
   let data = path.resolve(option('--data', path.join(import.meta.dirname, '..', 'data')));
   let libraries = librariesOf(args);
-  let server = createServer({ data, libraries });
+  let allowedHosts = args.flatMap((arg, at) => {
+    if(arg !== '--allow-host') return [];
+    if(!args[at + 1]) throw new Error('--allow-host takes a name: --allow-host reader.example.com');
+    return [args[at + 1]];
+  });
+  let server = createServer({ data, libraries, allowedHosts });
   server.listen(port, host, () => {
     console.log(`hyper-reader on http://${host}:${port}/, keeping books in ${data}`);
     for(let { name, dir } of libraries) console.log(`library ${name}: ${dir}`);
+    for(let name of allowedHosts) console.log(`answering ${name} too`);
     // what came, changed or went while the server was not running
     server.library.scan();
     server.library.scanned().then(() => {
@@ -175,4 +187,15 @@ if(import.meta.main) {
       console.log(`scanned: ${scan.files} files, ${scan.read} read, ${scan.removed} gone${scan.failed ? `, ${scan.failed} not read` : ''}`);
     });
   });
+  // stopped (docker stop, ctrl-c): closed as well as it can be in a few seconds, and gone (a scan
+  // going on is taken up again by the next start). In a container the server may be process 1,
+  // which a signal no one listens for does not stop
+  let stop = () => {
+    setTimeout(() => process.exit(0), 3000).unref();
+    server.close();
+    server.closeAllConnections();
+    server.library.close().then(() => process.exit(0));
+  };
+  process.once('SIGTERM', stop);
+  process.once('SIGINT', stop);
 }

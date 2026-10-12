@@ -41,6 +41,19 @@ describe('the readers', () => {
     }
     assert.equal(readers.running(), 0);
   });
+  it('reads the text of a book asked for before the books waiting to be read', async () => {
+    let readers = createReaders({ count: 1, idle: 100 });
+    try {
+      let done: string[] = [];
+      let reads = files.map((file, k) => readers.read(file).then(() => { done.push(`read ${k}`); }));
+      let text = readers.text(files[2]).then(() => { done.push('text'); });
+      await Promise.all([...reads, text]);
+      // the first read was under way already
+      assert.deepEqual(done, ['read 0', 'text', 'read 1', 'read 2']);
+    } finally {
+      await readers.close();
+    }
+  });
   it('fails the job a reader could not do, and goes on with the next', async () => {
     let readers = createReaders({ count: 1, idle: 100 });
     try {

@@ -93,8 +93,12 @@ export function createReaders({ count = Math.max(1, os.availableParallelism() - 
     return reader;
   };
 
+  // the text of a book is asked for by a reader waiting on it (a chapter opened): it goes before
+  // the books waiting to be read, of which a scan may leave thousands
   let run = <T>(kind: Asked['kind'], file: string) => new Promise<T>((resolve, reject) => {
-    waiting.push({ id: ++jobs, kind, file, resolve, reject });
+    let job = { id: ++jobs, kind, file, resolve, reject };
+    if(kind === 'text') waiting.unshift(job);
+    else waiting.push(job);
     dispatch();
   });
 

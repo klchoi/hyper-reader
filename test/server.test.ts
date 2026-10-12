@@ -55,7 +55,7 @@ describe('the server', () => {
     fs.writeFileSync(path.join(shelf, 'Sách thử (1-3 chương).txt'), bookText('Hoàng Dung'));
     fs.writeFileSync(path.join(shelf, 'nested', 'Sách thử (1-3 chương).txt'), bookText('Hoàng Dung'));
     fs.writeFileSync(path.join(shelf, 'notes.md'), 'not a book');
-    server = createServer({ data, libraries: [{ name: 'shelf', dir: shelf }] });
+    server = createServer({ data, libraries: [{ name: 'shelf', dir: shelf }], allowedHosts: ['Reader.example'] });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${port()}`;
     server.library.scan();
@@ -244,6 +244,15 @@ describe('the server', () => {
     assert.equal((await raw('GET', '/api/progress', { host: 'rebound.example:8080' })).status, 403);
     assert.equal((await raw('GET', '/', { host: 'rebound.example' })).status, 403);
     assert.equal((await raw('GET', '/api/progress', { host: `localhost:${port()}` })).status, 200);
+  });
+  it('answers the name of a proxy in front of it, and its page served over https', async () => {
+    assert.equal((await raw('GET', '/api/progress', { host: 'reader.example' })).status, 200);
+    assert.equal((await raw('GET', '/api/progress', { host: 'reader.example:18443' })).status, 200);
+    assert.equal((await raw('GET', '/api/progress', { host: 'reader.example.evil' })).status, 403);
+    let saved = (origin: string) => raw('PATCH', '/api/settings', { host: 'reader.example', origin, 'content-type': 'application/json' }, '{"proxied":true}');
+    assert.equal((await saved('https://reader.example')).status, 204);
+    assert.equal((await saved('http://reader.example')).status, 204);
+    assert.equal((await saved('https://another.example')).status, 403);
   });
   it('changes nothing for a page of another site', async () => {
     let book = JSON.stringify(upload);

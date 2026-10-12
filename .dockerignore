@@ -1,4 +1,8 @@
-# the image takes only the dependencies' lists (see Dockerfile)
+# what an image is built from: the dependencies' lists, and the source of the page and the server
+# (see Dockerfile). Everything else (node_modules, the data, the books) stays out
 *
 !package.json
 !package-lock.json
+!vite.config.ts
+!src
+!server

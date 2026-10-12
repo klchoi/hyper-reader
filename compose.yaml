@@ -10,7 +10,9 @@
 name: hyper-reader
 
 x-app: &app
-  build: .
+  build:
+    context: .
+    target: dev
   image: hyper-reader-dev
   init: true
   working_dir: /app

@@ -40,6 +40,27 @@ on the machine works here and not from the file.
 The two keep their books apart: a book dropped on the page opened as a file is not on the
 server, and the other way round.
 
+### In a container
+
+The server, with the page built in, is an image: `ghcr.io/klchoi/hyper-reader`, published by
+`.github/workflows/image.yml` for every push to master (`latest`, and `sha-<commit>`), once the
+checks pass. The books are mounted at `/books`, read-only, and what the server keeps (the
+database, and the books dropped on the page) at `/data`, a folder of the machine's own, so it
+outlives the container. It runs as any user that may write to that folder:
+
+```
+docker run -d --user 1000:1000 -v /path/to/books:/books:ro -v /path/to/data:/data \
+  -p 127.0.0.1:8080:8080 ghcr.io/klchoi/hyper-reader --library=novels=/books [--allow-host <name>]
+```
+
+The arguments are the server's. Given none, it reads `/books` as the library `books`; given any,
+they name the library too (`--library=<name>=/books`: the name is part of each book's id, so it
+is the one to keep when the folder moves). It has no logins of its
+own: put it behind a proxy that asks who is asking, and give the server the name the proxy is
+reached by (`--allow-host reader.example.com`), which it answers along with its own; the page
+may be served over https there. `docker stop` closes it at once (a scan going on is taken up
+again by the next start).
+
 ## Building it
 
 ```
@@ -65,8 +86,9 @@ is taken up where it is:
 - `api`, the server under `node --watch`: a change to server/ or src/ (the parser) starts it
   again, in a second; the page keeps what it shows
 
-The books of `LIBRARY` (it may go in `.env`) are mounted read-only, as the library `books`; what
-the server keeps is in the volume `data`. Both answer on this computer only (127.0.0.1). The
+The containers are made from the Dockerfile's `dev` image. The books of `LIBRARY` (it may go in
+`.env`) are mounted read-only, as the library `books`; what the server keeps is in the volume
+`data`. Both answer on this computer only (127.0.0.1). The
 dependencies are installed in the image for Linux, in a volume of their own (the ones of this
 machine stay out of it), and again when `package-lock.json` changes, the next time the
 containers start. `docker compose down -v` leaves nothing behind but the image. Both are told of an edit by the

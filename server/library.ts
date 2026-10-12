@@ -103,8 +103,9 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
   }
 
   // a file of a library read, and kept; its id
-  async function readBook(root: string, rel: string) {
-    let read = await readers.read(path.join(roots.get(root)!, rel));
+  // (`first`: someone waits on it, before the books a scan queued)
+  async function readBook(root: string, rel: string, first = false) {
+    let read = await readers.read(path.join(roots.get(root)!, rel), { first });
     let id = idOf(root, rel, read.name);
     store.keepBook({ id, root, path: rel, ...read });
     texts.delete(id);
@@ -191,7 +192,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
       let temporary = path.join(uploads, `.${file}.${process.pid}.tmp`);
       await fs.promises.writeFile(temporary, text);
       await fs.promises.rename(temporary, path.join(uploads, file));
-      return library.book(await readBook(UPLOADS, file));
+      return library.book(await readBook(UPLOADS, file, true));
     },
     // a book's record: read again first if an older parser read it, and indexed first
     async book(id: string): Promise<BookRecord | null> {
@@ -217,7 +218,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
         forget(id);
         return null;
       }
-      return recordOf(store.book(await readBook(row.root, row.path))!);
+      return recordOf(store.book(await readBook(row.root, row.path, true))!);
     },
     async deleteBook(id: string) {
       let row = store.book(id);

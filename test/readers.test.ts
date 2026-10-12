@@ -61,6 +61,20 @@ describe('the readers', () => {
       await readers.close();
     }
   });
+  it('reads a book someone waits on before the books queued, once though it was queued already', async () => {
+    let readers = createReaders({ count: 1, idle: 100 });
+    try {
+      let done: string[] = [];
+      let reads = files.map((file, k) => readers.read(file).then(() => { done.push(`read ${k}`); }));
+      let again = readers.read(files[2], { first: true });
+      assert.equal(readers.busy(), 3);
+      await Promise.all([...reads, again]);
+      // the first read was under way already; the third, asked again, went before the second
+      assert.deepEqual(done, ['read 0', 'read 2', 'read 1']);
+    } finally {
+      await readers.close();
+    }
+  });
   it('fails the job a reader could not do, and goes on with the next', async () => {
     let readers = createReaders({ count: 1, idle: 100 });
     try {

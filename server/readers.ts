@@ -46,6 +46,7 @@ export function createReaders({ count = Math.max(1, os.availableParallelism() - 
 
   let give = (reader: Reader, job: Job) => {
     clearTimeout(reader.timer);
+    queued.delete(`${job.kind}:${job.file}`);
     reader.job = job;
     reader.send({ id: job.id, kind: job.kind, file: job.file } satisfies Asked);
   };
@@ -93,18 +94,33 @@ export function createReaders({ count = Math.max(1, os.availableParallelism() - 
     return reader;
   };
 
-  // the text of a book is asked for by a reader waiting on it (a chapter opened): it goes before
-  // the books waiting to be read, of which a scan may leave thousands
-  let run = <T>(kind: Asked['kind'], file: string) => new Promise<T>((resolve, reject) => {
-    let job = { id: ++jobs, kind, file, resolve, reject };
-    if(kind === 'text') waiting.unshift(job);
+  // A job someone waits on (a book opened, a chapter of it) goes before the books waiting to be
+  // read, of which a scan may leave thousands: the text of a book always, a book when asked so.
+  // The same job asked again while it waits is the one job, answered to both (a book opened that
+  // the scan had queued is moved ahead, not read twice)
+  let queued = new Map<string, { job: Job; answer: Promise<any> }>();
+  let run = <T>(kind: Asked['kind'], file: string, first = kind === 'text'): Promise<T> => {
+    let key = `${kind}:${file}`;
+    let known = queued.get(key);
+    if(known) {
+      if(first && waiting[0] !== known.job) {
+        waiting.splice(waiting.indexOf(known.job), 1);
+        waiting.unshift(known.job);
+      }
+      return known.answer;
+    }
+    let job!: Job;
+    let answer = new Promise<T>((resolve, reject) => { job = { id: ++jobs, kind, file, resolve, reject }; });
+    queued.set(key, { job, answer });
+    if(first) waiting.unshift(job);
     else waiting.push(job);
     dispatch();
-  });
+    return answer;
+  };
 
   return {
-    // the book in a file
-    read: (file: string) => run<BookRead>('read', file),
+    // the book in a file; `first`, before the books queued (someone waits on it)
+    read: (file: string, { first = false } = {}) => run<BookRead>('read', file, first),
     // the text of a file as the parser reads it
     text: (file: string) => run<ReadText>('text', file),
     busy: () => waiting.length + [...readers].filter(reader => reader.job).length,

@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractChapters, finishChapters, normalizeFileContent, readNumberWords, cleanTitle, chapterTitle } from '../src/parser.ts';
 import type { Chapter } from '../src/parser.ts';
-import { bookRecord, Book, PARSER_VERSION } from '../src/book.ts';
+import { Book } from '../src/book.ts';
 
 // -- helpers
 const words = ['gió', 'núi', 'mưa', 'đêm', 'trăng', 'suối', 'rừng', 'đường', 'nhà', 'bến'];
@@ -352,11 +352,6 @@ describe('the model', () => {
   it('is plain data', () => {
     let [chapter] = parse(book('Chương 1\n\nx', story(4), 'Chương 2\n\ny', story(4)));
     assert.deepEqual(Object.keys(chapter).sort(), ['content', 'group', 'id', 'offset', 'part', 'title']);
-  });
-  it('stores a book without the text of its chapters', () => {
-    let record = bookRecord({ id: 'a', name: 'A', description: undefined, chapters: parse(book('Chương 1', story(4), 'Chương 2', story(4))) });
-    assert.ok(record.chapters.every(c => !('content' in c)));
-    assert.equal(record.parser, PARSER_VERSION);
   });
   it('is made from a file name', () => {
     let made = Book({ name: 'Tên sách (1-3 chương) (nón xanh).txt' });

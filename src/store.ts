@@ -4,8 +4,8 @@
 // while it is set up (tracked values belong to a component), and handed down as a context.
 import { Context, tick, track } from 'ripple';
 import type { Tracked } from 'ripple';
-import { chooseBackend } from './backends.ts';
-import type { Backend, BookRecord, BookSaying, FileInfo, LibraryStatus, Mention, Person, Progress, Shown } from './backends.ts';
+import { serverBackend } from './backends.ts';
+import type { BookRecord, BookSaying, FileInfo, LibraryStatus, Mention, Person, Progress, Shown } from './backends.ts';
 import { PAGE } from './catalog.ts';
 import type { Query, Shelved, TagCount } from './catalog.ts';
 import { offerFor, paintChapter, paintTitles } from './names.ts';
@@ -15,10 +15,6 @@ import type { Marked } from './marks.ts';
 import { bookRoute, chapterAt, createRouter, getColorScheme, markFound, nextTick, toOffset } from './places.ts';
 import type { Listed, Route } from './places.ts';
 import { latinize } from './parser.ts';
-import type { Reader } from './reading.ts';
-
-// what the page is given to start with: the reader of books (see reading.ts)
-export type Page = { reader: Reader };
 
 // the most books or chapters the palette lists at once
 const LISTED = 200;
@@ -56,9 +52,9 @@ function applyDataset(key: string, value: unknown) {
   document.documentElement.dataset[key] = String(value ?? '');
 }
 
-export function createStore({ reader }: Page) {
+export function createStore() {
   const router = createRouter();
-  let backend: Backend;
+  const backend = serverBackend();
 
   const book = track<BookRecord | null>(null);
   // the chapter open, its lines corrected by the book's names and the names in them marked, as the
@@ -80,8 +76,7 @@ export function createStore({ reader }: Page) {
   // the places in the book open that say what the palette was given, and whether the whole book
   // was indexed when asked
   const mentions = track<{ q: string; indexed: boolean; total: number; found: Mention[] }>({ q: '', indexed: true, total: 0, found: [] });
-  // what the backend can do beside keeping books: search, and the libraries on its disk
-  const searching = track(false);
+  // the libraries on the server's disk: the books, the scan going or last, the index
   const status = track<LibraryStatus | null>(null);
   // the library searched: the characters, and the books that say it
   const found = track<{ q: string; characters: Person[]; books: BookSaying[] }>({ q: '', characters: [], books: [] });
@@ -142,9 +137,8 @@ export function createStore({ reader }: Page) {
   }
 
   // ---- fonts
-  // chrome only remembers the fonts permission per origin, and a file:// page has
-  // none to remember it against: allowing it there is allowing it for that one call.
-  // So the list is kept once it is given, and asked for again only when asked to be
+  // the fonts installed, which only chromium says, and only when the reader lets it: the list
+  // is kept once it is given, and asked for again only when asked to be
   async function loadFonts(force = false) {
     if (!force && settings.value.fonts?.length > 0) return;
     let query = (window as any).queryLocalFonts;
@@ -544,9 +538,9 @@ export function createStore({ reader }: Page) {
         highlightMatches();
       }, q ? 150 : 0);
     }
-    if (open && backend.searchBook && q.length >= 2) {
+    if (open && q.length >= 2) {
       mentionsTimer = setTimeout(async () => {
-        let { indexed, total, mentions: places } = await backend.searchBook!(text.trim(), open.id);
+        let { indexed, total, mentions: places } = await backend.searchBook(text.trim(), open.id);
         if (palette.value.q !== q || book.value?.id !== open.id) return;
         mentions.value = { q, indexed, total, found: places.slice(0, 200) };
         highlightMatches();
@@ -592,7 +586,6 @@ export function createStore({ reader }: Page) {
   let statusTimer: ReturnType<typeof setTimeout> | undefined;
   async function watchStatus() {
     clearTimeout(statusTimer);
-    if (!backend.status) return;
     let was = status.value;
     let now = await backend.status();
     status.value = now;
@@ -600,7 +593,6 @@ export function createStore({ reader }: Page) {
     if (now.scan.running || now.index.done < now.index.total) statusTimer = setTimeout(watchStatus, 1500);
   }
   async function rescan() {
-    if (!backend.scan) return;
     status.value = await backend.scan();
     watchStatus();
   }
@@ -609,13 +601,13 @@ export function createStore({ reader }: Page) {
   function searchLibrary(text: string) {
     clearTimeout(foundTimer);
     let q = text.trim();
-    if (!q || !backend.search || !backend.characters) {
+    if (!q) {
       found.value = { q: '', characters: [], books: [] };
       return;
     }
     found.value = { ...found.value, q };
     foundTimer = setTimeout(async () => {
-      let [characters, books] = await Promise.all([backend.characters!(q), backend.search!(q)]);
+      let [characters, books] = await Promise.all([backend.characters(q), backend.search(q)]);
       if (found.value.q === q) found.value = { q, characters, books };
     }, 250);
   }
@@ -631,9 +623,7 @@ export function createStore({ reader }: Page) {
   // into a book opens it
   async function start() {
     applySettings({ 'color:dark': 'night', 'color:light': 'white' });
-    backend = await chooseBackend(reader);
     applySettings(await backend.settings());
-    searching.value = !!backend.searchBook;
     loadProgress();
     loadShelves();
     watchStatus();
@@ -652,7 +642,7 @@ export function createStore({ reader }: Page) {
     router,
     book, chapter, shown, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
     shelves, finding, shuffle, find, findMore,
-    fixNames, commands, unlisted, selectedCommand, mentions, searching, status, found,
+    fixNames, commands, unlisted, selectedCommand, mentions, status, found,
     start, follow,
     applySettings, saveSettings, chooseColor,
     loadFonts, toggleSettings, setFontTarget, setFontQuery, chooseFont,

@@ -1,5 +1,6 @@
 // What keeps the books, where each was left and the settings, and reads a book into its
-// chapters. The page asks it, and does not mind which it is. Every call is async:
+// chapters: the server (`node server/server.ts`, see there for its answers), which serves the page
+// too. Every call is async:
 //   settings()                  every setting, as { key: value }
 //   saveSettings(settings)      some of them
 //   progress()                  where each book was left, as { bookId: record }
@@ -10,30 +11,22 @@
 //                               (see catalog.ts for what can be asked, and what a book shows)
 //   tags(limit)                 the tags most books have: [{ tag, count }]
 //   addBooks(files)             read and keep [{ name, size, date, text }]; their records
-//   book(id)                    the record of a book (bookRecord), read again first if an
+//   book(id)                    the record of a book (see book.ts), read again first if an
 //                               older parser read it; null for a book not kept
 //   chapter(id, listed, raw)    a chapter of the record as the page shows it: its lines, corrected
 //                               by the book's names, and the names in them (see marks.ts); `raw`,
 //                               with its text as read too; null if it is gone
 //   rereadBook(id)              read a kept book again; its record, or null
 //   deleteBook(id)
-// and only the server's, which reads libraries on its disk and indexes the books for search:
+// and of the libraries on its disk, and the index of the books' text:
 //   status()                    the libraries, the scan going or last, and how much is indexed
 //   scan()                      a scan of the libraries, if none is going; the status
 //   search(q, id?)              the books that say `q`; in book `id`, every place it says it
 //   characters(q)               the characters named `q`, with the books they are in
-//
-// Served by the server (`node server/server.ts`), the page leaves its books to the server;
-// opened as a file, or served by anything else, it keeps them in the browser. The two keep
-// books apart: a book dropped on one is not in the other.
-import { openDB } from 'idb';
-import { bookRecord, PARSER_VERSION } from './book.ts';
 import type { BookRecord } from './book.ts';
-import type { Chapter, Listed } from './parser.ts';
-import type { Reader } from './reading.ts';
-import { entryOf, findBooks, queryString, topTags } from './catalog.ts';
+import type { Listed } from './parser.ts';
+import { queryString } from './catalog.ts';
 import type { Listing, Progress, Query, TagCount } from './catalog.ts';
-import { markChapter } from './marks.ts';
 import type { Marked } from './marks.ts';
 
 // a chapter as the page shows it: `length` is that of its text as read
@@ -57,11 +50,11 @@ export interface Backend {
   chapter(id: string, listed: Listed, raw?: boolean): Promise<Shown | null>;
   rereadBook(id: string): Promise<BookRecord | null>;
   deleteBook(id: string): Promise<void>;
-  status?(): Promise<LibraryStatus>;
-  scan?(): Promise<LibraryStatus>;
-  search?(q: string): Promise<BookSaying[]>;
-  searchBook?(q: string, id: string): Promise<{ indexed: boolean; total: number; mentions: Mention[] }>;
-  characters?(q: string): Promise<Person[]>;
+  status(): Promise<LibraryStatus>;
+  scan(): Promise<LibraryStatus>;
+  search(q: string): Promise<BookSaying[]>;
+  searchBook(q: string, id: string): Promise<{ indexed: boolean; total: number; mentions: Mention[] }>;
+  characters(q: string): Promise<Person[]>;
 }
 
 export type LibraryStatus = {
@@ -74,24 +67,8 @@ export type BookSaying = { id: string; name: string; chapters: number };
 export type Mention = { chapterId: string; title: string; offset: number; before: string; match: string; after: string };
 export type Person = { name: string; mentions: number; books: { id: string; name: string; mentions: number }[] };
 
-// the browser's backend reads the books it keeps itself, with the page's reader
-export async function chooseBackend(reader: Reader): Promise<Backend> {
-  if (location.protocol.startsWith('http')) {
-    try {
-      let hello = await fetch('/api/hello');
-      if (hello.ok && (await hello.json()).backend === 'server') {
-        console.info('Books kept by the server');
-        return serverBackend();
-      }
-    } catch (error) {
-      console.info('No server to keep the books, the browser keeps them:', error);
-    }
-  }
-  return browserBackend(reader);
-}
-
 // the server's: it reads the books and keeps them (see server/server.ts for its answers)
-function serverBackend(): Backend {
+export function serverBackend(): Backend {
   // a body is sent as JSON, or as text when it is text; an answer of 404 is null
   let call = async (method: string, route: string, body?: unknown) => {
     let text = typeof body === 'string';
@@ -128,106 +105,4 @@ function serverBackend(): Backend {
     searchBook: (q, bookId) => call('GET', `search?q=${id(q)}&book=${id(bookId)}`),
     characters: (q) => call('GET', `characters?q=${id(q)}`),
   };
-}
-
-// the browser's: IndexedDB, and the parser in a worker (see reading.ts)
-async function browserBackend({ readBook }: Reader): Promise<Backend> {
-  let db = await openDB('text-reader', 23, {
-    upgrade(db, oldVersion, newVersion, transaction, events) {
-      console.log('upgrade db', { oldVersion, newVersion, transaction, events });
-      let stores = ['files', 'fileContents', 'settings', 'progress', 'books', 'chapters', 'names'];
-      for (let store of stores) {
-        if (!db.objectStoreNames.contains(store)) db.createObjectStore(store);
-      }
-    },
-    blocked: console.log,
-    blocking: console.log,
-    terminated: console.log,
-  });
-  // a store as { key: value }
-  let everything = async (store: string) => {
-    let found: Record<string, any> = {};
-    for (let cursor = await db.transaction(store).store.openCursor(); cursor; cursor = await cursor.continue()) {
-      found[cursor.key as string] = cursor.value;
-    }
-    return found;
-  };
-  let catalogued = async () => {
-    let tx = db.transaction(['files', 'books']);
-    let [ids, files, records] = await Promise.all([tx.objectStore('files').getAllKeys(), tx.objectStore('files').getAll(), tx.objectStore('books').getAll()]);
-    let chapters = new Map((records as BookRecord[]).map(record => [record.id, record.chapters.length]));
-    return (files as FileInfo[]).map((file, k) => entryOf({
-      id: String(ids[k]), path: file.name, size: file.size, chapters: chapters.get(String(ids[k])) ?? 0, date: file.date ?? 0, deletable: true,
-    }));
-  };
-  let backend: Backend = {
-    settings: () => everything('settings'),
-    async saveSettings(settings) {
-      let tx = db.transaction('settings', 'readwrite');
-      await Promise.all([...Object.entries(settings).map(([key, value]) => tx.store.put(value, key)), tx.done]);
-    },
-    progress: () => everything('progress'),
-    saveProgress: (id, record) => db.put('progress', record, id),
-    names: (id) => db.get('names', id),
-    saveNames: (id, text) => db.put('names', text, id),
-    // the books as the files they came from, which say what each is: a page holds a few, so
-    // every one is looked through here, as the server does through its thousands
-    books: async (query) => findBooks(await catalogued(), await backend.progress(), query),
-    tags: async (limit) => topTags(await catalogued(), limit),
-    async addBooks(files) {
-      let chapterKeys = (await db.getAllKeys('chapters')) as string[];
-      // the books are read before the transaction opens: it would not wait for them
-      let read = await Promise.all(files.map(async ({ name, size, date, text }) => ({ file: { name, size, date: date ?? Date.now() }, text, book: await readBook({ name }, text) })));
-      let tx = db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
-      await Promise.all([
-        ...read.flatMap(({ file, text, book }) => [
-          tx.objectStore('files').put(file, book.id),
-          tx.objectStore('fileContents').put(text, book.id),
-          tx.objectStore('books').put(bookRecord(book), book.id),
-          ...chapterKeys.filter(k => k.startsWith(`${book.id}/`)).map(k => tx.objectStore('chapters').delete(k)),
-          ...book.chapters.map(c => tx.objectStore('chapters').put(c, `${book.id}/${c.id}`)),
-        ]),
-        tx.done,
-      ]);
-      return read.map(({ book }) => bookRecord(book));
-    },
-    async book(id) {
-      let book = await db.get('books', id);
-      // a book stored by an older parser keeps the titles and groups that parser cut it
-      // into, and one stored before chapters carried their offset has none: reading the
-      // file again is what updates them
-      let stale = !book || book.parser !== PARSER_VERSION || !book.chapters.some((c: Listed) => c.offset != null);
-      if (!stale) return book;
-      console.info('Book read again:', { id, parser: book?.parser });
-      return backend.rereadBook(id);
-    },
-    async chapter(id, listed, raw) {
-      let [chapter, names] = await Promise.all([db.get('chapters', `${id}/${listed.id}`), db.get('names', id)]);
-      if (!chapter) return null;
-      // the book record is the one that places the chapter, so it holds the offset
-      let { content, ...rest } = { ...(chapter as Chapter), offset: listed.offset };
-      return { ...rest, length: content.length, ...markChapter({ content, offset: listed.offset }, names ?? ''), ...(raw && { content }) };
-    },
-    async rereadBook(id) {
-      let [file, text] = await Promise.all([db.get('files', id), db.get('fileContents', id)]);
-      if (!file || !text) {
-        console.info('File not found:', { id });
-        return null;
-      }
-      let [book] = await backend.addBooks([{ ...file, text }]);
-      return book;
-    },
-    async deleteBook(id) {
-      let chapterKeys = ((await db.getAllKeys('chapters')) as string[]).filter(k => k.startsWith(`${id}/`));
-      let tx = db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
-      await Promise.all([
-        tx.objectStore('files').delete(id),
-        tx.objectStore('fileContents').delete(id),
-        tx.objectStore('books').delete(id),
-        ...chapterKeys.map(k => tx.objectStore('chapters').delete(k)),
-        tx.done,
-      ]);
-    },
-  };
-  return backend;
 }

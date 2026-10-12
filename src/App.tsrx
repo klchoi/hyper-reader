@@ -2,7 +2,6 @@
 // The store holds everything they show (see store.ts); App makes it, and starts listening.
 import { effect, untrack } from 'ripple';
 import { createStore, cssFontFamily, StoreContext } from './store.ts';
-import type { Page } from './store.ts';
 import { listen } from './listening.ts';
 import { ChapterList } from './ChapterList.tsrx';
 import { Library } from './Library.tsrx';
@@ -13,8 +12,8 @@ import { CommandPalette } from './CommandPalette.tsrx';
 import { NamesEditor } from './NamesEditor.tsrx';
 import { AddName } from './AddName.tsrx';
 
-export function App(page: Page) @{
-  const store = createStore(page);
+export function App() @{
+  const store = createStore();
   StoreContext.set(store);
 
   // the faces and sizes chosen, as the variables the stylesheet reads. Sizes and weights are

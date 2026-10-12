@@ -211,7 +211,7 @@ export function Library() @{
             @if (section.more) {
               <button class="more" disabled={store.finding.value?.busy} onClick={() => store.findMore()}>Show more</button>
             }
-            @if (section.key === 'found' && store.searching.value && asked.value.q?.trim()) {
+            @if (section.key === 'found' && asked.value.q?.trim()) {
               <button class="link inside" onClick={() => store.searchLibrary(asked.value.q ?? '')}>{`Search what the books say for “${asked.value.q?.trim()}”`}</button>
             }
           </section>

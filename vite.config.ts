@@ -1,6 +1,6 @@
 // The page is built from src/ into one file that holds everything it needs (its script, its
-// styles, its libraries), so it opens from the disk as it is: `npm run build` writes it to
-// dist/ and puts it in place as hyper-reader.html. `npm run dev` serves src/ as it changes, at
+// styles, its libraries), which the server serves: `npm run build` writes it to dist/ and puts
+// it in place as hyper-reader.html. `npm run dev` serves src/ as it changes, at
 // any path of the page (`/books/<id>`), and leaves the books to the server: `npm start`, or the
 // one at API (http://api:8080 in compose.yaml). POLL=1 watches the files by looking, where a
 // change to them is not told (some mounts into a container).

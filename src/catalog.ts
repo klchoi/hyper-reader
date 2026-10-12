@@ -11,8 +11,8 @@
 //             left out, the latest, or with words asked, the titles that say them as written first
 //   order     asc | desc, against the sort's own (latest, read, size, chapters: desc; title: asc)
 //   offset, limit
-// The server answers it for its thousands of books (server/library.ts), the browser's backend for
-// the few it keeps (backends.ts): the page only ever holds the page it shows.
+// The server answers it for its thousands of books (server/library.ts): the page only ever holds
+// the page it shows.
 //
 // A book kept as it grew is a file for every time it was kept (`... (1-30 chương)`, `(1-41
 // chương)`, `(1-66 chương)`): the library shows one book to a title, its newest file (among the

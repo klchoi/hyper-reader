@@ -17,7 +17,7 @@ export function CommandPalette() @{
       <input value={store.palette.value.text} onInput={(event) => store.searchCommands(event.currentTarget.value)} />
       <input type="submit" hidden />
     </form>
-    @if (store.book.value && store.searching.value && store.mentions.value.q === store.palette.value.q && store.palette.value.q.length >= 2) {
+    @if (store.book.value && store.mentions.value.q === store.palette.value.q && store.palette.value.q.length >= 2) {
       <small class="mentions">
         {`${store.mentions.value.total} ${store.mentions.value.total === 1 ? 'place says' : 'places say'} it`}
         {store.mentions.value.total > store.mentions.value.found.length ? `, the first ${store.mentions.value.found.length} below` : ''}

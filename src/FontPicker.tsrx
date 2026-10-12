@@ -37,7 +37,7 @@ export function FontPicker() @{
         <a onClick={() => store.loadFonts(true)}>Look again</a>
       </small>
     } @else {
-      <small>These are the fonts this page can name without asking. To pick from everything installed, open it over http://localhost - chrome will not remember the permission for a file:// page.</small>
+      <small>These are the fonts this page can name without asking: this browser does not say which are installed, or was not let to.</small>
     }
     <ul>
       <li>

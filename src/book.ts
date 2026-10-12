@@ -11,15 +11,9 @@ export type BookInfo = { id: string; name: string; description?: string };
 export type BookRecord = BookInfo & { parser: number; chapters: Listed[] };
 
 // a book: what its file is called says what it is, and its chapters once the text has been
-// read (see readBook in reading.ts)
+// read (see server/read-worker.ts)
 export function Book(file: { name: string }): BookInfo & { chapters?: Chapter[] } {
   let name = /(?<name>^[^(]*).*?\.txt/.exec(file.name.normalize())?.groups?.name.trim() ?? file.name;
   let description = /(?<description>\(.*)\.txt/.exec(file.name.normalize())?.groups?.description?.trim();
   return { id: slug(name), name, description, chapters: undefined };
-}
-
-// what is stored of a book: the list of its chapters without their text, which is kept
-// chapter by chapter
-export function bookRecord({ id, name, description, chapters }: BookInfo & { chapters: Chapter[] }): BookRecord {
-  return { id, name, description, parser: PARSER_VERSION, chapters: chapters.map(({ content, ...listed }) => listed) };
 }

@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "chroma-js": "^2.6.0",
-    "idb": "^8.0.4",
     "ripple": "^0.4.7"
   },
   "devDependencies": {

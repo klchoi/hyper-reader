@@ -1,19 +1,14 @@
 # hyper-reader
 
-A reader for long novels kept as `.txt` files. It is one page, `hyper-reader.html`: open it,
-drop a book on it, and read by chapter. The page is built from `src/` (see Building it) and kept
-in git as built, so it opens as it is. The books, where each was left and the settings are kept
-by a backend, of which there are two: the browser's, or a small Node server's.
+A reader for long novels kept as `.txt` files: a page, `hyper-reader.html`, to read a book by
+chapter in, and a small Node server that serves it and keeps the books, where each was left, the
+names corrected in each, and the settings. The page is built from `src/` (see Building it) and
+kept in git as built.
 
 ## Running it
 
-In the browser alone: open `hyper-reader.html` from the file. The browser keeps everything
-(IndexedDB), and a book is read in a worker, so a big one does not hold the page still; the
-console says which way each book was read (`Chapters of "...": read in a worker`, or `... read
-in the page (why)` when no worker could be had).
-
-With the server: `npm start -- [--port 8080] [--data <folder>] [--library [name=]<folder>]...`,
-then `http://127.0.0.1:8080/`. The server serves the page, and keeps the books in a SQLite
+`npm start -- [--port 8080] [--data <folder>] [--library [name=]<folder>]...`, then
+`http://127.0.0.1:8080/`. The server serves the page, and keeps the books in a SQLite
 database, `<data>/library.db` (`data/` by default):
 
 - the books of each library, a folder of `.txt` files (sub-folders too), read where they are and
@@ -36,12 +31,9 @@ looking through all of its books (`/api/books?q=&tag=&size=min-max&chapters=min-
 and `/api/tags` for the tags most books have; see `src/catalog.ts`), so the page holds only the
 few it shows, whatever the size of the library. Where a book was left and its names outlive it, so a
 file that goes and comes back finds them again. It needs nothing but Node (24, for `node:sqlite`
-and for running TypeScript as it is written), answers on this computer only, and runs the page's
-own parser (`src/parser.ts`). Listing the fonts installed
-on the machine works here and not from the file.
-
-The two keep their books apart: a book dropped on the page opened as a file is not on the
-server, and the other way round.
+and for running TypeScript as it is written), answers on this computer only, and runs the
+parser of `src/parser.ts`. A chapter is sent as its lines, corrected by the book's names, with
+where the names in them are (`src/marks.ts`): the page only paints them.
 
 ### In a container
 
@@ -73,7 +65,7 @@ npm run dev              src/ served as it changes (http://localhost:5173/), the
                          the server (npm start)
 ```
 
-The built page holds everything it needs, its libraries too, so it needs no network.
+The built page holds everything it needs, its libraries too, so it needs nothing but the server.
 
 ### In containers, with nothing to restart
 
@@ -101,16 +93,17 @@ Vite look for changes, and the server is started again with `docker compose rest
 ## What is in src/
 
 - `index.html`, `styles.css` the page and its styles (built into `hyper-reader.html`).
-- `parser.ts` the chapter parser. It touches nothing of the page and nothing of node, so the
-  page, its worker, and node (the tests, the tools, the server) all run it as it is.
-- `book.ts` what a book is (`Book`) and what is kept of it (`bookRecord`, `PARSER_VERSION`).
+- `parser.ts` the chapter parser. It touches nothing of the page and nothing of node, so node
+  (the server, the tests, the tools) runs it as it is, and the page what it needs of it.
+- `book.ts` what a book is (`Book`) and what is kept of it (`BookRecord`, `PARSER_VERSION`).
 - `catalog.ts` the library as it is browsed: what a file's name says the book is (its title, its
   tags in brackets, a note of its length), and the books found by what is asked of the library
-  (words, tags, a size, a length, an order, a page), which the server answers for its thousands
-  and the browser's backend for the few it keeps: the page holds only the page it shows.
-- `reading.ts` the page's reader of books, which hands a book to a worker (`parser-worker.ts`,
-  built into the page as a script of its own) and reads it in the page when no worker can run.
-- `main.ts` the page started: the reader of books, and the app mounted on `<body>`.
+  (words, tags, a size, a length, an order, a page), which the server answers for its thousands:
+  the page holds only the page it shows.
+- `marks.ts` the names list: the text corrected by it, and the names found in it, the list's and
+  those the patterns give, each the name of somebody. The server marks every chapter it sends;
+  the page, only while the list is edited.
+- `main.ts` the page started: the app mounted on `<body>`.
 - The app, in [Ripple](https://github.com/Ripple-TS/ripple) (TypeScript, `.tsrx`):
   - `App.tsrx` makes the store and lays the page out: `ChapterList`, `Library` or
     `ChapterText`, the `Rail` down the right (back to the library, the book's buttons, and the
@@ -120,12 +113,12 @@ Vite look for changes, and the server is started again with `docker compose rest
     that write them. Made by App and handed down as a context.
   - `listening.ts` what the page listens for: the url, books dropped, the keys, the scroll, the
     pointer over a name.
-  - `places.ts` the url, a place in a book, a chapter as its lines. `names.ts` the names list,
-    the text corrected by it, the names coloured on the page.
-- `name-patterns.ts` how a name is told in the text: the patterns the page colours names by, and
+  - `places.ts` the url, a place in a book, a line as the page shows it. `names.ts` the names
+    coloured on the page, where `marks.ts` found them, a highlight to a colour, and a name
+    added from the page.
+- `name-patterns.ts` how a name is told in the text: the patterns `marks.ts` finds names by, and
   the faster reading of them the server keeps a book's characters by.
-- `backends.ts` what the app asks of whatever keeps the books: the browser's backend
-  (IndexedDB, and the reader of books) and the server's (calls to `server/server.ts`).
+- `backends.ts` what the app asks of the server (calls to `server/server.ts`).
 
 ## The chapter parser
 
@@ -138,8 +131,8 @@ The parser's own comments say the rest; start with the contents at the head of `
 and `TUNING`, where every number it was tuned with is named.
 
 A chapter is `{ id, title, offset, group, part, content }`, `part` being set on the parts of a
-chapter written in several (`{ of, text }`: the chapter named once, and the part); what is stored of a book is
-`bookRecord(book)`. Raise `PARSER_VERSION` when a change should reach the books already stored:
+chapter written in several (`{ of, text }`: the chapter named once, and the part); what is kept of a book is
+its record (`BookRecord`): its chapters without their text. Raise `PARSER_VERSION` when a change should reach the books already stored:
 they are read again the next time they are opened (the server reads its libraries again when it
 next starts; a book that comes out in the same chapters keeps what the index holds of it, so only
 the books the change moves are indexed again).
@@ -147,8 +140,8 @@ the books the change moves are indexed again).
 ## Working on it
 
 ```
-npm test                 the tests: the parser, read from the page, on small invented books,
-                         the worker, the server's readers, and the server's answers
+npm test                 the tests: the parser on small invented books, the names of a chapter,
+                         the catalog, the server's readers, and the server's answers
 npm start                the server
 npm run lint             oxlint over all the code: src/, server/, test/, tools/
 npm run typecheck        TypeScript over the page (src/, the .tsrx too, with tsrx-tsc) and over

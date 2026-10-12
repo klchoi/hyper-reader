@@ -1,6 +1,6 @@
 // The chapter parser. It touches nothing of the page and nothing of node, so it runs anywhere:
-// in the page and in its worker (reading.ts, parser-worker.ts), and in node for the tests, the
-// tools and the server.
+// in the server's readers (server/read-worker.ts), the tests and the tools, and what the page
+// needs of it (`latinize`, `slug`) in the page.
 
 export function normalizeFileContent(source: string) {
   let text = source.normalize();

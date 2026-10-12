@@ -1,8 +1,8 @@
 // The names in a book's text, as its list has them (one person to a line, see names.ts): the text
 // corrected by the list, and where the names stand in it, those of the list and those the
 // patterns find (name-patterns.ts), each with the person it is of. Nothing of the page: the
-// server marks a chapter before it sends it, and the browser's backend the chapters it keeps, so
-// the page only colours where it is told (names.ts).
+// server marks a chapter before it sends it, so the page only colours where it is told
+// (names.ts), and marks one itself only while the list is edited.
 import { buildRegex, nameRegexes, namePatterns, standaloneRelationships } from './name-patterns.ts';
 
 // ---- words and their case -----------------------------------------------------------

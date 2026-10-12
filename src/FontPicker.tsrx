@@ -1,5 +1,5 @@
 // The fonts and sizes, for the reading and for everything else: the faces this page can name,
-// each written in itself, and the size and weight of the one chosen.
+// each written in itself, and the size and weight of the one chosen. A part of the settings.
 import { track } from 'ripple';
 import { cssFontFamily, fontSettings, readingFonts, StoreContext } from './store.ts';
 import type { FontTarget } from './store.ts';
@@ -23,13 +23,14 @@ export function FontPicker() @{
   });
   const slid = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
 
-  <dialog id="font-picker" open={store.fontPicker.value.open}>
-    <div class="target">
+  <section class="fonts">
+    <h2>{'Font'}</h2>
+    <div class="choices">
       @for (const { target, label, title } of targets) {
         <button class={{ selected: store.fontPicker.value.target === target }} onClick={() => store.setFontTarget(target)} title={title}>{label}</button>
       }
     </div>
-    <input placeholder="Font" value={store.fontPicker.value.q} onInput={(event) => store.setFontQuery(event.currentTarget.value)} />
+    <input placeholder="Find a font" value={store.fontPicker.value.q} onInput={(event) => store.setFontQuery(event.currentTarget.value)} />
     @if (installed.value.length > 0) {
       <small>
         {`${installed.value.length} fonts. `}
@@ -76,5 +77,5 @@ export function FontPicker() @{
       />
       <span>{pickedWeight.value}</span>
     </label>
-  </dialog>
+  </section>
 }

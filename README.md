@@ -60,8 +60,9 @@ The built page holds everything it needs, its libraries too, so it needs no netw
 - `main.ts` the page started: the reader of books, and the app mounted on `<body>`.
 - The app, in [Ripple](https://github.com/Ripple-TS/ripple) (TypeScript, `.tsrx`):
   - `App.tsrx` makes the store and lays the page out: `ChapterList`, `Library` or
-    `ChapterText`, `Settings`, and the dialogs, `CommandPalette`, `FontPicker`,
-    `NamesEditor`, and the `AddName` button.
+    `ChapterText`, the `Rail` down the right (back to the library, the book's buttons, and the
+    cog), and the dialogs: `Settings` (the theme, the page's width, and the fonts, in
+    `FontPicker`), `CommandPalette`, `NamesEditor`, and the `AddName` button.
   - `store.ts` everything the page knows, as tracked values, and the actions, the only things
     that write them. Made by App and handed down as a context.
   - `listening.ts` what the page listens for: the url, books dropped, the keys, the scroll, the

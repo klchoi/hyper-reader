@@ -1,4 +1,4 @@
-// The page: the chapter list, the library or the chapter open, the settings, and the dialogs.
+// The page: the chapter list, the library or the chapter open, the rail, and the dialogs.
 // The store holds everything they show (see store.ts); App makes it, and starts listening.
 import { effect, untrack } from 'ripple';
 import { createStore, cssFontFamily, StoreContext } from './store.ts';
@@ -7,9 +7,9 @@ import { listen } from './listening.ts';
 import { ChapterList } from './ChapterList.tsrx';
 import { Library } from './Library.tsrx';
 import { ChapterText } from './ChapterText.tsrx';
+import { Rail } from './Rail.tsrx';
 import { Settings } from './Settings.tsrx';
 import { CommandPalette } from './CommandPalette.tsrx';
-import { FontPicker } from './FontPicker.tsrx';
 import { NamesEditor } from './NamesEditor.tsrx';
 import { AddName } from './AddName.tsrx';
 
@@ -46,9 +46,9 @@ export function App(page: Page) @{
     @if (store.chapter.value) {
       <ChapterText />
     }
+    <Rail />
     <Settings />
     <CommandPalette />
-    <FontPicker />
     <NamesEditor />
     <AddName />
   </>

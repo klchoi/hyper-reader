@@ -109,7 +109,7 @@ small {
   --paper-padding: calc(var(--reading-font-size, 18pt) * 3);
   cursor: default;
 }
-.settings .colors button.white {
+#settings .colors button.white {
   --body-font-color: rgb(27, 27, 27);
   --body-background-color: rgb(230, 230, 230);
   --paper-background-color: rgb(255, 255, 255);
@@ -134,7 +134,7 @@ small {
     --horizontal-line-color: rgb(220, 220, 220);
   }
 }
-.settings .colors button.sepia {
+#settings .colors button.sepia {
   --body-font-color: rgb(79, 50, 28);
   --body-background-color: rgb(225, 216, 200);
   --paper-background-color: rgb(248, 241, 227);
@@ -159,7 +159,7 @@ small {
     --horizontal-line-color: rgb(230, 218, 201);
   }
 }
-.settings .colors button.gray {
+#settings .colors button.gray {
   --body-font-color: rgba(255, 255, 255, 0.78);
   --body-background-color: rgb(50, 50, 51);
   --paper-background-color: rgb(74, 74, 77);
@@ -187,7 +187,7 @@ small {
     --body-font-smoothing: antialiased;
   }
 }
-.settings .colors button.night {
+#settings .colors button.night {
   --body-font-color: rgb(176, 176, 176);
   --body-background-color: rgb(0, 0, 0);
   --paper-background-color: rgb(18, 18, 18);
@@ -218,7 +218,7 @@ small {
     --body-font-smoothing: antialiased;
   }
 }
-.settings .colors button.rose-pine {
+#settings .colors button.rose-pine {
   --body-font-color: var(--rp-main-subtle);
   --body-background-color: var(--rp-main-surface);
   --paper-background-color: var(--rp-main-base);
@@ -252,7 +252,7 @@ small {
     --body-font-smoothing: antialiased;
   }
 }
-.settings .colors button.rose-pine-moon {
+#settings .colors button.rose-pine-moon {
   --body-font-color: var(--rp-moon-subtle);
   --body-background-color: var(--rp-moon-surface);
   --paper-background-color: var(--rp-moon-base);
@@ -286,7 +286,7 @@ small {
     --body-font-smoothing: antialiased;
   }
 }
-.settings .colors button.rose-pine-dawn {
+#settings .colors button.rose-pine-dawn {
   --body-font-color: var(--rp-dawn-text);
   --body-background-color: var(--rp-dawn-base);
   --paper-background-color: var(--rp-dawn-overlay);
@@ -317,7 +317,7 @@ small {
     --selection-bg: var(--rp-dawn-highlight-med);
   }
 }
-.settings .colors button.solarized,
+#settings .colors button.solarized,
 :root[data-color\:light=solarized] {
   @media (prefers-color-scheme:light) {
     --body-font-color: #002a35;
@@ -329,7 +329,7 @@ small {
     --selection-bg: #cadcdf;
   }
 }
-.settings .colors button.solarized,
+#settings .colors button.solarized,
 :root[data-color\:dark=solarized] {
   @media (prefers-color-scheme:dark) {
     --body-font-color: #002a35;
@@ -341,7 +341,7 @@ small {
     --selection-bg: #cadcdf;
   }
 }
-.settings .colors button.kiselevka,
+#settings .colors button.kiselevka,
 :root[data-color\:light=kiselevka] {
   @media (prefers-color-scheme:light) {
     --body-font-color: #81a8bf;
@@ -353,7 +353,7 @@ small {
     --selection-bg: #153d4f;
   }
 }
-.settings .colors button.kiselevka,
+#settings .colors button.kiselevka,
 :root[data-color\:dark=kiselevka] {
   @media (prefers-color-scheme:dark) {
     --body-font-color: #81a8bf;
@@ -365,7 +365,7 @@ small {
     --selection-bg: #153d4f;
   }
 }
-.settings .colors button.gruvbox,
+#settings .colors button.gruvbox,
 :root[data-color\:light=gruvbox] {
   @media (prefers-color-scheme:light) {
     --body-font-color: #282828;
@@ -377,7 +377,7 @@ small {
     --selection-bg: #bac6ab;
   }
 }
-.settings .colors button.gruvbox,
+#settings .colors button.gruvbox,
 :root[data-color\:dark=gruvbox] {
   @media (prefers-color-scheme:dark) {
     --body-font-color: #fbf1c7;
@@ -543,10 +543,16 @@ nav {
 }
 
 /** aside **/
+/* the rail: the book's buttons from the top, the cog at the foot */
 aside {
   position: sticky;
   top: 0;
   height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+aside > .foot {
+  margin-top: auto;
 }
 aside a,
 aside button {
@@ -592,23 +598,6 @@ aside > div + div::before {
   background: var(--horizontal-line-color);
   opacity: 0.5;
 }
-aside .colors button {
-  border-radius: 2em;
-  &::before {
-    content: var(--checkmark);
-    font-size: .7em;
-  }
-  @media (prefers-color-scheme:light) {
-    &.checked\:light {
-      --checkmark: '✔';
-    }
-  }
-  @media (prefers-color-scheme:dark) {
-    &.checked\:dark {
-      --checkmark: '✔';
-    }
-  }
-}
 aside a.close {
   position: relative;
   box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
@@ -652,8 +641,15 @@ aside button {
   &.names-editor::after {
     content: 'ℕ';
   }
-  &.font::after {
-    content: '𝔽';
+  /* (the text form of the cog, not the emoji) */
+  &.cog::after {
+    content: '\2699\FE0E';
+    font-size: 1.4em;
+    line-height: 1;
+  }
+  &.cog.selected {
+    font-weight: inherit;
+    color: var(--link-color);
   }
 }
 
@@ -854,54 +850,182 @@ main {
   }
 }
 
-/** font picker **/
-#font-picker[open] {
-  --width: min(46ch, calc(var(--paper-width) - 80px));
-  width: var(--width);
-  max-height: 80%;
+/** settings **/
+/* a panel over the cog at the foot of the rail, its corner by the cog's */
+#settings[open] {
+  width: min(40ch, calc(100vw - 2 * var(--gap)));
+  max-height: calc(100vh - var(--gap) * 5);
   position: fixed;
-  top: 10%;
-  left: calc((100% - var(--width)) / 2);
+  inset: auto calc(var(--gap) * .75) calc(var(--gap) * 3.5) auto;
+  margin: 0;
+  z-index: 10;
   border-radius: 1.5ex;
-  overflow: hidden;
+  /* in a window too short for it all, the panel scrolls: the list keeps a few fonts in sight */
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.7ex;
-  padding: 0.7ex;
+  gap: 1.6ex;
+  padding: 1.3ex;
 
-  /* the filter, which is the only input sitting directly in the dialog */
-  > input {
-    background: var(--paper-background-color);
-    font: inherit;
-    padding: 1ex 1.3ex;
-    border: 1px solid var(--paper-outline-color);
-    border-radius: 0.8ex;
-    color: var(--body-font-color);
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7ex;
+    flex: none;
+  }
+  h2 {
+    font-size: 0.6em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0 0.5ex;
+    opacity: 0.65;
+    small {
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      margin-left: 0.5ex;
+    }
+  }
+  /* the scheme a theme is chosen for is the one the system is in */
+  .for-dark {
+    display: none;
+  }
+  @media (prefers-color-scheme:dark) {
+    .for-light {
+      display: none;
+    }
+    .for-dark {
+      display: inline;
+    }
   }
 
-  /* which of the two fonts the list is picking */
-  .target {
-    display: flex;
-    gap: 0.5ex;
+  button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--body-font-color);
+    font-size: inherit;
+    cursor: pointer;
+  }
+
+  /* each theme as its paper on its background, ticked where it is the one chosen */
+  .colors {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 0.8ex;
+    padding: 0 0.3ex;
 
     button {
-      flex: 1;
-      text-align: center;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: radial-gradient(closest-side, var(--paper-background-color) 62%, var(--body-background-color) 64%);
       outline: 1px solid var(--horizontal-line-color);
-
-      &.selected {
-        font-weight: bold;
+      display: grid;
+      place-content: center;
+      font-size: 0.6em;
+      &::before {
+        content: var(--checkmark);
+      }
+      &:hover {
+        outline: 2px solid var(--link-color);
+      }
+      @media (prefers-color-scheme:light) {
+        &.checked\:light {
+          --checkmark: '✔';
+        }
+      }
+      @media (prefers-color-scheme:dark) {
+        &.checked\:dark {
+          --checkmark: '✔';
+        }
       }
     }
   }
 
+  /* one of a few, side by side: the page's width, which of the two fonts the list picks */
+  .choices {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 0.9ex;
+    outline: 1px solid var(--horizontal-line-color);
+
+    button {
+      flex: 1;
+      text-align: center;
+      padding: 0.25ex 1ex;
+      border-radius: 0.7ex;
+      font-size: 0.8em;
+      &:hover {
+        background: var(--selection-bg);
+      }
+      &.selected {
+        background: var(--paper-background-color);
+        color: var(--link-color);
+        font-weight: bold;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .15);
+      }
+    }
+  }
+
+  /* the fonts take what room is left, their list scrolling in it */
+  .fonts {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .fonts > input {
+    background: var(--paper-background-color);
+    font: inherit;
+    font-size: 0.8em;
+    padding: 0.8ex 1.2ex;
+    border: 1px solid var(--paper-outline-color, var(--horizontal-line-color));
+    border-radius: 0.8ex;
+    color: var(--body-font-color);
+  }
+  .fonts > small {
+    padding: 0 0.5ex;
+    font-size: 0.6em;
+    opacity: 0.7;
+    a {
+      color: var(--link-color);
+      cursor: pointer;
+    }
+  }
+  ul {
+    flex: 1 1 9em;
+    min-height: 3em;
+    overflow-y: auto;
+    list-style: none;
+
+    button {
+      width: 100%;
+      text-align: left;
+      font-size: 0.85em;
+      padding: 0.2ex 1.2ex;
+      border-radius: 0.8ex;
+      line-height: 1.7;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+
+      &:hover,
+      &:focus {
+        background: var(--selection-bg);
+      }
+      /* the font in use, so the list says where you already are */
+      &.selected {
+        color: var(--link-color);
+      }
+    }
+  }
   label {
     display: grid;
-    grid-template-columns: 7ch 1fr 8ch;
+    grid-template-columns: 7ch 1fr 6ch;
     align-items: center;
     gap: 1ex;
-    padding: 0 1.3ex;
-    font-size: 0.75em;
+    padding: 0 0.5ex;
+    font-size: 0.7em;
 
     input[type=range] {
       accent-color: var(--link-color);
@@ -911,46 +1035,6 @@ main {
     span {
       text-align: right;
       opacity: 0.7;
-    }
-  }
-
-  ul {
-    flex: 1;
-    overflow-y: auto;
-    list-style: none;
-  }
-
-  small {
-    padding: 0 1.3ex;
-    opacity: 0.7;
-    a {
-      color: var(--link-color);
-      cursor: pointer;
-    }
-  }
-
-  button {
-    appearance: none;
-    background: transparent;
-    color: var(--body-font-color);
-    width: 100%;
-    text-align: left;
-    padding: 0.3ex 1.3ex;
-    border-radius: 0.8ex;
-    cursor: pointer;
-    font-size: inherit;
-    line-height: 1.7;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-
-    &:hover,
-    &:focus {
-      background: var(--selection-bg);
-    }
-    /* the font in use, so the list says where you already are */
-    &.selected {
-      color: var(--link-color);
     }
   }
 }

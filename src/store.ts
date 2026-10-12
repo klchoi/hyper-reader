@@ -65,7 +65,9 @@ export function createStore({ reader }: Page) {
   const status = track<LibraryStatus | null>(null);
   // the library searched: the characters, and the books that say it
   const found = track<{ q: string; characters: Person[]; books: BookSaying[] }>({ q: '', characters: [], books: [] });
-  const fontPicker = track<{ open: boolean; q: string; target: FontTarget }>({ open: false, q: '', target: 'reading' });
+  // the settings panel, and in it the fonts: which of the two the list picks, and its filter
+  const settingsOpen = track(false);
+  const fontPicker = track<{ q: string; target: FontTarget }>({ q: '', target: 'reading' });
   const names = track('');
   const namesEditorOpen = track(false);
   const addName = track<AddNameOffer | null>(null);
@@ -138,14 +140,15 @@ export function createStore({ reader }: Page) {
       console.warn(error);
     }
   }
-  async function toggleFontPicker(open: boolean) {
-    fontPicker.value = { ...fontPicker.value, open, q: '' };
+  // the settings panel opened, or put away; `open` left out turns it over
+  function toggleSettings(open = !settingsOpen.value) {
+    if (open === settingsOpen.value) return;
+    settingsOpen.value = open;
     if (!open) return;
+    fontPicker.value = { ...fontPicker.value, q: '' };
     // queryLocalFonts only answers while the click that opened this still counts
     // as the reader asking, so the list is asked for before waiting on anything
     loadFonts();
-    await nextTick();
-    document.querySelector<HTMLInputElement>('#font-picker input')?.select();
   }
   const setFontTarget = (target: FontTarget) => { fontPicker.value = { ...fontPicker.value, target }; };
   const setFontQuery = (q: string) => { fontPicker.value = { ...fontPicker.value, q }; };
@@ -497,11 +500,11 @@ export function createStore({ reader }: Page) {
 
   return {
     router,
-    books, book, chapter, progress, settings, palette, fontPicker, names, namesEditorOpen, addName,
+    books, book, chapter, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
     fixNames, commands, selectedCommand, mentions, searching, status, found,
     start, follow,
     applySettings, saveSettings, chooseColor, sortBy,
-    loadFonts, toggleFontPicker, setFontTarget, setFontQuery, chooseFont,
+    loadFonts, toggleSettings, setFontTarget, setFontQuery, chooseFont,
     openBook, openNextChapter, trackReadingOffset, showLibrary,
     storeFiles, refreshBook, deleteBook,
     setNames, toggleNamesEditor, saveNames, showAddName, addToNames,

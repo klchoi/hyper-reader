@@ -37,8 +37,13 @@ export function listen(store: Store) {
   });
   stops.push(onKey('Cmd+K', () => store.togglePalette()));
   stops.push(onKey('Escape', () => store.togglePalette(false)));
-  // a non-modal dialog is not dismissed for us
-  stops.push(onKey('Escape', () => store.toggleFontPicker(false)));
+  // a non-modal dialog is not dismissed for us: the settings go with Escape, or a click anywhere
+  // but on them (or on the cog, which puts them away itself)
+  stops.push(onKey('Escape', () => store.toggleSettings(false)));
+  on(document, 'pointerdown', (event: PointerEvent) => {
+    if (!store.settingsOpen.value || (event.target as Element).closest?.('#settings, aside button.cog')) return;
+    store.toggleSettings(false);
+  });
   // the arrows move through the palette's list, while it has the keys
   on(window, 'keydown', (event: KeyboardEvent) => {
     if (!(event.target as HTMLElement).closest?.('#command-palette')) return;
@@ -80,7 +85,7 @@ export function listen(store: Store) {
     let name = asName(range);
     if (name) return addNameAt(range, name, pointer.x, pointer.y);
   };
-  let busy = () => document.querySelector('#names-editor[open], #font-picker[open]');
+  let busy = () => document.querySelector('#names-editor[open], #settings[open]');
   let hoveredName = (x: number, y: number) => {
     // a selection is the more explicit ask, let it win
     if (!getSelection()?.isCollapsed) return;

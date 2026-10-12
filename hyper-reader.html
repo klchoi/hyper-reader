@@ -703,7 +703,7 @@ function render_tsrx_collection_text(value, anchor, assign = false) {
 * @returns {void}
 */
 function expression(node, get_value) {
-	render$9(run_expression, {
+	render$10(run_expression, {
 		start: null,
 		end: null,
 		a: node,
@@ -2033,7 +2033,7 @@ function user_effect(fn) {
 * @param {any} [state]
 * @param {number} [flags]
 */
-function render$9(fn, state, flags = 0) {
+function render$10(fn, state, flags = 0) {
 	var block = create_block(4 | flags, fn, state);
 	run_block(block, true);
 	block.f ^= BLOCK_HAS_RUN;
@@ -2070,7 +2070,7 @@ function own_anchor(node, anchor) {
 * @param {() => (void | (() => void))} fn
 * @returns {Block}
 */
-function root$8(fn) {
+function root$9(fn) {
 	return block(2, fn, {
 		start: null,
 		end: null
@@ -3249,7 +3249,7 @@ function for_block(node, get_collection, render_fn, flags, render_empty, update_
 		if (root_controlled) boundary = hydrate_node;
 		hydrate_next();
 	}
-	render$9(run_for, new ListState(anchor, get_collection, render_fn, is_controlled, is_indexed, void 0, render_empty, void 0, update_fn, false, false), 32);
+	render$10(run_for, new ListState(anchor, get_collection, render_fn, is_controlled, is_indexed, void 0, render_empty, void 0, update_fn, false, false), 32);
 	if (!is_controlled) own_anchor(node, anchor);
 	if (hydrating && root_controlled) append(node, boundary);
 }
@@ -3287,7 +3287,7 @@ function for_block_keyed(node, get_collection, render_fn, flags, get_key, render
 		if (root_controlled) boundary = hydrate_node;
 		hydrate_next();
 	}
-	render$9(run_for_keyed, new ListState(anchor, get_collection, render_fn, is_controlled, is_indexed, get_key, render_empty, map_item, update_fn, (flags & 128) !== 0, (flags & 128) === 0), 32);
+	render$10(run_for_keyed, new ListState(anchor, get_collection, render_fn, is_controlled, is_indexed, get_key, render_empty, map_item, update_fn, (flags & 128) !== 0, (flags & 128) === 0), 32);
 	if (!is_controlled) own_anchor(node, anchor);
 	if (hydrating && root_controlled) append(node, boundary);
 }
@@ -3927,7 +3927,7 @@ function selector(get_source) {
 			n: 0
 		}
 	};
-	s.b = render$9(() => {
+	s.b = render$10(() => {
 		var next = get_source();
 		var prev = s.v;
 		if (next === prev) return;
@@ -4258,7 +4258,7 @@ function mount(component, options) {
 	/** @type {import('./internal/client/events.js').RootTargetRef | null} */
 	let events_ref = handle_root_events(target);
 	const root_boundary = options.rootBoundary;
-	const _root = root$8(() => {
+	const _root = root$9(() => {
 		if (root_boundary === false) {
 			render_component(component, anchor, props);
 			return;
@@ -9745,8 +9745,8 @@ function createStore({ reader }) {
 		characters: [],
 		books: []
 	});
+	const settingsOpen = track(false);
 	const fontPicker = track({
-		open: false,
 		q: "",
 		target: "reading"
 	});
@@ -9837,16 +9837,15 @@ function createStore({ reader }) {
 			console.warn(error);
 		}
 	}
-	async function toggleFontPicker(open) {
+	function toggleSettings(open = !settingsOpen.value) {
+		if (open === settingsOpen.value) return;
+		settingsOpen.value = open;
+		if (!open) return;
 		fontPicker.value = {
 			...fontPicker.value,
-			open,
 			q: ""
 		};
-		if (!open) return;
 		loadFonts();
-		await nextTick();
-		document.querySelector("#font-picker input")?.select();
 	}
 	const setFontTarget = (target) => {
 		fontPicker.value = {
@@ -10248,6 +10247,7 @@ function createStore({ reader }) {
 		chapter,
 		progress,
 		settings,
+		settingsOpen,
 		palette,
 		fontPicker,
 		names,
@@ -10267,7 +10267,7 @@ function createStore({ reader }) {
 		chooseColor,
 		sortBy,
 		loadFonts,
-		toggleFontPicker,
+		toggleSettings,
 		setFontTarget,
 		setFontQuery,
 		chooseFont,
@@ -10326,7 +10326,11 @@ function listen(store) {
 	});
 	stops.push(onKey("Cmd+K", () => store.togglePalette()));
 	stops.push(onKey("Escape", () => store.togglePalette(false)));
-	stops.push(onKey("Escape", () => store.toggleFontPicker(false)));
+	stops.push(onKey("Escape", () => store.toggleSettings(false)));
+	on(document, "pointerdown", (event) => {
+		if (!store.settingsOpen.value || event.target.closest?.("#settings, aside button.cog")) return;
+		store.toggleSettings(false);
+	});
 	on(window, "keydown", (event) => {
 		if (!event.target.closest?.("#command-palette")) return;
 		if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
@@ -10359,7 +10363,7 @@ function listen(store) {
 		let name = asName(range);
 		if (name) return addNameAt(range, name, pointer.x, pointer.y);
 	};
-	let busy = () => document.querySelector("#names-editor[open], #font-picker[open]");
+	let busy = () => document.querySelector("#names-editor[open], #settings[open]");
 	let hoveredName = (x, y) => {
 		if (!getSelection()?.isCollapsed) return;
 		let found = detectedNameAt(x, y);
@@ -10386,15 +10390,15 @@ function listen(store) {
 //#endregion
 //#region src/ChapterList.tsrx
 var root_2$6 = template_el("li", ["class", "book"]);
-function render$8(__prev) {
+function render$9(__prev) {
 	var __a = get(__prev._a).book;
 	if (__prev.a !== __a) {
 		set_text_content(__prev._b, __a, __prev.a);
 		__prev.a = __a;
 	}
 }
-var root_3$5 = template_el("li", null, [["a"]]);
-function render_1$6(__prev) {
+var root_3$4 = template_el("li", null, [["a"]]);
+function render_1$7(__prev) {
 	var __pattern = get(__prev._a);
 	var __a = __pattern.label;
 	if (__prev.a !== __a) {
@@ -10413,7 +10417,7 @@ function render_1$6(__prev) {
 }
 function consequent$7(__anchor, { a: pattern, b: open, c: selector }) {
 	var li = root_2$6();
-	render$9(render$8, {
+	render$10(render$9, {
 		a: "",
 		_a: pattern,
 		_b: li
@@ -10421,10 +10425,10 @@ function consequent$7(__anchor, { a: pattern, b: open, c: selector }) {
 	append(__anchor, li);
 }
 function alternate$3(__anchor, { a: pattern, b: open, c: selector }) {
-	var li_1 = root_3$5();
+	var li_1 = root_3$4();
 	var a = hydrating ? hydrate_first_child() : li_1.firstChild;
 	a.__click = (event) => open(event, get(pattern).offset);
-	render$9(render_1$6, {
+	render$10(render_1$7, {
 		a: "",
 		b: void 0,
 		c: void 0,
@@ -10448,9 +10452,9 @@ function render_2$6(__prev) {
 	});
 	if (__prev.a !== __a) if_update(__prev._d, __prev.a = __a);
 }
-var root_1$7 = template_el("ol", ["start", "0"]);
-function consequent_1$5(__anchor, { a: rows, b: activeId, c: open }) {
-	var ol = root_1$7();
+var root_1$8 = template_el("ol", ["start", "0"]);
+function consequent_1$4(__anchor, { a: rows, b: activeId, c: open }) {
+	var ol = root_1$8();
 	{
 		const selector$4 = selector(() => activeId.value);
 		for_block_keyed(ol, () => rows.value, (__anchor, pattern) => {
@@ -10470,12 +10474,12 @@ function consequent_1$5(__anchor, { a: rows, b: activeId, c: open }) {
 	}
 	append(__anchor, ol);
 }
-function if_2$5({ a: rows, b: activeId, c: open }) {
-	if (rows.value.length > 0) return consequent_1$5;
+function if_2$4({ a: rows, b: activeId, c: open }) {
+	if (rows.value.length > 0) return consequent_1$4;
 }
-var root$7 = template_el("nav", null, [null]);
-function render_3$5(__prev) {
-	var __a = if_2$5({
+var root$8 = template_el("nav", null, [null]);
+function render_3$4(__prev) {
+	var __a = if_2$4({
 		a: __prev._a,
 		b: __prev._b,
 		c: __prev._c
@@ -10525,13 +10529,13 @@ function ChapterList_render(__anchor, __block) {
 			offset
 		}));
 	};
-	var nav = root$7();
-	render$9(render_3$5, {
+	var nav = root$8();
+	render$10(render_3$4, {
 		a: UNINITIALIZED,
 		_a: rows,
 		_b: activeId,
 		_c: open,
-		_d: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_2$5, 0, {
+		_d: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_2$4, 0, {
 			a: rows,
 			b: activeId,
 			c: open
@@ -10546,7 +10550,7 @@ function ChapterList() {
 delegate(["click"]);
 //#endregion
 //#region src/Library.tsrx
-var root_1$6 = template_el("div", ["class", "bar"], [
+var root_1$7 = template_el("div", ["class", "bar"], [
 	["input", [
 		"type",
 		"search",
@@ -10564,18 +10568,18 @@ var root_1$6 = template_el("div", ["class", "bar"], [
 		"Rescan"
 	]
 ], 1);
-function render$7(__prev) {
+function render$8(__prev) {
 	__prev._a.disabled = __prev._b.status.value?.scan?.running;
 }
 function consequent$6(__anchor, { a: store, b: __block, c: said }) {
-	var div_1 = root_1$6();
+	var div_1 = root_1$7();
 	var input = hydrating ? hydrate_first_child() : div_1.firstChild;
 	input.__input = (event) => with_scope(__block, () => store.searchLibrary(event.currentTarget.value));
 	var small = hydrating ? hydrate_next_sibling() : input.nextSibling;
 	expression(hydrating ? hydrate_first_child() : small.firstChild, () => said.value);
 	var button = hydrating ? hydrate_next_sibling() : small.nextSibling;
 	button.__click = () => with_scope(__block, () => store.rescan());
-	render$9(render$7, {
+	render$10(render$8, {
 		_a: button,
 		_b: store
 	});
@@ -10589,7 +10593,7 @@ var root_5$1 = template_el("li", null, [[
 	null,
 	" "
 ], ["small"]]);
-function render_1$5(__prev) {
+function render_1$6(__prev) {
 	var __a = with_scope(__prev._a, () => __prev._b.router.route({ book: get(__prev._c).id }));
 	if (__prev.a !== __a) set_attribute(__prev._d, "href", __prev.a = __a);
 	var __b = ` ${get(__prev._c).mentions}`;
@@ -10598,7 +10602,7 @@ function render_1$5(__prev) {
 		__prev.b = __b;
 	}
 }
-var root_4$4 = template_el("div", ["class", "person"], [
+var root_4$3 = template_el("div", ["class", "person"], [
 	[
 		"b",
 		null,
@@ -10615,12 +10619,12 @@ function render_2$5(__prev) {
 		__prev.a = __a;
 	}
 }
-var root_3$4 = template(`<h3>Characters</h3><!>`, 1, 2);
-function consequent_1$4(__anchor, { a: store, b: __block }) {
-	var fragment = root_3$4();
+var root_3$3 = template(`<h3>Characters</h3><!>`, 1, 2);
+function consequent_1$3(__anchor, { a: store, b: __block }) {
+	var fragment = root_3$3();
 	var h3 = first_child_frag(fragment);
 	for_block_keyed(hydrating ? hydrate_next_sibling() : h3.nextSibling, () => store.found.value.characters, (__anchor, pattern) => {
-		var div_3 = root_4$4();
+		var div_3 = root_4$3();
 		var b = hydrating ? hydrate_first_child() : div_3.firstChild;
 		expression(hydrating ? hydrate_first_child() : b.firstChild, () => get(pattern).name);
 		var small_1 = hydrating ? hydrate_next_sibling() : b.nextSibling;
@@ -10642,7 +10646,7 @@ function consequent_1$4(__anchor, { a: store, b: __block }) {
 				_e: hydrating ? hydrate_next_sibling() : a_1.nextSibling
 			});
 			append(__anchor, li);
-		}, 4, (pattern_1) => pattern_1.id, void 0, void 0, render_1$5);
+		}, 4, (pattern_1) => pattern_1.id, void 0, void 0, render_1$6);
 		item({
 			a: "",
 			_a: pattern,
@@ -10652,15 +10656,15 @@ function consequent_1$4(__anchor, { a: store, b: __block }) {
 	}, 0, (pattern) => pattern.name, void 0, void 0, render_2$5);
 	append(__anchor, fragment);
 }
-function if_2$4({ a: store, b: __block }) {
-	if (store.found.value.characters.length > 0) return consequent_1$4;
+function if_2$3({ a: store, b: __block }) {
+	if (store.found.value.characters.length > 0) return consequent_1$3;
 }
 var root_6$1 = template_el("p", null, [[
 	"a",
 	["class", "name"],
 	" "
 ], ["small"]]);
-function render_3$4(__prev) {
+function render_3$3(__prev) {
 	var __pattern_2 = get(__prev._a);
 	var __a = with_scope(__prev._b, () => __prev._c.router.route({ book: get(__prev._a).id }));
 	if (__prev.a !== __a) set_attribute(__prev._d, "href", __prev.a = __a);
@@ -10672,7 +10676,7 @@ function render_3$4(__prev) {
 }
 var root_2$5 = template_el("div", ["class", "found"], [["h3"]]);
 function render_4$2(__prev) {
-	var __a = if_2$4({
+	var __a = if_2$3({
 		a: __prev._a,
 		b: __prev._b
 	});
@@ -10686,7 +10690,7 @@ function render_4$2(__prev) {
 function consequent_2$2(__anchor, { a: searched, b: store, c: __block }) {
 	var div_2 = root_2$5();
 	var node_2 = hydrating ? hydrate_first_child() : div_2.firstChild;
-	var ifs_1 = if_static(node_2, if_2$4, 0, {
+	var ifs_1 = if_static(node_2, if_2$3, 0, {
 		a: store,
 		b: __block
 	});
@@ -10709,8 +10713,8 @@ function consequent_2$2(__anchor, { a: searched, b: store, c: __block }) {
 			_e: hydrating ? hydrate_next_sibling() : a_2.nextSibling
 		});
 		append(__anchor, p);
-	}, 0, (pattern_2) => pattern_2.id, void 0, void 0, render_3$4);
-	render$9(render_4$2, {
+	}, 0, (pattern_2) => pattern_2.id, void 0, void 0, render_3$3);
+	render$10(render_4$2, {
 		a: UNINITIALIZED,
 		b: "",
 		_a: store,
@@ -10758,7 +10762,7 @@ function render_5$1(__prev) {
 	});
 	if (__prev.c !== __c) if_update(__prev._f, __prev.c = __c);
 }
-var root$6 = template(`<div class=table><a href=# class="th text-left"><span>File</span></a><a href=# class="th text-right"><span>Size</span></a><a href=# class="th text-right"><span>Chapters</span></a><a href=# class="th text-right"><span>Date</span></a><span class=th><span>`);
+var root$7 = template(`<div class=table><a href=# class="th text-left"><span>File</span></a><a href=# class="th text-right"><span>Size</span></a><a href=# class="th text-right"><span>Chapters</span></a><a href=# class="th text-right"><span>Date</span></a><span class=th><span>`);
 function render_6(__prev) {
 	var __a = if_1$6({
 		a: __prev._a,
@@ -10831,7 +10835,7 @@ function Library_render(__anchor, __block) {
 		with_scope(__block, () => event.preventDefault());
 		with_scope(__block, () => store.sortBy(field, first));
 	};
-	var div = root$6();
+	var div = root$7();
 	var node = hydrating ? hydrate_first_child() : div.firstChild;
 	var ifs = if_static(node, if_1$6, 0, {
 		a: store,
@@ -10891,7 +10895,7 @@ function Library_render(__anchor, __block) {
 		});
 		append(__anchor, fragment_1);
 	}, 0, (pattern_3) => pattern_3.id, void 0, void 0, render_5$1);
-	render$9(render_6, {
+	render$10(render_6, {
 		a: UNINITIALIZED,
 		b: UNINITIALIZED,
 		c: void 0,
@@ -10919,24 +10923,24 @@ function Library() {
 delegate(["input", "click"]);
 //#endregion
 //#region src/ChapterText.tsrx
-var root_1$5 = template_el("hr");
-function render$6(__prev) {
+var root_1$6 = template_el("hr");
+function render$7(__prev) {
 	var __a = get(__prev._a).offset;
 	if (__prev.a !== __a) set_attribute_value(__prev._b, "data-offset", __prev.a = __a);
 }
 var root_2$4 = template_el("p", ["class", "text-center indent-none"], " ");
-function render_1$4(__prev) {
+function render_1$5(__prev) {
 	var __a = get(__prev._a).offset;
 	if (__prev.a !== __a) set_attribute_value(__prev._b, "data-offset", __prev.a = __a);
 }
-var root_3$3 = template_el("p", null, " ");
+var root_3$2 = template_el("p", null, " ");
 function render_2$4(__prev) {
 	var __a = get(__prev._a).offset;
 	if (__prev.a !== __a) set_attribute_value(__prev._b, "data-offset", __prev.a = __a);
 }
 var root_5 = template(` `, 1, 1);
 var root_6 = template_el("a", ["target", "_blank"], " ");
-function render_3$3(__prev) {
+function render_3$2(__prev) {
 	var __a = __prev._a.href;
 	if (__prev.a !== __a) set_attribute(__prev._b, "href", __prev.a = __a);
 }
@@ -10948,7 +10952,7 @@ function consequent_3(__anchor, piece) {
 function alternate$2(__anchor, piece) {
 	var a = root_6();
 	expression(hydrating ? hydrate_first_child() : a.firstChild, () => piece.href);
-	render$9(render_3$3, {
+	render$10(render_3$2, {
 		a: void 0,
 		_a: piece,
 		_b: a
@@ -10959,24 +10963,24 @@ function if_1$5(piece) {
 	if (typeof piece === "string") return consequent_3;
 	else return alternate$2;
 }
-var root_4$3 = template_el("p");
+var root_4$2 = template_el("p");
 function render_4$1(__prev) {
 	var __a = get(__prev._a).offset;
 	if (__prev.a !== __a) set_attribute_value(__prev._b, "data-offset", __prev.a = __a);
 }
 function consequent$5(__anchor, pattern) {
-	var hr = root_1$5();
-	render$9(render$6, {
+	var hr = root_1$6();
+	render$10(render$7, {
 		a: void 0,
 		_a: pattern,
 		_b: hr
 	});
 	append(__anchor, hr);
 }
-function consequent_1$3(__anchor, pattern) {
+function consequent_1$2(__anchor, pattern) {
 	var p = root_2$4();
 	expression(hydrating ? hydrate_first_child() : p.firstChild, () => get(pattern).text);
-	render$9(render_1$4, {
+	render$10(render_1$5, {
 		a: void 0,
 		_a: pattern,
 		_b: p
@@ -10984,9 +10988,9 @@ function consequent_1$3(__anchor, pattern) {
 	append(__anchor, p);
 }
 function consequent_2$1(__anchor, pattern) {
-	var p_1 = root_3$3();
+	var p_1 = root_3$2();
 	expression(hydrating ? hydrate_first_child() : p_1.firstChild, () => get(pattern).text);
-	render$9(render_2$4, {
+	render$10(render_2$4, {
 		a: void 0,
 		_a: pattern,
 		_b: p_1
@@ -10994,28 +10998,28 @@ function consequent_2$1(__anchor, pattern) {
 	append(__anchor, p_1);
 }
 function alternate_1(__anchor, pattern) {
-	var p_2 = root_4$3();
+	var p_2 = root_4$2();
 	for_block(p_2, () => get(pattern).pieces, (__anchor, piece) => {
 		if_block(__anchor, if_1$5, true, piece);
 	}, 4);
-	render$9(render_4$1, {
+	render$10(render_4$1, {
 		a: void 0,
 		_a: pattern,
 		_b: p_2
 	});
 	append(__anchor, p_2);
 }
-function if_2$3(pattern) {
+function if_2$2(pattern) {
 	if (get(pattern).kind === "rule") return consequent$5;
-	else if (get(pattern).kind === "marks") return consequent_1$3;
+	else if (get(pattern).kind === "marks") return consequent_1$2;
 	else if (get(pattern).pieces.length === 1 && typeof get(pattern).pieces[0] === "string") return consequent_2$1;
 	else return alternate_1;
 }
 function render_5(__prev) {
-	var __a = if_2$3(__prev._a);
+	var __a = if_2$2(__prev._a);
 	if (__prev.a !== __a) if_update(__prev._b, __prev.a = __a);
 }
-var root$5 = template_el("main", null, [["article"]]);
+var root$6 = template_el("main", null, [["article"]]);
 function ChapterText_render(__anchor, __block) {
 	const store = with_scope(__block, () => StoreContext.get());
 	const lines = track(() => {
@@ -11027,12 +11031,12 @@ function ChapterText_render(__anchor, __block) {
 			pieces: with_scope(__block, () => linePieces(line.text))
 		})));
 	}, __block, "t8lftv");
-	var main = root$5();
+	var main = root$6();
 	for_block_keyed(hydrating ? hydrate_first_child() : main.firstChild, () => lines.value, (__anchor, pattern) => {
 		item({
 			a: UNINITIALIZED,
 			_a: pattern,
-			_b: if_static(__anchor, if_2$3, 3, pattern)
+			_b: if_static(__anchor, if_2$2, 3, pattern)
 		});
 	}, 4, (pattern) => pattern.offset, void 0, void 0, render_5);
 	append(__anchor, main);
@@ -11042,169 +11046,342 @@ function ChapterText() {
 	return tsrx_element(ChapterText_render);
 }
 //#endregion
-//#region src/Settings.tsrx
-var root_1$4 = template_el("div", null, [["a", [
-	"title",
-	"Back to bookshelf",
-	"class",
-	"close"
-]]]);
-function render$5(__prev) {
+//#region src/Rail.tsrx
+var root_1$5 = template(`<div><a title="Back to bookshelf" class=close></a></div><div><button title="Refresh book" class=refresh></button><button title="Toggle Zen Mode" class=zen></button><button title="Edit names" class=names-editor>`, 1, 2);
+function render$6(__prev) {
 	var __a = with_scope(__prev._a, () => __prev._b.router.route({}));
 	if (__prev.a !== __a) set_attribute(__prev._c, "href", __prev.a = __a);
 }
 function consequent$4(__anchor, { a: store, b: __block }) {
-	var div = root_1$4();
+	var fragment = root_1$5();
+	var div = first_child_frag(fragment);
 	var a = hydrating ? hydrate_first_child() : div.firstChild;
 	a.__click = (event) => {
 		with_scope(__block, () => event.preventDefault());
 		with_scope(__block, () => store.showLibrary());
 	};
-	render$9(render$5, {
+	var div_1 = hydrating ? hydrate_next_sibling() : div.nextSibling;
+	var button = hydrating ? hydrate_first_child() : div_1.firstChild;
+	button.__click = () => with_scope(__block, () => store.refreshBook());
+	var button_1 = hydrating ? hydrate_next_sibling() : button.nextSibling;
+	button_1.__click = () => with_scope(__block, () => store.saveSettings({ zen: !store.settings.value.zen }));
+	var button_2 = hydrating ? hydrate_next_sibling() : button_1.nextSibling;
+	button_2.__click = () => with_scope(__block, () => store.toggleNamesEditor(true));
+	render$10(render$6, {
 		a: void 0,
 		_a: __block,
 		_b: store,
 		_c: a
 	});
-	append(__anchor, div);
+	append(__anchor, fragment);
 }
 function if_1$4({ a: store, b: __block }) {
 	if (store.chapter.value) return consequent$4;
 }
-var root_2$3 = template_el("button");
+var root$5 = template_el("aside", ["class", "rail"], [[
+	"div",
+	["class", "foot"],
+	[["button", [
+		"title",
+		"Settings",
+		"aria-controls",
+		"settings"
+	]]]
+]]);
+function render_1$4(__prev) {
+	var __a = if_1$4({
+		a: __prev._a,
+		b: __prev._b
+	});
+	if (__prev.a !== __a) if_update(__prev._c, __prev.a = __a);
+	var __b = __prev._a.settingsOpen.value;
+	if (__prev.b !== __b) set_attribute_value(__prev._d, "aria-expanded", __prev.b = __b);
+	var __c = ["cog", { selected: __prev._a.settingsOpen.value }];
+	if (__prev.c !== __c) set_class_value(__prev._d, __prev.c = __c);
+}
+function Rail_render(__anchor, __block) {
+	const store = with_scope(__block, () => StoreContext.get());
+	var aside = root$5();
+	var node = hydrating ? hydrate_first_child() : aside.firstChild;
+	var ifs = if_static(node, if_1$4, 0, {
+		a: store,
+		b: __block
+	});
+	var div_2 = hydrating ? hydrate_next_sibling() : node;
+	var button_3 = hydrating ? hydrate_first_child() : div_2.firstChild;
+	button_3.__click = () => with_scope(__block, () => store.toggleSettings());
+	render$10(render_1$4, {
+		a: UNINITIALIZED,
+		b: void 0,
+		c: UNINITIALIZED,
+		_a: store,
+		_b: __block,
+		_c: ifs,
+		_d: button_3
+	});
+	append(__anchor, aside);
+}
+Rail[RENDER_ENTRY] = Rail_render;
+function Rail() {
+	return tsrx_element(Rail_render);
+}
+delegate(["click"]);
+//#endregion
+//#region src/FontPicker.tsrx
+var root_1$4 = template_el("button", null, " ");
+function render$5(__prev) {
+	var __a = { selected: selector_match(__prev._a, __prev._b) };
+	if (__prev.a !== __a) set_class_value(__prev._c, __prev.a = __a);
+}
+var root_2$3 = template_el("small", null, [" ", [
+	"a",
+	null,
+	"Look again"
+]]);
 function render_1$3(__prev) {
+	var __a = `${__prev._a.value.length} fonts. `;
+	if (__prev.a !== __a) set_text(__prev._b, __prev.a = __a);
+}
+var root_3$1 = template_el("small", null, "These are the fonts this page can name without asking. To pick from everything installed, open it over http://localhost - chrome will not remember the permission for a file:// page.");
+function consequent$3(__anchor, { a: installed, b: __block, c: store }) {
+	var small = root_2$3();
+	var expression_1 = hydrating ? hydrate_first_child(true) : small.firstChild;
+	var a = hydrating ? hydrate_next_sibling() : expression_1.nextSibling;
+	a.__click = () => with_scope(__block, () => store.loadFonts(true));
+	render$10(render_1$3, {
+		a: " ",
+		_a: installed,
+		_b: expression_1
+	});
+	append(__anchor, small);
+}
+function alternate$1(__anchor, { a: installed, b: __block, c: store }) {
+	append(__anchor, root_3$1());
+}
+function if_1$3({ a: installed, b: __block, c: store }) {
+	if (installed.value.length > 0) return consequent$3;
+	else return alternate$1;
+}
+var root_4$1 = template_el("li", null, [[
+	"button",
+	null,
+	" "
+]]);
+function render_2$3(__prev) {
+	var __a = { selected: selector_match(__prev._a, __prev._b) };
+	if (__prev.a !== __a) set_class_value(__prev._c, __prev.a = __a);
+	var __b = { fontFamily: with_scope(__prev._d, () => cssFontFamily(get(__prev._e))) };
+	if (__prev.b !== __b) {
+		set_style(__prev._c, __b, __prev.b);
+		__prev.b = __b;
+	}
+}
+var root$4 = template(`<section class=fonts><h2>Font</h2><div class=choices></div><input placeholder="Find a font"><ul><li><button>Default</button></li></ul><label>Size<input type=range min=10 max=32 step=0.5><span></span></label><label>Weight<input type=range min=100 max=900 step=100><span> `);
+function render_3$1(__prev) {
+	var __pickedSize_value = __prev._a.value;
+	var __a = __prev._b.fontPicker.value.q;
+	if (__prev.a !== __a) set_value(__prev._c, __prev.a = __a);
+	var __b = if_1$3({
+		a: __prev._d,
+		b: __prev._e,
+		c: __prev._b
+	});
+	if (__prev.b !== __b) if_update(__prev._f, __prev.b = __b);
+	var __c = { selected: !__prev._g.value };
+	if (__prev.c !== __c) set_class_value(__prev._h, __prev.c = __c);
+	var __d = __pickedSize_value;
+	if (__prev.d !== __d) set_value(__prev._i, __prev.d = __d);
+	var __e = `${__pickedSize_value}pt`;
+	if (__prev.e !== __e) {
+		set_text_content(__prev._j, __e, __prev.e);
+		__prev.e = __e;
+	}
+	var __f = __prev._k.value;
+	if (__prev.f !== __f) set_value(__prev._l, __prev.f = __f);
+}
+function FontPicker_render(__anchor, __block) {
+	const store = with_scope(__block, () => StoreContext.get());
+	const picked = track(() => fontSettings[store.fontPicker.value.target], __block, "gwewn3");
+	const pickedFont = track(() => store.settings.value[picked.value.family], __block, "1vs2amn");
+	const pickedSize = track(() => store.settings.value[picked.value.size] || 18, __block, "8n6i1g");
+	const pickedWeight = track(() => store.settings.value[picked.value.weight] || 400, __block, "1ilpj0w");
+	const installed = track(() => store.settings.value.fonts ?? [], __block, "17hwozf");
+	const families = track(() => {
+		let q = with_scope(__block, () => store.fontPicker.value.q.trim().toLowerCase());
+		return with_scope(__block, () => (installed.value.length > 0 ? installed.value : readingFonts).filter((family) => with_scope(__block, () => family.toLowerCase().includes(q))));
+	}, __block, "18uy3lo");
+	const slid = (event) => Number(event.currentTarget.value);
+	var section = root$4();
+	var h2 = hydrating ? hydrate_first_child() : section.firstChild;
+	var div = hydrating ? hydrate_next_sibling() : h2.nextSibling;
+	{
+		const selector$3 = selector(() => store.fontPicker.value.target);
+		for_block(div, () => targets, (__anchor, { target, label, title }) => {
+			var button = root_1$4();
+			button.__click = () => with_scope(__block, () => store.setFontTarget(target));
+			set_property_value(button, "title", title);
+			expression(hydrating ? hydrate_first_child() : button.firstChild, () => label);
+			item({
+				a: UNINITIALIZED,
+				_a: selector$3,
+				_b: target,
+				_c: button
+			});
+			append(__anchor, button);
+		}, 4, void 0, render$5);
+	}
+	var input = hydrating ? hydrate_next_sibling() : div.nextSibling;
+	input.__input = (event) => with_scope(__block, () => store.setFontQuery(event.currentTarget.value));
+	var node = hydrating ? hydrate_next_sibling() : input.nextSibling;
+	var ifs = if_static(node, if_1$3, 0, {
+		a: installed,
+		b: __block,
+		c: store
+	});
+	var ul = hydrating ? hydrate_next_sibling() : node;
+	{
+		var li = hydrating ? hydrate_first_child() : ul.firstChild;
+		var button_1 = hydrating ? hydrate_first_child() : li.firstChild;
+		button_1.__click = () => with_scope(__block, () => store.chooseFont(""));
+		var node_1 = hydrating ? hydrate_next_sibling() : append_into(ul);
+		const selector_1 = selector(() => pickedFont.value);
+		for_block_keyed(node_1, () => families.value, (__anchor, pattern, index, key) => {
+			var li_1 = root_4$1();
+			var button_2 = hydrating ? hydrate_first_child() : li_1.firstChild;
+			button_2.__click = () => with_scope(__block, () => store.chooseFont(get(pattern)));
+			expression(hydrating ? hydrate_first_child() : button_2.firstChild, () => get(pattern));
+			item({
+				a: UNINITIALIZED,
+				b: void 0,
+				_a: selector_1,
+				_b: key,
+				_c: button_2,
+				_d: __block,
+				_e: pattern
+			});
+			append(__anchor, li_1);
+		}, 0, void 0, void 0, void 0, render_2$3);
+	}
+	var label_1 = hydrating ? hydrate_next_sibling() : ul.nextSibling;
+	var text = hydrating ? hydrate_first_child() : label_1.firstChild;
+	var input_1 = hydrating ? hydrate_next_sibling() : text.nextSibling;
+	input_1.__input = (event) => with_scope(__block, () => store.applySettings({ [picked.value.size]: slid(event) }));
+	input_1.__change = (event) => with_scope(__block, () => store.saveSettings({ [picked.value.size]: slid(event) }));
+	var span = hydrating ? hydrate_next_sibling() : input_1.nextSibling;
+	var label_2 = hydrating ? hydrate_next_sibling() : label_1.nextSibling;
+	var text_1 = hydrating ? hydrate_first_child() : label_2.firstChild;
+	var input_2 = hydrating ? hydrate_next_sibling() : text_1.nextSibling;
+	input_2.__input = (event) => with_scope(__block, () => store.applySettings({ [picked.value.weight]: slid(event) }));
+	input_2.__change = (event) => with_scope(__block, () => store.saveSettings({ [picked.value.weight]: slid(event) }));
+	var span_1 = hydrating ? hydrate_next_sibling() : input_2.nextSibling;
+	expression(hydrating ? hydrate_first_child() : span_1.firstChild, () => pickedWeight.value);
+	render$10(render_3$1, {
+		a: void 0,
+		b: UNINITIALIZED,
+		c: UNINITIALIZED,
+		d: void 0,
+		e: "",
+		f: void 0,
+		_a: pickedSize,
+		_b: store,
+		_c: input,
+		_d: installed,
+		_e: __block,
+		_f: ifs,
+		_g: pickedFont,
+		_h: button_1,
+		_i: input_1,
+		_j: span,
+		_k: pickedWeight,
+		_l: input_2
+	});
+	append(__anchor, section);
+}
+FontPicker[RENDER_ENTRY] = FontPicker_render;
+var targets = [{
+	target: "reading",
+	label: "Reading",
+	title: "The font the paragraphs are set in"
+}, {
+	target: "ui",
+	label: "Interface",
+	title: "The font everything else is set in"
+}];
+function FontPicker() {
+	return tsrx_element(FontPicker_render);
+}
+delegate([
+	"click",
+	"input",
+	"change"
+]);
+//#endregion
+//#region src/Settings.tsrx
+var root_1$3 = template_el("button");
+function render$4(__prev) {
 	var __a = [__prev._a, {
 		"checked:light": selector_match(__prev._b, __prev._a),
 		"checked:dark": selector_match(__prev._c, __prev._a)
 	}];
 	if (__prev.a !== __a) set_class_value(__prev._d, __prev.a = __a);
 }
-var root_3$2 = template_el("button", null, " ");
-function render_2$3(__prev) {
-	var __a = [
-		"size",
-		__prev._a,
-		{ selected: selector_match(__prev._b, __prev._a) }
-	];
+var root_2$2 = template_el("button", null, " ");
+function render_1$2(__prev) {
+	var __a = { selected: selector_match(__prev._a, __prev._b) };
 	if (__prev.a !== __a) set_class_value(__prev._c, __prev.a = __a);
 }
-var root_4$2 = template_el("div", null, [
-	["button", [
-		"title",
-		"Refresh book",
-		"class",
-		"refresh"
-	]],
-	["button", [
-		"title",
-		"Toggle Zen Mode",
-		"class",
-		"zen"
-	]],
-	["button", [
-		"title",
-		"Edit names",
-		"class",
-		"names-editor"
-	]]
-]);
-function consequent_1$2(__anchor, { a: store, b: __block }) {
-	var div_4 = root_4$2();
-	var button_3 = hydrating ? hydrate_first_child() : div_4.firstChild;
-	button_3.__click = () => with_scope(__block, () => store.refreshBook());
-	var button_4 = hydrating ? hydrate_next_sibling() : button_3.nextSibling;
-	button_4.__click = () => with_scope(__block, () => store.saveSettings({ zen: !store.settings.value.zen }));
-	var button_5 = hydrating ? hydrate_next_sibling() : button_4.nextSibling;
-	button_5.__click = () => with_scope(__block, () => store.toggleNamesEditor(true));
-	append(__anchor, div_4);
-}
-function if_2$2({ a: store, b: __block }) {
-	if (store.chapter.value) return consequent_1$2;
-}
-var root$4 = template_el("aside", ["class", "settings"], [
-	["div", ["class", "colors"]],
-	["div", ["class", "paper-size"]],
-	[
-		"div",
-		null,
-		[["button", [
-			"title",
-			"Fonts and sizes",
-			"class",
-			"font"
-		]]]
-	]
-]);
-function render_3$2(__prev) {
-	var __a = if_1$4({
-		a: __prev._a,
-		b: __prev._b
-	});
-	if (__prev.a !== __a) if_update(__prev._c, __prev.a = __a);
-	var __b = if_2$2({
-		a: __prev._a,
-		b: __prev._b
-	});
-	if (__prev.b !== __b) if_update(__prev._d, __prev.b = __b);
+var root$3 = template(`<dialog id=settings aria-label=Settings><section><h2>Theme<small class=for-light>for light mode</small><small class=for-dark>for dark mode</small></h2><div class=colors></div></section><section><h2>Page width</h2><div class=choices>`);
+function render_2$2(__prev) {
+	__prev._a.open = __prev._b.settingsOpen.value;
 }
 function Settings_render(__anchor, __block) {
 	const store = with_scope(__block, () => StoreContext.get());
-	var aside = root$4();
-	var node = hydrating ? hydrate_first_child() : aside.firstChild;
-	var ifs = if_static(node, if_1$4, 0, {
-		a: store,
-		b: __block
-	});
-	var div_1 = hydrating ? hydrate_next_sibling() : node;
+	var dialog = root$3();
+	var section = hydrating ? hydrate_first_child() : dialog.firstChild;
+	var h2 = hydrating ? hydrate_first_child() : section.firstChild;
+	var div = hydrating ? hydrate_next_sibling() : h2.nextSibling;
 	{
-		const selector$3 = selector(() => store.settings.value["color:light"]);
+		const selector$2 = selector(() => store.settings.value["color:light"]);
 		const selector_1 = selector(() => store.settings.value["color:dark"]);
-		for_block(div_1, () => colors, (__anchor, color) => {
-			var button = root_2$3();
+		for_block(div, () => colors, (__anchor, color) => {
+			var button = root_1$3();
 			button.__click = () => with_scope(__block, () => store.chooseColor(color));
 			button.setAttribute("title", `Theme: ${color}`);
 			item({
 				a: UNINITIALIZED,
 				_a: color,
-				_b: selector$3,
+				_b: selector$2,
 				_c: selector_1,
 				_d: button
 			});
 			append(__anchor, button);
-		}, 4, void 0, render_1$3);
+		}, 4, void 0, render$4);
 	}
-	var div_2 = hydrating ? hydrate_next_sibling() : div_1.nextSibling;
+	var section_1 = hydrating ? hydrate_next_sibling() : section.nextSibling;
+	var h2_1 = hydrating ? hydrate_first_child() : section_1.firstChild;
+	var div_1 = hydrating ? hydrate_next_sibling() : h2_1.nextSibling;
 	{
-		const selector_2 = selector(() => store.settings.value.paperSize);
-		for_block(div_2, () => paperSizes, (__anchor, size) => {
-			var button_1 = root_3$2();
+		const selector_2 = selector(() => store.settings.value.paperSize ?? "sm");
+		for_block(div_1, () => paperSizes, (__anchor, { size, label, title }) => {
+			var button_1 = root_2$2();
 			button_1.__click = () => with_scope(__block, () => store.saveSettings({ paperSize: size }));
-			button_1.setAttribute("title", `Page size: ${size}`);
-			expression(hydrating ? hydrate_first_child() : button_1.firstChild, () => size);
+			set_property_value(button_1, "title", title);
+			expression(hydrating ? hydrate_first_child() : button_1.firstChild, () => label);
 			item({
 				a: UNINITIALIZED,
-				_a: size,
-				_b: selector_2,
+				_a: selector_2,
+				_b: size,
 				_c: button_1
 			});
 			append(__anchor, button_1);
-		}, 4, void 0, render_2$3);
+		}, 4, void 0, render_1$2);
 	}
-	var div_3 = hydrating ? hydrate_next_sibling() : div_2.nextSibling;
-	var button_2 = hydrating ? hydrate_first_child() : div_3.firstChild;
-	button_2.__click = () => with_scope(__block, () => store.toggleFontPicker(true));
-	render$9(render_3$2, {
-		a: UNINITIALIZED,
-		b: UNINITIALIZED,
-		_a: store,
-		_b: __block,
-		_c: ifs,
-		_d: if_static(hydrating ? hydrate_next_sibling() : append_into(aside, true), if_2$2, 0, {
-			a: store,
-			b: __block
-		})
+	render_component(FontPicker, hydrating ? hydrate_next_sibling() : append_into(dialog), {});
+	render$10(render_2$2, {
+		_a: dialog,
+		_b: store
 	});
-	append(__anchor, aside);
+	append(__anchor, dialog);
 }
 Settings[RENDER_ENTRY] = Settings_render;
 var colors = [
@@ -11220,10 +11397,26 @@ var colors = [
 	"gruvbox"
 ];
 var paperSizes = [
-	"sm",
-	"md",
-	"lg",
-	"xl"
+	{
+		size: "sm",
+		label: "S",
+		title: "Narrow"
+	},
+	{
+		size: "md",
+		label: "M",
+		title: "Medium"
+	},
+	{
+		size: "lg",
+		label: "L",
+		title: "Wide"
+	},
+	{
+		size: "xl",
+		label: "XL",
+		title: "As wide as the window"
+	}
 ];
 function Settings() {
 	return tsrx_element(Settings_render);
@@ -11231,27 +11424,27 @@ function Settings() {
 delegate(["click"]);
 //#endregion
 //#region src/CommandPalette.tsrx
-var root_1$3 = template_el("small", ["class", "mentions"]);
-function render$4(__prev) {
+var root_1$2 = template_el("small", ["class", "mentions"]);
+function render$3(__prev) {
 	var __a = `${__prev._a.mentions.value.total} ${__prev._a.mentions.value.total === 1 ? "place says" : "places say"} it` + ((__prev._a.mentions.value.total > __prev._a.mentions.value.found.length ? `, the first ${__prev._a.mentions.value.found.length} below` : "") + (__prev._a.mentions.value.indexed ? "" : " (the book is being indexed: ask again in a moment for all of them)"));
 	if (__prev.a !== __a) {
 		set_text_content(__prev._b, __a, __prev.a);
 		__prev.a = __a;
 	}
 }
-function consequent$3(__anchor, store) {
-	var small = root_1$3();
-	render$9(render$4, {
+function consequent$2(__anchor, store) {
+	var small = root_1$2();
+	render$10(render$3, {
 		a: "",
 		_a: store,
 		_b: small
 	});
 	append(__anchor, small);
 }
-function if_1$3(store) {
-	if (store.book.value && store.searching.value && store.mentions.value.q === store.palette.value.q && store.palette.value.q.length >= 2) return consequent$3;
+function if_1$2(store) {
+	if (store.book.value && store.searching.value && store.mentions.value.q === store.palette.value.q && store.palette.value.q.length >= 2) return consequent$2;
 }
-var root_3$1 = template_el("li", null, [[
+var root_3 = template_el("li", null, [[
 	"a",
 	null,
 	[
@@ -11269,7 +11462,7 @@ var root_3$1 = template_el("li", null, [[
 		null
 	]
 ]]);
-function render_1$2(__prev) {
+function render_1$1(__prev) {
 	var __pattern = get(__prev._a);
 	var __a = with_scope(__prev._b, () => __prev._c.router.route(bookRoute(get(__prev._a).open)));
 	if (__prev.a !== __a) set_attribute(__prev._d, "href", __prev.a = __a);
@@ -11281,12 +11474,12 @@ function render_1$2(__prev) {
 	};
 	if (__prev.c !== __c) set_class_value(__prev._f, __prev.c = __c);
 }
-var root_4$1 = template_el("li", null, [[
+var root_4 = template_el("li", null, [[
 	"a",
 	null,
 	" "
 ]]);
-function render_2$2(__prev) {
+function render_2$1(__prev) {
 	var __pattern_1 = get(__prev._a);
 	var __a = with_scope(__prev._b, () => __prev._c.router.route(bookRoute(get(__prev._a).open)));
 	if (__prev.a !== __a) set_attribute(__prev._d, "href", __prev.a = __a);
@@ -11298,7 +11491,7 @@ function render_2$2(__prev) {
 	if (__prev.d !== __d) set_class_value(__prev._e, __prev.d = __d);
 }
 function consequent_1$1(__anchor, { a: pattern, b: choose, c: __block, d: store, e: selector }) {
-	var li = root_3$1();
+	var li = root_3();
 	var a = hydrating ? hydrate_first_child() : li.firstChild;
 	a.__click = (event) => choose(event, get(pattern));
 	var small_1 = hydrating ? hydrate_first_child() : a.firstChild;
@@ -11308,7 +11501,7 @@ function consequent_1$1(__anchor, { a: pattern, b: choose, c: __block, d: store,
 	var mark = hydrating ? hydrate_next_sibling() : expression_2.nextSibling;
 	expression(hydrating ? hydrate_first_child() : mark.firstChild, () => get(pattern).mention.match);
 	expression(hydrating ? hydrate_next_sibling() : mark.nextSibling, () => get(pattern).mention.after);
-	render$9(render_1$2, {
+	render$10(render_1$1, {
 		a: void 0,
 		b: void 0,
 		c: UNINITIALIZED,
@@ -11321,12 +11514,12 @@ function consequent_1$1(__anchor, { a: pattern, b: choose, c: __block, d: store,
 	});
 	append(__anchor, li);
 }
-function alternate$1(__anchor, { a: pattern, b: choose, c: __block, d: store, e: selector }) {
-	var li_1 = root_4$1();
+function alternate(__anchor, { a: pattern, b: choose, c: __block, d: store, e: selector }) {
+	var li_1 = root_4();
 	var a_1 = hydrating ? hydrate_first_child() : li_1.firstChild;
 	a_1.__click = (event) => choose(event, get(pattern));
 	expression(hydrating ? hydrate_first_child() : a_1.firstChild, () => get(pattern).label);
-	render$9(render_2$2, {
+	render$10(render_2$1, {
 		a: void 0,
 		b: void 0,
 		c: void 0,
@@ -11342,9 +11535,9 @@ function alternate$1(__anchor, { a: pattern, b: choose, c: __block, d: store, e:
 }
 function if_2$1({ a: pattern, b: choose, c: __block, d: store, e: selector }) {
 	if (get(pattern).mention) return consequent_1$1;
-	else return alternate$1;
+	else return alternate;
 }
-function render_3$1(__prev) {
+function render_3(__prev) {
 	var __a = if_2$1({
 		a: __prev._a,
 		b: __prev._b,
@@ -11354,18 +11547,18 @@ function render_3$1(__prev) {
 	});
 	if (__prev.a !== __a) if_update(__prev._f, __prev.a = __a);
 }
-var root_2$2 = template_el("ul");
+var root_2$1 = template_el("ul");
 function consequent_2(__anchor, { a: store, b: choose, c: __block }) {
-	var ul = root_2$2();
+	var ul = root_2$1();
 	{
-		const selector$2 = selector(() => store.selectedCommand.value);
+		const selector$1 = selector(() => store.selectedCommand.value);
 		for_block_keyed(ul, () => store.commands.value, (__anchor, pattern) => {
 			var ifs_1 = if_static(__anchor, if_2$1, 3, {
 				a: pattern,
 				b: choose,
 				c: __block,
 				d: store,
-				e: selector$2
+				e: selector$1
 			});
 			item({
 				a: UNINITIALIZED,
@@ -11373,17 +11566,17 @@ function consequent_2(__anchor, { a: store, b: choose, c: __block }) {
 				_b: choose,
 				_c: __block,
 				_d: store,
-				_e: selector$2,
+				_e: selector$1,
 				_f: ifs_1
 			});
-		}, 4, (pattern) => pattern.key, void 0, void 0, render_3$1);
+		}, 4, (pattern) => pattern.key, void 0, void 0, render_3);
 	}
 	append(__anchor, ul);
 }
 function if_3({ a: store, b: choose, c: __block }) {
 	if (store.commands.value.length > 0) return consequent_2;
 }
-var root$3 = template_el("dialog", ["id", "command-palette"], [[
+var root$2 = template_el("dialog", ["id", "command-palette"], [[
 	"form",
 	null,
 	[["input"], ["input", [
@@ -11396,7 +11589,7 @@ var root$3 = template_el("dialog", ["id", "command-palette"], [[
 function render_4(__prev) {
 	var __a = __prev._a.palette.value.text;
 	if (__prev.a !== __a) set_value(__prev._b, __prev.a = __a);
-	var __b = if_1$3(__prev._a);
+	var __b = if_1$2(__prev._a);
 	if (__prev.b !== __b) if_update(__prev._c, __prev.b = __b);
 	var __c = if_3({
 		a: __prev._a,
@@ -11413,7 +11606,7 @@ function CommandPalette_render(__anchor, __block) {
 		with_scope(__block, () => store.selectCommand(store.commands.value.indexOf(command)));
 		with_scope(__block, () => store.runCommand(command));
 	};
-	var dialog = root$3();
+	var dialog = root$2();
 	var form = hydrating ? hydrate_first_child() : dialog.firstChild;
 	form.__submit = (event) => {
 		with_scope(__block, () => event.preventDefault());
@@ -11421,13 +11614,13 @@ function CommandPalette_render(__anchor, __block) {
 	};
 	var input = hydrating ? hydrate_first_child() : form.firstChild;
 	input.__input = (event) => with_scope(__block, () => store.searchCommands(event.currentTarget.value));
-	render$9(render_4, {
+	render$10(render_4, {
 		a: void 0,
 		b: UNINITIALIZED,
 		c: UNINITIALIZED,
 		_a: store,
 		_b: input,
-		_c: if_static(hydrating ? hydrate_next_sibling() : append_into(dialog), if_1$3, 0, store),
+		_c: if_static(hydrating ? hydrate_next_sibling() : append_into(dialog), if_1$2, 0, store),
 		_d: choose,
 		_e: __block,
 		_f: if_static(hydrating ? hydrate_next_sibling() : append_into(dialog, true), if_3, 0, {
@@ -11447,196 +11640,6 @@ delegate([
 	"submit",
 	"input",
 	"click"
-]);
-//#endregion
-//#region src/FontPicker.tsrx
-var root_1$2 = template_el("button", null, " ");
-function render$3(__prev) {
-	var __a = { selected: selector_match(__prev._a, __prev._b) };
-	if (__prev.a !== __a) set_class_value(__prev._c, __prev.a = __a);
-}
-var root_2$1 = template_el("small", null, [" ", [
-	"a",
-	null,
-	"Look again"
-]]);
-function render_1$1(__prev) {
-	var __a = `${__prev._a.value.length} fonts. `;
-	if (__prev.a !== __a) set_text(__prev._b, __prev.a = __a);
-}
-var root_3 = template_el("small", null, "These are the fonts this page can name without asking. To pick from everything installed, open it over http://localhost - chrome will not remember the permission for a file:// page.");
-function consequent$2(__anchor, { a: installed, b: __block, c: store }) {
-	var small = root_2$1();
-	var expression_1 = hydrating ? hydrate_first_child(true) : small.firstChild;
-	var a = hydrating ? hydrate_next_sibling() : expression_1.nextSibling;
-	a.__click = () => with_scope(__block, () => store.loadFonts(true));
-	render$9(render_1$1, {
-		a: " ",
-		_a: installed,
-		_b: expression_1
-	});
-	append(__anchor, small);
-}
-function alternate(__anchor, { a: installed, b: __block, c: store }) {
-	append(__anchor, root_3());
-}
-function if_1$2({ a: installed, b: __block, c: store }) {
-	if (installed.value.length > 0) return consequent$2;
-	else return alternate;
-}
-var root_4 = template_el("li", null, [[
-	"button",
-	null,
-	" "
-]]);
-function render_2$1(__prev) {
-	var __a = { selected: selector_match(__prev._a, __prev._b) };
-	if (__prev.a !== __a) set_class_value(__prev._c, __prev.a = __a);
-	var __b = { fontFamily: with_scope(__prev._d, () => cssFontFamily(get(__prev._e))) };
-	if (__prev.b !== __b) {
-		set_style(__prev._c, __b, __prev.b);
-		__prev.b = __b;
-	}
-}
-var root$2 = template(`<dialog id=font-picker><div class=target></div><input placeholder=Font><ul><li><button>Default</button></li></ul><label>Size<input type=range min=10 max=32 step=0.5><span></span></label><label>Weight<input type=range min=100 max=900 step=100><span> `);
-function render_3(__prev) {
-	var __pickedSize_value = __prev._a.value;
-	var __a = __prev._b.fontPicker.value.q;
-	if (__prev.a !== __a) set_value(__prev._c, __prev.a = __a);
-	var __b = if_1$2({
-		a: __prev._d,
-		b: __prev._e,
-		c: __prev._b
-	});
-	if (__prev.b !== __b) if_update(__prev._f, __prev.b = __b);
-	var __c = { selected: !__prev._g.value };
-	if (__prev.c !== __c) set_class_value(__prev._h, __prev.c = __c);
-	var __d = __pickedSize_value;
-	if (__prev.d !== __d) set_value(__prev._i, __prev.d = __d);
-	var __e = `${__pickedSize_value}pt`;
-	if (__prev.e !== __e) {
-		set_text_content(__prev._j, __e, __prev.e);
-		__prev.e = __e;
-	}
-	var __f = __prev._k.value;
-	if (__prev.f !== __f) set_value(__prev._l, __prev.f = __f);
-	__prev._m.open = __prev._b.fontPicker.value.open;
-}
-function FontPicker_render(__anchor, __block) {
-	const store = with_scope(__block, () => StoreContext.get());
-	const picked = track(() => fontSettings[store.fontPicker.value.target], __block, "gwewn3");
-	const pickedFont = track(() => store.settings.value[picked.value.family], __block, "1vs2amn");
-	const pickedSize = track(() => store.settings.value[picked.value.size] || 18, __block, "8n6i1g");
-	const pickedWeight = track(() => store.settings.value[picked.value.weight] || 400, __block, "1ilpj0w");
-	const installed = track(() => store.settings.value.fonts ?? [], __block, "17hwozf");
-	const families = track(() => {
-		let q = with_scope(__block, () => store.fontPicker.value.q.trim().toLowerCase());
-		return with_scope(__block, () => (installed.value.length > 0 ? installed.value : readingFonts).filter((family) => with_scope(__block, () => family.toLowerCase().includes(q))));
-	}, __block, "18uy3lo");
-	const slid = (event) => Number(event.currentTarget.value);
-	var dialog = root$2();
-	var div = hydrating ? hydrate_first_child() : dialog.firstChild;
-	{
-		const selector$1 = selector(() => store.fontPicker.value.target);
-		for_block(div, () => targets, (__anchor, { target, label, title }) => {
-			var button = root_1$2();
-			button.__click = () => with_scope(__block, () => store.setFontTarget(target));
-			set_property_value(button, "title", title);
-			expression(hydrating ? hydrate_first_child() : button.firstChild, () => label);
-			item({
-				a: UNINITIALIZED,
-				_a: selector$1,
-				_b: target,
-				_c: button
-			});
-			append(__anchor, button);
-		}, 4, void 0, render$3);
-	}
-	var input = hydrating ? hydrate_next_sibling() : div.nextSibling;
-	input.__input = (event) => with_scope(__block, () => store.setFontQuery(event.currentTarget.value));
-	var node = hydrating ? hydrate_next_sibling() : input.nextSibling;
-	var ifs = if_static(node, if_1$2, 0, {
-		a: installed,
-		b: __block,
-		c: store
-	});
-	var ul = hydrating ? hydrate_next_sibling() : node;
-	{
-		var li = hydrating ? hydrate_first_child() : ul.firstChild;
-		var button_1 = hydrating ? hydrate_first_child() : li.firstChild;
-		button_1.__click = () => with_scope(__block, () => store.chooseFont(""));
-		var node_1 = hydrating ? hydrate_next_sibling() : append_into(ul);
-		const selector_1 = selector(() => pickedFont.value);
-		for_block_keyed(node_1, () => families.value, (__anchor, pattern, index, key) => {
-			var li_1 = root_4();
-			var button_2 = hydrating ? hydrate_first_child() : li_1.firstChild;
-			button_2.__click = () => with_scope(__block, () => store.chooseFont(get(pattern)));
-			expression(hydrating ? hydrate_first_child() : button_2.firstChild, () => get(pattern));
-			item({
-				a: UNINITIALIZED,
-				b: void 0,
-				_a: selector_1,
-				_b: key,
-				_c: button_2,
-				_d: __block,
-				_e: pattern
-			});
-			append(__anchor, li_1);
-		}, 0, void 0, void 0, void 0, render_2$1);
-	}
-	var label_1 = hydrating ? hydrate_next_sibling() : ul.nextSibling;
-	var text = hydrating ? hydrate_first_child() : label_1.firstChild;
-	var input_1 = hydrating ? hydrate_next_sibling() : text.nextSibling;
-	input_1.__input = (event) => with_scope(__block, () => store.applySettings({ [picked.value.size]: slid(event) }));
-	input_1.__change = (event) => with_scope(__block, () => store.saveSettings({ [picked.value.size]: slid(event) }));
-	var span = hydrating ? hydrate_next_sibling() : input_1.nextSibling;
-	var label_2 = hydrating ? hydrate_next_sibling() : label_1.nextSibling;
-	var text_1 = hydrating ? hydrate_first_child() : label_2.firstChild;
-	var input_2 = hydrating ? hydrate_next_sibling() : text_1.nextSibling;
-	input_2.__input = (event) => with_scope(__block, () => store.applySettings({ [picked.value.weight]: slid(event) }));
-	input_2.__change = (event) => with_scope(__block, () => store.saveSettings({ [picked.value.weight]: slid(event) }));
-	var span_1 = hydrating ? hydrate_next_sibling() : input_2.nextSibling;
-	expression(hydrating ? hydrate_first_child() : span_1.firstChild, () => pickedWeight.value);
-	render$9(render_3, {
-		a: void 0,
-		b: UNINITIALIZED,
-		c: UNINITIALIZED,
-		d: void 0,
-		e: "",
-		f: void 0,
-		_a: pickedSize,
-		_b: store,
-		_c: input,
-		_d: installed,
-		_e: __block,
-		_f: ifs,
-		_g: pickedFont,
-		_h: button_1,
-		_i: input_1,
-		_j: span,
-		_k: pickedWeight,
-		_l: input_2,
-		_m: dialog
-	});
-	append(__anchor, dialog);
-}
-FontPicker[RENDER_ENTRY] = FontPicker_render;
-var targets = [{
-	target: "reading",
-	label: "Reading",
-	title: "The font the paragraphs are set in"
-}, {
-	target: "ui",
-	label: "Interface",
-	title: "The font everything else is set in"
-}];
-function FontPicker() {
-	return tsrx_element(FontPicker_render);
-}
-delegate([
-	"click",
-	"input",
-	"change"
 ]);
 //#endregion
 //#region src/NamesEditor.tsrx
@@ -11661,7 +11664,7 @@ function NamesEditor_render(__anchor, __block) {
 	var textarea = hydrating ? hydrate_first_child() : form.firstChild;
 	textarea.__input = (event) => with_scope(__block, () => store.setNames(event.currentTarget.value));
 	textarea.__keydown = keys;
-	render$9(render$2, {
+	render$10(render$2, {
 		a: void 0,
 		_a: store,
 		_b: textarea,
@@ -11718,7 +11721,7 @@ function consequent$1(__anchor, { a: offer, b: __block, c: add, d: place }) {
 	}, 0, void 0, render$1);
 	var button_1 = hydrating ? hydrate_next_sibling() : node;
 	button_1.__click = () => add();
-	render$9(render_1, {
+	render$10(render_1, {
 		a: "",
 		b: void 0,
 		_a: offer,
@@ -11759,7 +11762,7 @@ function AddName_render(__anchor, __block) {
 			relationship: at.relationship
 		}));
 	};
-	render$9(render_2, {
+	render$10(render_2, {
 		a: UNINITIALIZED,
 		_a: offer,
 		_b: __block,
@@ -11828,15 +11831,15 @@ function App_render(__anchor, __block, page) {
 		var node_2 = hydrating ? hydrate_next_sibling() : node_1.nextSibling;
 		var ifs_1 = if_static(node_2, if_2, 0, store);
 		var node_3 = hydrating ? hydrate_next_sibling() : node_2.nextSibling;
-		render_component(Settings, node_3, {});
+		render_component(Rail, node_3, {});
 		var node_4 = hydrating ? hydrate_next_sibling() : node_3.nextSibling;
-		render_component(CommandPalette, node_4, {});
+		render_component(Settings, node_4, {});
 		var node_5 = hydrating ? hydrate_next_sibling() : node_4.nextSibling;
-		render_component(FontPicker, node_5, {});
+		render_component(CommandPalette, node_5, {});
 		var node_6 = hydrating ? hydrate_next_sibling() : node_5.nextSibling;
 		render_component(NamesEditor, node_6, {});
 		render_component(AddName, hydrating ? hydrate_next_sibling() : node_6.nextSibling, {});
-		render$9(render, {
+		render$10(render, {
 			a: UNINITIALIZED,
 			b: UNINITIALIZED,
 			_a: store,
@@ -11972,7 +11975,7 @@ small {
   --paper-padding: calc(var(--reading-font-size, 18pt) * 3);
   cursor: default;
 }
-.settings .colors button.white {
+#settings .colors button.white {
   --body-font-color: rgb(27, 27, 27);
   --body-background-color: rgb(230, 230, 230);
   --paper-background-color: rgb(255, 255, 255);
@@ -11997,7 +12000,7 @@ small {
     --horizontal-line-color: rgb(220, 220, 220);
   }
 }
-.settings .colors button.sepia {
+#settings .colors button.sepia {
   --body-font-color: rgb(79, 50, 28);
   --body-background-color: rgb(225, 216, 200);
   --paper-background-color: rgb(248, 241, 227);
@@ -12022,7 +12025,7 @@ small {
     --horizontal-line-color: rgb(230, 218, 201);
   }
 }
-.settings .colors button.gray {
+#settings .colors button.gray {
   --body-font-color: rgba(255, 255, 255, 0.78);
   --body-background-color: rgb(50, 50, 51);
   --paper-background-color: rgb(74, 74, 77);
@@ -12050,7 +12053,7 @@ small {
     --body-font-smoothing: antialiased;
   }
 }
-.settings .colors button.night {
+#settings .colors button.night {
   --body-font-color: rgb(176, 176, 176);
   --body-background-color: rgb(0, 0, 0);
   --paper-background-color: rgb(18, 18, 18);
@@ -12081,7 +12084,7 @@ small {
     --body-font-smoothing: antialiased;
   }
 }
-.settings .colors button.rose-pine {
+#settings .colors button.rose-pine {
   --body-font-color: var(--rp-main-subtle);
   --body-background-color: var(--rp-main-surface);
   --paper-background-color: var(--rp-main-base);
@@ -12115,7 +12118,7 @@ small {
     --body-font-smoothing: antialiased;
   }
 }
-.settings .colors button.rose-pine-moon {
+#settings .colors button.rose-pine-moon {
   --body-font-color: var(--rp-moon-subtle);
   --body-background-color: var(--rp-moon-surface);
   --paper-background-color: var(--rp-moon-base);
@@ -12149,7 +12152,7 @@ small {
     --body-font-smoothing: antialiased;
   }
 }
-.settings .colors button.rose-pine-dawn {
+#settings .colors button.rose-pine-dawn {
   --body-font-color: var(--rp-dawn-text);
   --body-background-color: var(--rp-dawn-base);
   --paper-background-color: var(--rp-dawn-overlay);
@@ -12180,7 +12183,7 @@ small {
     --selection-bg: var(--rp-dawn-highlight-med);
   }
 }
-.settings .colors button.solarized,
+#settings .colors button.solarized,
 :root[data-color\:light=solarized] {
   @media (prefers-color-scheme:light) {
     --body-font-color: #002a35;
@@ -12192,7 +12195,7 @@ small {
     --selection-bg: #cadcdf;
   }
 }
-.settings .colors button.solarized,
+#settings .colors button.solarized,
 :root[data-color\:dark=solarized] {
   @media (prefers-color-scheme:dark) {
     --body-font-color: #002a35;
@@ -12204,7 +12207,7 @@ small {
     --selection-bg: #cadcdf;
   }
 }
-.settings .colors button.kiselevka,
+#settings .colors button.kiselevka,
 :root[data-color\:light=kiselevka] {
   @media (prefers-color-scheme:light) {
     --body-font-color: #81a8bf;
@@ -12216,7 +12219,7 @@ small {
     --selection-bg: #153d4f;
   }
 }
-.settings .colors button.kiselevka,
+#settings .colors button.kiselevka,
 :root[data-color\:dark=kiselevka] {
   @media (prefers-color-scheme:dark) {
     --body-font-color: #81a8bf;
@@ -12228,7 +12231,7 @@ small {
     --selection-bg: #153d4f;
   }
 }
-.settings .colors button.gruvbox,
+#settings .colors button.gruvbox,
 :root[data-color\:light=gruvbox] {
   @media (prefers-color-scheme:light) {
     --body-font-color: #282828;
@@ -12240,7 +12243,7 @@ small {
     --selection-bg: #bac6ab;
   }
 }
-.settings .colors button.gruvbox,
+#settings .colors button.gruvbox,
 :root[data-color\:dark=gruvbox] {
   @media (prefers-color-scheme:dark) {
     --body-font-color: #fbf1c7;
@@ -12406,10 +12409,16 @@ nav {
 }
 
 /** aside **/
+/* the rail: the book's buttons from the top, the cog at the foot */
 aside {
   position: sticky;
   top: 0;
   height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+aside > .foot {
+  margin-top: auto;
 }
 aside a,
 aside button {
@@ -12455,23 +12464,6 @@ aside > div + div::before {
   background: var(--horizontal-line-color);
   opacity: 0.5;
 }
-aside .colors button {
-  border-radius: 2em;
-  &::before {
-    content: var(--checkmark);
-    font-size: .7em;
-  }
-  @media (prefers-color-scheme:light) {
-    &.checked\:light {
-      --checkmark: '✔';
-    }
-  }
-  @media (prefers-color-scheme:dark) {
-    &.checked\:dark {
-      --checkmark: '✔';
-    }
-  }
-}
 aside a.close {
   position: relative;
   box-shadow: 0 3px 6px rgba(0, 0, 0, .2);
@@ -12515,8 +12507,15 @@ aside button {
   &.names-editor::after {
     content: 'ℕ';
   }
-  &.font::after {
-    content: '𝔽';
+  /* (the text form of the cog, not the emoji) */
+  &.cog::after {
+    content: '\2699\FE0E';
+    font-size: 1.4em;
+    line-height: 1;
+  }
+  &.cog.selected {
+    font-weight: inherit;
+    color: var(--link-color);
   }
 }
 
@@ -12717,54 +12716,182 @@ main {
   }
 }
 
-/** font picker **/
-#font-picker[open] {
-  --width: min(46ch, calc(var(--paper-width) - 80px));
-  width: var(--width);
-  max-height: 80%;
+/** settings **/
+/* a panel over the cog at the foot of the rail, its corner by the cog's */
+#settings[open] {
+  width: min(40ch, calc(100vw - 2 * var(--gap)));
+  max-height: calc(100vh - var(--gap) * 5);
   position: fixed;
-  top: 10%;
-  left: calc((100% - var(--width)) / 2);
+  inset: auto calc(var(--gap) * .75) calc(var(--gap) * 3.5) auto;
+  margin: 0;
+  z-index: 10;
   border-radius: 1.5ex;
-  overflow: hidden;
+  /* in a window too short for it all, the panel scrolls: the list keeps a few fonts in sight */
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.7ex;
-  padding: 0.7ex;
+  gap: 1.6ex;
+  padding: 1.3ex;
 
-  /* the filter, which is the only input sitting directly in the dialog */
-  > input {
-    background: var(--paper-background-color);
-    font: inherit;
-    padding: 1ex 1.3ex;
-    border: 1px solid var(--paper-outline-color);
-    border-radius: 0.8ex;
-    color: var(--body-font-color);
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7ex;
+    flex: none;
+  }
+  h2 {
+    font-size: 0.6em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0 0.5ex;
+    opacity: 0.65;
+    small {
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+      margin-left: 0.5ex;
+    }
+  }
+  /* the scheme a theme is chosen for is the one the system is in */
+  .for-dark {
+    display: none;
+  }
+  @media (prefers-color-scheme:dark) {
+    .for-light {
+      display: none;
+    }
+    .for-dark {
+      display: inline;
+    }
   }
 
-  /* which of the two fonts the list is picking */
-  .target {
-    display: flex;
-    gap: 0.5ex;
+  button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--body-font-color);
+    font-size: inherit;
+    cursor: pointer;
+  }
+
+  /* each theme as its paper on its background, ticked where it is the one chosen */
+  .colors {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 0.8ex;
+    padding: 0 0.3ex;
 
     button {
-      flex: 1;
-      text-align: center;
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: radial-gradient(closest-side, var(--paper-background-color) 62%, var(--body-background-color) 64%);
       outline: 1px solid var(--horizontal-line-color);
-
-      &.selected {
-        font-weight: bold;
+      display: grid;
+      place-content: center;
+      font-size: 0.6em;
+      &::before {
+        content: var(--checkmark);
+      }
+      &:hover {
+        outline: 2px solid var(--link-color);
+      }
+      @media (prefers-color-scheme:light) {
+        &.checked\:light {
+          --checkmark: '✔';
+        }
+      }
+      @media (prefers-color-scheme:dark) {
+        &.checked\:dark {
+          --checkmark: '✔';
+        }
       }
     }
   }
 
+  /* one of a few, side by side: the page's width, which of the two fonts the list picks */
+  .choices {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 0.9ex;
+    outline: 1px solid var(--horizontal-line-color);
+
+    button {
+      flex: 1;
+      text-align: center;
+      padding: 0.25ex 1ex;
+      border-radius: 0.7ex;
+      font-size: 0.8em;
+      &:hover {
+        background: var(--selection-bg);
+      }
+      &.selected {
+        background: var(--paper-background-color);
+        color: var(--link-color);
+        font-weight: bold;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .15);
+      }
+    }
+  }
+
+  /* the fonts take what room is left, their list scrolling in it */
+  .fonts {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .fonts > input {
+    background: var(--paper-background-color);
+    font: inherit;
+    font-size: 0.8em;
+    padding: 0.8ex 1.2ex;
+    border: 1px solid var(--paper-outline-color, var(--horizontal-line-color));
+    border-radius: 0.8ex;
+    color: var(--body-font-color);
+  }
+  .fonts > small {
+    padding: 0 0.5ex;
+    font-size: 0.6em;
+    opacity: 0.7;
+    a {
+      color: var(--link-color);
+      cursor: pointer;
+    }
+  }
+  ul {
+    flex: 1 1 9em;
+    min-height: 3em;
+    overflow-y: auto;
+    list-style: none;
+
+    button {
+      width: 100%;
+      text-align: left;
+      font-size: 0.85em;
+      padding: 0.2ex 1.2ex;
+      border-radius: 0.8ex;
+      line-height: 1.7;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+
+      &:hover,
+      &:focus {
+        background: var(--selection-bg);
+      }
+      /* the font in use, so the list says where you already are */
+      &.selected {
+        color: var(--link-color);
+      }
+    }
+  }
   label {
     display: grid;
-    grid-template-columns: 7ch 1fr 8ch;
+    grid-template-columns: 7ch 1fr 6ch;
     align-items: center;
     gap: 1ex;
-    padding: 0 1.3ex;
-    font-size: 0.75em;
+    padding: 0 0.5ex;
+    font-size: 0.7em;
 
     input[type=range] {
       accent-color: var(--link-color);
@@ -12774,46 +12901,6 @@ main {
     span {
       text-align: right;
       opacity: 0.7;
-    }
-  }
-
-  ul {
-    flex: 1;
-    overflow-y: auto;
-    list-style: none;
-  }
-
-  small {
-    padding: 0 1.3ex;
-    opacity: 0.7;
-    a {
-      color: var(--link-color);
-      cursor: pointer;
-    }
-  }
-
-  button {
-    appearance: none;
-    background: transparent;
-    color: var(--body-font-color);
-    width: 100%;
-    text-align: left;
-    padding: 0.3ex 1.3ex;
-    border-radius: 0.8ex;
-    cursor: pointer;
-    font-size: inherit;
-    line-height: 1.7;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-
-    &:hover,
-    &:focus {
-      background: var(--selection-bg);
-    }
-    /* the font in use, so the list says where you already are */
-    &.selected {
-      color: var(--link-color);
     }
   }
 }

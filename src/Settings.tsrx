@@ -1,51 +1,49 @@
-// The settings down the other side: back to the library, the colours, the page's width, the
-// fonts, and for the book open, reading it again, zen, and its names.
+// The settings, in a panel over the cog at the foot of the rail: the colours, the page's width,
+// and the fonts. Put away with the cog, Escape, or a click anywhere else (see listening.ts).
 import { StoreContext } from './store.ts';
+import { FontPicker } from './FontPicker.tsrx';
 
 const colors = ['white', 'sepia', 'gray', 'night', 'rose-pine', 'rose-pine-moon', 'rose-pine-dawn', 'solarized', 'kiselevka', 'gruvbox'];
-const paperSizes = ['sm', 'md', 'lg', 'xl'];
+const paperSizes = [
+  { size: 'sm', label: 'S', title: 'Narrow' },
+  { size: 'md', label: 'M', title: 'Medium' },
+  { size: 'lg', label: 'L', title: 'Wide' },
+  { size: 'xl', label: 'XL', title: 'As wide as the window' },
+];
 
 export function Settings() @{
   const store = StoreContext.get();
 
-  <aside class="settings">
-    @if (store.chapter.value) {
-      <div>
-        <a
-          class="close"
-          href={store.router.route({})}
-          onClick={(event: MouseEvent) => { event.preventDefault(); store.showLibrary(); }}
-          title="Back to bookshelf"
-        />
+  <dialog id="settings" open={store.settingsOpen.value} aria-label="Settings">
+    <section>
+      // a colour is chosen for the light scheme or the dark one, whichever the system is in
+      <h2>
+        {'Theme'}
+        <small class="for-light">{'for light mode'}</small>
+        <small class="for-dark">{'for dark mode'}</small>
+      </h2>
+      <div class="colors">
+        @for (const color of colors) {
+          <button
+            class={[color, { 'checked:light': store.settings.value['color:light'] === color, 'checked:dark': store.settings.value['color:dark'] === color }]}
+            onClick={() => store.chooseColor(color)}
+            title={`Theme: ${color}`}
+          />
+        }
       </div>
-    }
-    <div class="colors">
-      @for (const color of colors) {
-        <button
-          class={[color, { 'checked:light': store.settings.value['color:light'] === color, 'checked:dark': store.settings.value['color:dark'] === color }]}
-          onClick={() => store.chooseColor(color)}
-          title={`Theme: ${color}`}
-        />
-      }
-    </div>
-    <div class="paper-size">
-      @for (const size of paperSizes) {
-        <button
-          class={['size', size, { selected: store.settings.value.paperSize === size }]}
-          onClick={() => store.saveSettings({ paperSize: size })}
-          title={`Page size: ${size}`}
-        >{size}</button>
-      }
-    </div>
-    <div>
-      <button class="font" onClick={() => store.toggleFontPicker(true)} title="Fonts and sizes" />
-    </div>
-    @if (store.chapter.value) {
-      <div>
-        <button class="refresh" onClick={() => store.refreshBook()} title="Refresh book" />
-        <button class="zen" onClick={() => store.saveSettings({ zen: !store.settings.value.zen })} title="Toggle Zen Mode" />
-        <button class="names-editor" onClick={() => store.toggleNamesEditor(true)} title="Edit names" />
+    </section>
+    <section>
+      <h2>{'Page width'}</h2>
+      <div class="choices">
+        @for (const { size, label, title } of paperSizes) {
+          <button
+            class={{ selected: (store.settings.value.paperSize ?? 'sm') === size }}
+            onClick={() => store.saveSettings({ paperSize: size })}
+            title={title}
+          >{label}</button>
+        }
       </div>
-    }
-  </aside>
+    </section>
+    <FontPicker />
+  </dialog>
 }

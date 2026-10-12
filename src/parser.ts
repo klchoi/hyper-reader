@@ -300,9 +300,13 @@ const SINO_DIGITS: Record<string, number> = { nhất: 1, nhị: 2, tam: 3, tứ:
 // the units that may follow `mươi`: `hai mươi tư` is 24, `ba mươi mốt` 31 (`mốt` and `lăm` are
 // the forms a unit takes there)
 const TENS_UNITS = ['mốt', 'hai', 'ba', 'bốn', 'tư', 'lăm', 'sáu', 'bảy', 'tám', 'chín'];
+// the words a number written out begins with: a word of the text that is none of them is no
+// number, whatever follows it
+const NUMBER_STARTS = new Set(['mười', 'thập', ...Object.keys(WORD_DIGITS), ...Object.keys(SINO_DIGITS)]);
 
 // the longest number the words at `i` read as: { value, length } in words, or null
 export function readNumberWords(words: string[], i: number): { value: number; length: number } | null {
+  if(!NUMBER_STARTS.has(words[i])) return null;
   let w = (k: number) => words[i + k];
   let best: { value: number; length: number } | null = null;
   let take = (value: number, length: number) => {
@@ -393,6 +397,16 @@ function readKnownWord(word: string, lower: string, pos: number): [string, Carri
 
 const OPENERS = '【[(（《“"«';
 const CLOSERS = '】])）》”"»';
+// what lexLine reads, where it stands in the line: a sticky pattern matches there, so the rest
+// of the line is never copied to be read (every line of the book is lexed)
+const DIGITS = /\d+(?:\.\d+)?/y;
+const LETTERS = /\p{L}+/uy;
+const NEXT_WORD = / \p{L}+/uy;
+const NEXT_MARK = /\s*(\S)/y;
+const readAt = (re: RegExp, line: string, pos: number) => {
+  re.lastIndex = pos;
+  return re.exec(line);
+};
 
 function lexLine(line: string, lower: string, names: string[]) {
   let tokens: Token[] = [];
@@ -409,7 +423,7 @@ function lexLine(line: string, lower: string, names: string[]) {
     if(OPENERS.includes(ch)) { add('L', pos + 1); continue; }
     if(CLOSERS.includes(ch)) { add('R', pos + 1); continue; }
     if(/\d/.test(ch)) {
-      let m = /^\d+(?:\.\d+)?/.exec(line.slice(pos))!;
+      let m = readAt(DIGITS, line, pos)!;
       let [major, minor] = m[0].split('.');
       // `0.05` is a fraction (a countdown, a price), not chapter 5 of a book 0
       if(minor != null && Number(major) === 0) { add('x', pos + m[0].length); continue; }
@@ -417,14 +431,15 @@ function lexLine(line: string, lower: string, names: string[]) {
       add('N', pos + m[0].length, { value: Number(minor ?? major), book: minor == null ? null : Number(major), digits: true });
       continue;
     }
-    let letters = /^\p{L}+/u.exec(line.slice(pos));
+    let letters = readAt(LETTERS, line, pos);
     if(!letters) { add('S', pos + 1); continue; }
     let word = letters[0];
-    // the words that follow, for the numbers that take several
-    let words = [lower.slice(pos, pos + word.length)];
+    let lowered = lower.slice(pos, pos + word.length);
+    // the words that follow, for the numbers that take several; only a number takes them
+    let words = [lowered];
     let ahead = pos + word.length;
-    for(let k = 0; k < 4; k++) {
-      let next = /^ \p{L}+/u.exec(line.slice(ahead));
+    for(let k = 0; k < 4 && NUMBER_STARTS.has(lowered); k++) {
+      let next = readAt(NEXT_WORD, line, ahead);
       if(!next) break;
       words.push(lower.slice(ahead + 1, ahead + next[0].length));
       ahead += next[0].length;
@@ -438,14 +453,13 @@ function lexLine(line: string, lower: string, names: string[]) {
       continue;
     }
     let roman = readRoman(word);
-    let lowered = words[0];
     let end = pos + word.length;
     let known = readKnownWord(lowered, lower, pos);
     if(roman != null && word.length <= 7) add('N', end, { value: roman, roman: true });
     else if(known) add(known[0], pos + known[2], known[1]);
     else if(lowered === 'kết' || lowered === 'cuối') {
       // `Chương kết` ends the book; `Kết quả là` and `Cuối cùng` are only sentences
-      let after = /^\s*(\S)/.exec(line.slice(end));
+      let after = readAt(NEXT_MARK, line, end);
       let lone = !after || /[^\p{L}\p{N}]/u.test(after[1]);
       add(lone ? 'E' : 'x', end, { word: lowered });
     }

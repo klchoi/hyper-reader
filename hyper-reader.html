@@ -9726,6 +9726,7 @@ function createStore({ reader }) {
 	const books = track([]);
 	const book = track(null);
 	const chapter = track(null);
+	const opening = track(null);
 	const progress = track({});
 	const settings = track({ sort: {
 		field: "updatedAt",
@@ -9893,7 +9894,8 @@ function createStore({ reader }) {
 			[open.id]: record
 		};
 	}
-	async function openBook({ bookId, offset, chapterId }) {
+	let asked = 0;
+	async function openBook({ bookId, offset, chapterId }, { fresh = false } = {}) {
 		if (!bookId) {
 			console.info("Failed to load file:", {
 				bookId,
@@ -9902,14 +9904,19 @@ function createStore({ reader }) {
 			});
 			return;
 		}
+		let ask = ++asked;
+		let latest = () => ask === asked;
 		let listedIn = (record) => chapterAt(record.chapters, offset) || record.chapters.find((c) => c.id === chapterId) || record.chapters[0];
-		let record = await backend.book(bookId);
+		let record = !fresh && book.value?.id === bookId ? book.value : await backend.book(bookId);
+		if (!latest()) return;
 		if (!record) {
 			console.info("Book not found:", { bookId });
 			return;
 		}
 		let listed = listedIn(record);
+		opening.value = listed.id;
 		let found = await backend.chapter(bookId, listed);
+		if (!latest()) return;
 		if (!found) {
 			console.info("Chapter not found:", {
 				bookId,
@@ -9918,15 +9925,19 @@ function createStore({ reader }) {
 				id: listed.id
 			});
 			record = await backend.rereadBook(bookId);
-			if (!record) return;
+			if (!latest()) return;
+			if (!record) return void (opening.value = null);
 			listed = listedIn(record);
+			opening.value = listed.id;
 			found = await backend.chapter(bookId, listed);
-			if (!found) return;
+			if (!latest()) return;
+			if (!found) return void (opening.value = null);
 		}
 		let position = Math.max(toOffset(offset) ?? 0, listed.offset ?? 0);
 		let sameBook = book.value?.id === record.id;
 		book.value = record;
 		chapter.value = found;
+		opening.value = null;
 		togglePalette(false);
 		loadNames(record.id);
 		saveProgressLater(record, found, position, 1e4);
@@ -9953,8 +9964,9 @@ function createStore({ reader }) {
 	}
 	function openNextChapter(delta) {
 		let open = book.value;
-		if (!open || !chapter.value) return;
-		let at = open.chapters.findIndex((c) => c.id === chapter.value.id);
+		let current = opening.value ?? chapter.value?.id;
+		if (!open || !current) return;
+		let at = open.chapters.findIndex((c) => c.id === current);
 		let next = open.chapters[at + delta];
 		if (next) openBook({
 			bookId: open.id,
@@ -9975,6 +9987,8 @@ function createStore({ reader }) {
 	}
 	async function showLibrary() {
 		if (!book.value) return;
+		asked++;
+		opening.value = null;
 		book.value = null;
 		chapter.value = null;
 		clearTimeout(progressTimer);
@@ -10018,7 +10032,7 @@ function createStore({ reader }) {
 		if (blocked.length) console.info("Blocked by the popup blocker, opened in the library only:", blocked.map((b) => b.name));
 		if (here) {
 			router.push(bookRoute(places.get(here.id)));
-			await openBook(places.get(here.id));
+			await openBook(places.get(here.id), { fresh: true });
 		}
 	}
 	async function refreshBook() {
@@ -10030,7 +10044,7 @@ function createStore({ reader }) {
 			bookId: open.id,
 			offset: at.offset,
 			chapterId: at.id
-		});
+		}, { fresh: true });
 	}
 	async function deleteBook(bookId) {
 		await backend.deleteBook(bookId);
@@ -10250,6 +10264,7 @@ function createStore({ reader }) {
 		books,
 		book,
 		chapter,
+		opening,
 		progress,
 		settings,
 		settingsOpen,
@@ -10591,7 +10606,7 @@ function ChapterList_render(__anchor, __block) {
 		return rows;
 	}, __block, "ulty7c");
 	const digits = track(() => with_scope(__block, () => Math.max(1, ...rows.value.map((row) => with_scope(__block, () => /^\d+$/.test(row.number ?? "")) ? row.number.length : 0))), __block, "1w3h6mr");
-	const activeId = track(() => store.chapter.value?.id, __block, "krcoh8");
+	const activeId = track(() => store.opening.value ?? store.chapter.value?.id, __block, "krcoh8");
 	const open = (event, offset) => {
 		with_scope(__block, () => event.preventDefault());
 		with_scope(__block, () => store.openBook({
@@ -12474,7 +12489,6 @@ nav {
         padding: 0.1ex calc(var(--gap) * 0.25);
         outline: calc(var(--gap) * 0.15) solid transparent;
         border-radius: 0.5ex;
-        transition: background-color 0.1s, outline-color 0.1s;
       }
       /* the chapter's number, in a column of its own: `12.` */
       .number {

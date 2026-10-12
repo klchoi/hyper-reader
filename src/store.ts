@@ -53,6 +53,8 @@ export function createStore({ reader }: Page) {
   const books = track<BookSummary[]>([]);
   const book = track<BookRecord | null>(null);
   const chapter = track<Chapter | null>(null);
+  // the chapter asked for, while its text is on its way: the list shows it as the one read
+  const opening = track<string | null>(null);
   const progress = track<Record<string, Progress>>({});
   const settings = track<Settings>({ sort: { field: 'updatedAt', direction: 'desc' } });
   // `text` as typed, `q` as searched for
@@ -187,32 +189,44 @@ export function createStore({ reader }: Page) {
 
   // `offset` says where to open, `chapterId` is only what an older bookmark or
   // progress record has instead. Both may be missing, and then the book starts over
-  async function openBook({ bookId, offset, chapterId }: { bookId: string; offset?: unknown; chapterId?: string | null }) {
+  // the latest chapter asked for: one asked for before it, that comes after it, is dropped
+  let asked = 0;
+  // `fresh`: the book is asked of the backend even when it is the one open (it was read again)
+  async function openBook({ bookId, offset, chapterId }: { bookId: string; offset?: unknown; chapterId?: string | null }, { fresh = false } = {}) {
     if (!bookId) {
       console.info('Failed to load file:', { bookId, offset, chapterId });
       return;
     }
+    let ask = ++asked;
+    let latest = () => ask === asked;
     // nothing to go on means the book starts over
     let listedIn = (record: BookRecord): Listed => chapterAt(record.chapters, offset)
       || record.chapters.find(c => c.id === chapterId)
       || record.chapters[0];
 
-    // the backend reads the book again when an older parser read it
-    let record = await backend.book(bookId);
+    // the book open is the one asked for again; another is asked of the backend, which reads it
+    // again when an older parser read it
+    let record = !fresh && book.value?.id === bookId ? book.value : await backend.book(bookId);
+    if (!latest()) return;
     if (!record) {
       console.info('Book not found:', { bookId });
       return;
     }
     let listed = listedIn(record);
+    opening.value = listed.id;
     let found = await backend.chapter(bookId, listed);
+    if (!latest()) return;
     // a record that lists a chapter whose text is gone is read again, once
     if (!found) {
       console.info('Chapter not found:', { bookId, offset, chapterId, id: listed.id });
       record = await backend.rereadBook(bookId);
-      if (!record) return;
+      if (!latest()) return;
+      if (!record) return void (opening.value = null);
       listed = listedIn(record);
+      opening.value = listed.id;
       found = await backend.chapter(bookId, listed);
-      if (!found) return;
+      if (!latest()) return;
+      if (!found) return void (opening.value = null);
     }
     // an offset inside the chapter is a place on its page, not just the chapter
     let position = Math.max(toOffset(offset) ?? 0, listed.offset ?? 0);
@@ -220,6 +234,7 @@ export function createStore({ reader }: Page) {
     let sameBook = book.value?.id === record.id;
     book.value = record;
     chapter.value = found;
+    opening.value = null;
     togglePalette(false);
     loadNames(record.id);
     saveProgressLater(record, found, position, 10000);
@@ -247,8 +262,10 @@ export function createStore({ reader }: Page) {
   }
   function openNextChapter(delta: number) {
     let open = book.value;
-    if (!open || !chapter.value) return;
-    let at = open.chapters.findIndex(c => c.id === chapter.value!.id);
+    // from the chapter asked for last, whether or not it is in yet
+    let current = opening.value ?? chapter.value?.id;
+    if (!open || !current) return;
+    let at = open.chapters.findIndex(c => c.id === current);
     let next = open.chapters[at + delta];
     if (next) openBook({ bookId: open.id, offset: next.offset });
   }
@@ -265,6 +282,9 @@ export function createStore({ reader }: Page) {
   }
   async function showLibrary() {
     if (!book.value) return;
+    // a chapter on its way is not opened after all
+    asked++;
+    opening.value = null;
     book.value = null;
     chapter.value = null;
     clearTimeout(progressTimer);
@@ -311,7 +331,7 @@ export function createStore({ reader }: Page) {
     if (blocked.length) console.info('Blocked by the popup blocker, opened in the library only:', blocked.map(b => b.name));
     if (here) {
       router.push(bookRoute(places.get(here.id)!));
-      await openBook(places.get(here.id)!);
+      await openBook(places.get(here.id)!, { fresh: true });
     }
   }
   // the book read again, and opened where the reader is
@@ -320,7 +340,7 @@ export function createStore({ reader }: Page) {
     let at = chapter.value;
     if (!open || !at) return;
     if (!await backend.rereadBook(open.id)) return;
-    await openBook({ bookId: open.id, offset: at.offset, chapterId: at.id });
+    await openBook({ bookId: open.id, offset: at.offset, chapterId: at.id }, { fresh: true });
   }
   async function deleteBook(bookId: string) {
     await backend.deleteBook(bookId);
@@ -500,7 +520,7 @@ export function createStore({ reader }: Page) {
 
   return {
     router,
-    books, book, chapter, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
+    books, book, chapter, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
     fixNames, commands, selectedCommand, mentions, searching, status, found,
     start, follow,
     applySettings, saveSettings, chooseColor, sortBy,

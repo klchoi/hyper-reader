@@ -524,7 +524,6 @@ nav {
         padding: 0.1ex calc(var(--gap) * 0.25);
         outline: calc(var(--gap) * 0.15) solid transparent;
         border-radius: 0.5ex;
-        transition: background-color 0.1s, outline-color 0.1s;
       }
       /* the chapter's number, in a column of its own: `12.` */
       .number {

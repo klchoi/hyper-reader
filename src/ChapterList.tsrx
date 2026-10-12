@@ -52,7 +52,8 @@ export function ChapterList() @{
   // the column the numbers stand in is as wide as the longest of a single chapter; a run
   // (`152-153`) or `kết` takes what more it needs
   const digits = track(() => Math.max(1, ...rows.value.map(row => /^\d+$/.test(row.number ?? '') ? row.number!.length : 0)));
-  const activeId = track(() => store.chapter.value?.id);
+  // the chapter asked for is the one read, the moment it is asked for
+  const activeId = track(() => store.opening.value ?? store.chapter.value?.id);
   const open = (event: MouseEvent, offset: number) => {
     event.preventDefault();
     store.openBook({ bookId: store.book.value!.id, offset });

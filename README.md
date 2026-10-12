@@ -140,7 +140,9 @@ and `TUNING`, where every number it was tuned with is named.
 A chapter is `{ id, title, offset, group, part, content }`, `part` being set on the parts of a
 chapter written in several (`{ of, text }`: the chapter named once, and the part); what is stored of a book is
 `bookRecord(book)`. Raise `PARSER_VERSION` when a change should reach the books already stored:
-they are read again the next time they are opened.
+they are read again the next time they are opened (the server reads its libraries again when it
+next starts; a book that comes out in the same chapters keeps what the index holds of it, so only
+the books the change moves are indexed again).
 
 ## Working on it
 

@@ -177,6 +177,26 @@ describe('the server', () => {
     await call('POST', `books/${id}/reread`);
     await settled();
   });
+  it('keeps the index of a book a newer parser reads into the same chapters, and only then', async () => {
+    await settled();
+    let { id } = (await books()).find(book => !book.folder && !book.deletable)!;
+    let db = new DatabaseSync(path.join(data, 'library.db'));
+    let rowids = () => (db.prepare('select rowid from chapters where book_id = ? order by n').all(id) as { rowid: number }[]).map(row => row.rowid);
+    let indexed = () => (db.prepare('select indexed from books where id = ?').get(id) as { indexed: number }).indexed;
+    let before = rowids();
+    db.prepare('update books set parser = 1 where id = ?').run(id);
+    assert.equal((await call('GET', `books/${id}`)).answer.parser, PARSER_VERSION);
+    assert.deepEqual([rowids(), indexed()], [before, PARSER_VERSION]);
+    // a file that changed is another matter
+    let file = path.join(shelf, 'Sách thử (1-3 chương).txt');
+    fs.appendFileSync(file, '\n\nThêm một câu.');
+    await call('POST', `books/${id}/reread`);
+    assert.notDeepEqual(rowids(), before);
+    db.close();
+    fs.writeFileSync(file, bookText('Hoàng Dung'));
+    await call('POST', `books/${id}/reread`);
+    await settled();
+  });
   it('finds what came, changed and went in a library when scanned again', async () => {
     let gone = (await books()).find(book => book.folder === 'nested')!;
     await call('PUT', `progress/${gone.id}`, { offset: 120 });

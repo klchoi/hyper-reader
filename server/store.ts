@@ -144,18 +144,29 @@ export function createStore(file: string) {
     book: (id: string) => (sql(`select ${BOOK_COLUMNS} from books where id = ?`).get(id) ?? null) as BookRow | null,
     chapters: (id: string) => sql('select rowid, n, id, title, offset, "end", grp, part_of, part_text from chapters where book_id = ? order by n').all(id) as ChapterRow[],
     // a book read: its row, and its chapters and characters in place of what it had
+    // A book read again by a newer parser that cuts it into the same chapters keeps them, and what
+    // the index holds of them: only the books the parser now reads otherwise are indexed again
     keepBook({ id, root, path, name, description, size, mtime, parser, chapters, characters }: BookRead & { id: string; root: string; path: string }) {
       transaction(db, () => {
-        sql('delete from chapters where book_id = ?').run(id);
+        let was = sql('select size, mtime, indexed from books where id = ?').get(id) as { size: number; mtime: number; indexed: number } | undefined;
+        let kept = store.chapters(id);
+        let same = !!was && was.size === size && was.mtime === mtime && kept.length === chapters.length && chapters.every((c, n) => (
+          kept[n].id === c.id && kept[n].title === c.title && kept[n].offset === c.offset && kept[n].end === c.end
+          && kept[n].grp === (c.group ?? null) && kept[n].part_of === (c.part?.of ?? null) && kept[n].part_text === (c.part?.text ?? null)
+        ));
+        let indexed = same && was!.indexed ? parser : 0;
         sql('delete from characters where book_id = ?').run(id);
         sql(`insert into books (id, root, path, name, description, size, mtime, parser, indexed, chapter_count, added_at)
-             values (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              on conflict (id) do update set root = excluded.root, path = excluded.path, name = excluded.name,
                description = excluded.description, size = excluded.size, mtime = excluded.mtime,
-               parser = excluded.parser, indexed = 0, chapter_count = excluded.chapter_count`)
-          .run(id, root, path, name, description ?? null, size, mtime, parser, chapters.length, new Date().toISOString());
-        let chapter = sql('insert into chapters (book_id, n, id, title, offset, "end", grp, part_of, part_text) values (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        chapters.forEach((c, n) => chapter.run(id, n, c.id, c.title, c.offset, c.end, c.group ?? null, c.part?.of ?? null, c.part?.text ?? null));
+               parser = excluded.parser, indexed = excluded.indexed, chapter_count = excluded.chapter_count`)
+          .run(id, root, path, name, description ?? null, size, mtime, parser, indexed, chapters.length, new Date().toISOString());
+        if(!same) {
+          sql('delete from chapters where book_id = ?').run(id);
+          let chapter = sql('insert into chapters (book_id, n, id, title, offset, "end", grp, part_of, part_text) values (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+          chapters.forEach((c, n) => chapter.run(id, n, c.id, c.title, c.offset, c.end, c.group ?? null, c.part?.of ?? null, c.part?.text ?? null));
+        }
         let character = sql('insert into characters (book_id, name, folded, mentions) values (?, ?, ?, ?)');
         for(let { name: who, mentions } of characters) character.run(id, who, plain(who), mentions);
       });

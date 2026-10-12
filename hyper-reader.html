@@ -12439,8 +12439,15 @@ nav {
         margin: -0.25em 0;
         padding: 0.25em 0;
         color: var(--body-font-color);
+        /* the pointer anywhere on the row shows the entry it opens: in the link's colour, on
+           a tint of the highlight the chapter read has */
         &:hover {
           color: var(--link-color);
+          .entry {
+            --tint: color-mix(in srgb, var(--body-font-color) 10%, transparent);
+            background: var(--tint);
+            outline-color: var(--tint);
+          }
         }
       }
       .entry {
@@ -12448,6 +12455,9 @@ nav {
         vertical-align: top;
         max-width: 100%;
         padding: 0.1ex calc(var(--gap) * 0.25);
+        outline: calc(var(--gap) * 0.15) solid transparent;
+        border-radius: 0.5ex;
+        transition: background-color 0.1s, outline-color 0.1s;
       }
       /* the chapter's number, in a column of its own (see ChapterList.tsrx) */
       .number {
@@ -12470,8 +12480,7 @@ nav {
         }
         .entry {
           background: var(--body-font-color);
-          outline: calc(var(--gap) * 0.15) solid var(--body-font-color);
-          border-radius: 0.5ex;
+          outline-color: var(--body-font-color);
         }
         .number {
           opacity: 0.7;

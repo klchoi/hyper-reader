@@ -429,7 +429,7 @@ a {
 
 nav,
 aside,
-.table,
+.library,
 dialog,
 #add-name {
   font-family: var(--ui-font, Reader);
@@ -734,86 +734,190 @@ main {
   }
 }
 
-/** table **/
-/* the library, where the chapter list and the paper stand when a book is open. Its rows are
-   made only as they come in sight (see Library.tsrx), so they cannot size their columns by
-   what is in them: every row, the header's too, has the same, and all are one height (a name
-   and a line under it), a name too long for its column cut short */
-.table {
-  --columns: minmax(0, 1fr) 7ch 7ch 14ch 5ch;
-  --row: calc(1.2em + 1.2em * 0.875 + var(--gap));
+/** the library **/
+/* where the chapter list and the paper stand when a book is open: one column of books, as wide as
+   reads well, the whole width of a phone. The search stays at the top as the books scroll */
+.library {
   grid-column: 1 / 3;
-  padding: 0 var(--gap) var(--gap);
   background: var(--paper-background-color);
   box-shadow: 0px 6px 12px 3px var(--paper-shadow-color);
   outline: 1px solid var(--paper-outline-color);
-  line-height: 1.2;
+  line-height: 1.3;
   align-self: stretch;
-}
-.table .row {
-  display: grid;
-  grid-template-columns: var(--columns);
-  column-gap: calc(var(--gap) * 2);
-}
-.table .head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--paper-background-color);
-}
-.table .rows {
-  position: relative;
-  height: calc(var(--row) * var(--rows, 0));
-  .row {
-    position: absolute;
-    inset: calc(var(--row) * var(--at)) 0 auto;
-    height: var(--row);
-    padding-top: calc(var(--gap) / 2);
+  padding: 0 max(var(--gap), calc((100% - 46rem) / 2)) calc(var(--gap) * 2);
+  button {
+    appearance: none;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
+  .link {
+    color: var(--link-color);
+    font-size: 0.8em;
+  }
+  .find {
+    display: flex;
+    gap: calc(var(--gap) / 2);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: var(--gap) 0 calc(var(--gap) / 2);
+    background: var(--paper-background-color);
+    input {
+      flex: 1;
+      min-width: 0;
+      font: inherit;
+      font-size: 0.9em;
+      padding: 0.6ex 1.2ex;
+      color: var(--body-font-color);
+      background: var(--body-background-color);
+      border: 1px solid var(--paper-outline-color);
+      border-radius: 0.8ex;
+    }
+    button {
+      font-size: 0.8em;
+      padding: 0.4ex 1.2ex;
+      border: 1px solid var(--paper-outline-color);
+      border-radius: 0.8ex;
+      &.selected {
+        color: var(--link-color);
+        border-color: currentColor;
+      }
+    }
+  }
+  .filters {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--gap) / 2);
+    margin-bottom: calc(var(--gap) / 2);
+  }
+  .choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6ex;
+  }
+  /* a choice, and a tag: a word in a pill */
+  .choices button,
+  .tag {
+    font-size: 0.7em;
+    padding: 0.2ex 1ex;
+    border-radius: 99px;
+    outline: 1px solid var(--horizontal-line-color);
+    &:hover,
+    &.selected {
+      color: var(--link-color);
+      outline-color: currentColor;
+    }
+    small {
+      opacity: 0.6;
+    }
+  }
+  .choices button {
+    font-size: 0.75em;
+    &.selected {
+      font-weight: bold;
+    }
+  }
+  section {
+    margin-top: var(--gap);
+  }
+  h2 {
+    display: flex;
+    align-items: baseline;
+    gap: var(--gap);
+    font-size: 0.9em;
+    margin: 0 0 calc(var(--gap) / 2);
+    span {
+      flex: 1;
+    }
+  }
+  h3 {
+    font-size: 0.8em;
+    font-weight: normal;
+    opacity: 0.6;
+    margin: var(--gap) 0 calc(var(--gap) / 2);
+  }
+  .books {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--gap) * 0.75);
+    li {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.3ex;
+    }
+  }
+  .title {
+    font-weight: bold;
+    overflow-wrap: anywhere;
+  }
+  .facts {
+    font-size: 0.75em;
+    opacity: 0.7;
+  }
+  .read {
+    font-size: 0.75em;
+    color: var(--link-color);
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5ex;
+    &.asked {
+      margin-bottom: calc(var(--gap) / 2);
+      .tag {
+        font-size: 0.8em;
+      }
+    }
+  }
+  .delete {
+    font-size: 0.7em;
+  }
+  .more {
+    margin-top: var(--gap);
+    width: 100%;
+    padding: 0.6ex;
+    font-size: 0.8em;
+    border-radius: 0.8ex;
+    outline: 1px solid var(--horizontal-line-color);
+  }
+  .inside {
+    display: block;
+    margin-top: var(--gap);
+  }
+  .empty {
+    margin-top: calc(var(--gap) * 2);
+    opacity: 0.7;
+  }
+  .found {
+    p {
+      margin: 0 0 calc(var(--gap) / 2);
+    }
+    .person {
+      margin-bottom: calc(var(--gap) / 2);
+      ul {
+        list-style: none;
+        margin: 0.3ex 0 0 1.5em;
+      }
+    }
+  }
+  footer {
+    display: flex;
+    align-items: baseline;
+    gap: var(--gap);
+    margin-top: calc(var(--gap) * 2);
+    opacity: 0.7;
   }
 }
-.table .td {
-  min-width: 0;
-}
-.table .name,
-.table .desc {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.table .name {
-  font-weight: bold;
-}
-.table .th {
-  white-space: nowrap;
-  padding: calc(var(--gap)/2) 0;
-  position: relative;
-}
-.table .th::before {
-  content: '';
-  display: block;
-  border-bottom: 1px solid var(--horizontal-line-color);
-  width: calc(100% + 1ex);
-  height: calc(2ex + 2px);
-  box-shadow: 0 calc(1ex - 5px) 1.4ex -1ex rgba(0, 0, 0, .5);
-  position: absolute;
-  bottom: -1px;
-  left: calc(-1ex / 2);
-}
-.table .th span {
-  display: inline-block;
-  position: relative;
-}
-.table .th span::after {
-  position: absolute;
-  bottom: calc(1ex/4);
-  right: -1.8ex;
-  color: var(--body-font-color);
-}
-.table .th[data-sort=asc] span::after { content: '↑'; }
-.table .th[data-sort=desc] span::after { content: '↓'; }
-.table .delete { color: inherit; }
-.table .delete:hover { color: var(--link-color); }
 
 /** zen mode **/
 [data-zen=true] nav {
@@ -1170,63 +1274,6 @@ main {
 .text-right { text-align: right; }
 .text-center { text-align: center; }
 .indent-none { text-indent: 0; }
-
-/** the library searched, and its libraries **/
-.table .bar {
-  display: flex;
-  align-items: center;
-  gap: var(--gap);
-  padding-top: var(--gap);
-
-  input {
-    flex: 1;
-    font: inherit;
-    font-size: 0.9em;
-    padding: 0.6ex 1.2ex;
-    color: var(--body-font-color);
-    background: var(--body-background-color);
-    border: 1px solid var(--paper-outline-color);
-    border-radius: 0.8ex;
-  }
-  small {
-    white-space: nowrap;
-  }
-  button {
-    font: inherit;
-    font-size: 0.8em;
-    padding: 0.4ex 1.2ex;
-    color: var(--body-font-color);
-    background: var(--body-background-color);
-    border: 1px solid var(--paper-outline-color);
-    border-radius: 0.8ex;
-    cursor: pointer;
-    &:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-  }
-}
-.table .found {
-  h3 {
-    font-size: 0.8em;
-    font-weight: normal;
-    opacity: 0.6;
-    margin: var(--gap) 0 calc(var(--gap) / 2);
-  }
-  p {
-    margin: 0 0 calc(var(--gap) / 2);
-  }
-  .person {
-    margin-bottom: calc(var(--gap) / 2);
-    ul {
-      list-style: none;
-      margin: 0.3ex 0 0 1.5em;
-    }
-  }
-  a.name {
-    font-weight: bold;
-  }
-}
 
 /** the places a book says what was searched for **/
 #command-palette[open] {

@@ -1,170 +1,224 @@
-// The books kept, as a table: sorted by a column chosen above it, each with where it was left.
-// Kept by the server, the library can be searched (for a character, or for what the books say)
-// and its libraries scanned again, from a bar above it.
-//
-// A library may hold thousands of books, and a row for each is more than a page can make, or
-// sort, in good time. So the rows are all one height, over a list as tall as all of them, and
-// only those in sight are made (and a few around them), as the window scrolls.
-import { effect, track } from 'ripple';
+// The library: its front (the books being read, the newest, a few at random, and the tags most
+// books have), and what it is asked for (words of a title, tags, a size, a length, an order), a
+// page at a time. The backend looks through the books (see catalog.ts): the page only ever holds
+// the few it shows. Kept by the server, the library can also be searched for what its books say
+// and the characters they name, and its libraries scanned again.
+import { track } from 'ripple';
 import { StoreContext } from './store.ts';
 import { bookRoute, formatDate, formatSize } from './places.ts';
+import type { Query, Range, Shelved, Sort } from './catalog.ts';
 
-// the rows made above and below those in sight, so a quick scroll finds them there
-const AROUND = 10;
-// (a collator made once: localeCompare makes one for every two names it compares)
-const byName = new Intl.Collator('vi-VN', { sensitivity: 'accent' });
+// what the library can be narrowed to, and ordered by
+const SIZES: { label: string; range?: Range }[] = [
+  { label: 'Any size' },
+  { label: 'Under 1 MB', range: [null, 1e6] },
+  { label: '1–5 MB', range: [1e6, 5e6] },
+  { label: '5–20 MB', range: [5e6, 2e7] },
+  { label: 'Over 20 MB', range: [2e7, null] },
+];
+const LENGTHS: { label: string; range?: Range }[] = [
+  { label: 'Any length' },
+  { label: 'Under 50 chapters', range: [null, 49] },
+  { label: '50–200', range: [50, 200] },
+  { label: '200–1,000', range: [201, 1000] },
+  { label: 'Over 1,000', range: [1001, null] },
+];
+const SORTS: { label: string; sort?: Sort }[] = [
+  { label: 'Best match' },
+  { label: 'Newest', sort: 'latest' },
+  { label: 'Last read', sort: 'read' },
+  { label: 'Title', sort: 'title' },
+  { label: 'Largest', sort: 'size' },
+  { label: 'Most chapters', sort: 'chapters' },
+  { label: 'Random', sort: 'random' },
+];
+const sameRange = (a?: Range, b?: Range) => (a?.[0] ?? null) === (b?.[0] ?? null) && (a?.[1] ?? null) === (b?.[1] ?? null);
+// the day a file is from, as 2024-02-11
+const dayOf = (ms: number) => (ms ? new Date(ms).toLocaleDateString('sv-SE') : '');
+
+type Section = { key: string; title: string; books: Shelved[]; all?: Query; shuffle?: boolean; more?: boolean };
 
 export function Library() @{
   const store = StoreContext.get();
-  // every book, with where it was left, in the order chosen
-  const books = track(() => {
-    let progress = store.progress.value;
-    let { field, direction } = store.settings.value.sort;
-    let entries = store.books.value.map(book => {
-      let kept = progress[book.id] || {};
-      return { book, kept, updated: new Date(kept.updatedAt || 0).getTime() };
-    });
-    let compare = (a: (typeof entries)[number], z: (typeof entries)[number]) => {
-      if (field === 'name') return byName.compare(a.book.name, z.book.name);
-      if (field === 'size') return a.book.size - z.book.size;
-      if (field === 'updatedAt') return a.updated - z.updated;
-      if (field === 'chapterCount') return (a.kept.chapterCount || 1) - (z.kept.chapterCount || 1);
-      return 0;
-    };
-    return entries.sort((a, z) => (direction === 'desc' ? -compare(a, z) || 0 : compare(a, z)));
-  });
-  // the rows in sight, by where the list stands in the window: those from `first` up to `last`
-  // (at first as many as the window could hold, the list not being there to measure yet)
-  const range = track({ first: 0, last: Math.ceil(innerHeight / 40) + AROUND });
-  let list: HTMLDivElement | undefined;
-  let frame = 0;
-  const measure = () => {
-    frame = 0;
-    if (!list) return;
-    let above = -list.getBoundingClientRect().top;
-    let height = list.firstElementChild?.getBoundingClientRect().height || 60;
-    let first = Math.max(0, Math.floor(above / height) - AROUND);
-    let last = Math.max(first, Math.ceil((above + innerHeight) / height) + AROUND);
-    if (first !== range.value.first || last !== range.value.last) range.value = { first, last };
+  const filtersOpen = track(false);
+  const asked = track<Query>(() => store.finding.value?.query ?? {});
+  const narrowed = track(() => !!(asked.value.size || asked.value.chapters || asked.value.sort));
+  // what is asked, changed: the library's front again once nothing is
+  const ask = (change: Query, wait = 0) => {
+    let query = { ...asked.value, ...change };
+    if ('q' in change) store.searchLibrary('');
+    let something = query.q?.trim() || query.tags?.length || query.size || query.chapters || query.sort;
+    store.find(something ? query : null, wait);
   };
-  // once a frame however often the window says it moved
-  const measureSoon = () => { frame ||= requestAnimationFrame(measure); };
-  effect(() => {
-    addEventListener('scroll', measureSoon, { passive: true });
-    addEventListener('resize', measureSoon);
-    return () => {
-      removeEventListener('scroll', measureSoon);
-      removeEventListener('resize', measureSoon);
-      cancelAnimationFrame(frame);
-    };
+  const withTag = (tag: string) => ask({ tags: [...new Set([...(asked.value.tags ?? []), tag])] });
+
+  const sections = track<Section[]>(() => {
+    let now = store.finding.value;
+    if (now) {
+      let title = now.busy && !now.books.length ? 'Looking…' : `${now.total.toLocaleString()} ${now.total === 1 ? 'book' : 'books'}`;
+      return [{ key: 'found', title, books: now.books, more: now.books.length < now.total }];
+    }
+    let front = store.shelves.value;
+    if (!front) return [];
+    let shown: Section[] = [
+      { key: 'reading', title: 'Continue reading', books: front.reading, all: { sort: 'read' } },
+      { key: 'latest', title: 'New & updated', books: front.latest, all: { sort: 'latest' } },
+      { key: 'random', title: 'Something different', books: front.random, shuffle: true },
+    ];
+    return shown.filter(section => section.books.length > 0);
   });
-  const rows = track(() => {
-    let { first, last } = range.value;
-    return books.value.slice(first, last).map(({ book, kept }, k) => {
-      let place = { bookId: book.id, offset: kept.offset, chapterId: kept.chapterId };
-      return {
-        id: book.id,
-        at: first + k,
-        name: book.name,
-        description: book.description,
-        place,
-        href: store.router.route(bookRoute(place)),
-        size: formatSize(book.size),
-        deletable: book.deletable,
-        chapters: !kept.chapterCount ? '-' : `${kept.chapterIndex}/${kept.chapterCount}`,
-        date: formatDate(kept.updatedAt) || '-',
-      };
-    });
-  });
+  // a book as a row shows it
+  const placeOf = (book: Shelved) => ({ bookId: book.id, offset: book.read?.offset, chapterId: book.read?.chapterId });
+  const factsOf = (book: Shelved) => [formatSize(book.size), `${book.chapters.toLocaleString()} ${book.chapters === 1 ? 'chapter' : 'chapters'}`, dayOf(book.date), book.folder].filter(Boolean).join(' · ');
+  const readOf = (book: Shelved) => (book.read?.chapterCount ? `Chapter ${book.read.chapterIndex} of ${book.read.chapterCount}, ${formatDate(book.read.updatedAt) ?? ''}` : '');
+  const open = (event: MouseEvent, book: Shelved) => {
+    event.preventDefault();
+    store.openBook(placeOf(book));
+  };
+
   // what the bar says of the libraries: how many books, a scan going, the index behind
   const said = track(() => {
     let now = store.status.value;
     if (!now) return '';
     let { scan, index } = now;
-    let parts = [`${now.books} books`];
+    let parts = [`${now.books.toLocaleString()} books`];
     if (scan.running) parts.push(scan.toRead ? `reading ${scan.read}/${scan.toRead}` : 'looking for books');
     if (index.done < index.total) parts.push(`indexed ${index.done}/${index.total}`);
     return parts.join(' · ');
   });
-  const searched = track(() => store.found.value.q !== '');
-  // measured again when the list changes under the window: the books come, a search is left
-  effect(() => {
-    if (!searched.value && books.value.length > 0) measureSoon();
-  });
 
-  // the column the books are sorted by says which way
-  const sorted = (field: string) => (store.settings.value.sort.field === field ? store.settings.value.sort.direction : undefined);
-  const sortBy = (event: MouseEvent, field: string, first: 'asc' | 'desc' = 'asc') => {
-    event.preventDefault();
-    store.sortBy(field, first);
-  };
-
-  <div class="table">
-    @if (store.searching.value) {
-      <div class="bar">
-        <input type="search" placeholder="Search for a character, or for what the books say" onInput={(event) => store.searchLibrary(event.currentTarget.value)} />
-        <small>{said.value}</small>
-        <button onClick={() => store.rescan()} disabled={store.status.value?.scan.running} title="Read again what came, changed or went in the libraries">Rescan</button>
+  <div class="library">
+    <div class="find">
+      <input type="search" placeholder="Find a book: a title, a tag, a folder" value={asked.value.q ?? ''} onInput={(event) => ask({ q: event.currentTarget.value }, 250)} />
+      <button class={{ selected: filtersOpen.value || narrowed.value }} aria-expanded={filtersOpen.value} onClick={() => { filtersOpen.value = !filtersOpen.value; }}>Filters</button>
+    </div>
+    @if (filtersOpen.value) {
+      <div class="filters">
+        <div class="choices">
+          @for (const size of SIZES; key size.label) {
+            <button class={{ selected: sameRange(asked.value.size, size.range) }} onClick={() => ask({ size: size.range })}>{size.label}</button>
+          }
+        </div>
+        <div class="choices">
+          @for (const length of LENGTHS; key length.label) {
+            <button class={{ selected: sameRange(asked.value.chapters, length.range) }} onClick={() => ask({ chapters: length.range })}>{length.label}</button>
+          }
+        </div>
+        <div class="choices">
+          @for (const order of SORTS; key order.label) {
+            <button class={{ selected: asked.value.sort === order.sort }} onClick={() => ask({ sort: order.sort, seed: order.sort === 'random' ? Math.floor(Math.random() * 2 ** 31) : undefined })}>{order.label}</button>
+          }
+        </div>
       </div>
     }
-    @if (searched.value) {
-      <div class="found">
+    @if ((asked.value.tags ?? []).length > 0) {
+      <div class="tags asked">
+        @for (const tag of asked.value.tags ?? []; key tag) {
+          <button class="tag selected" title="Leave this tag out" onClick={() => ask({ tags: (asked.value.tags ?? []).filter(t => t !== tag) })}>{`${tag} ×`}</button>
+        }
+      </div>
+    }
+
+    @if (store.found.value.q) {
+      // what the books say, and the characters they name (the server's index)
+      <section class="found">
+        <h2>
+          <span>{`“${store.found.value.q}” in the books`}</span>
+          <button class="link" onClick={() => store.searchLibrary('')}>Back</button>
+        </h2>
         @if (store.found.value.characters.length > 0) {
           <>
-          <h3>Characters</h3>
-          @for (const person of store.found.value.characters; key person.name) {
-            <div class="person">
-              <b>{person.name}</b>
-              <small>{` ${person.mentions} mentions, in ${person.books.length} ${person.books.length === 1 ? 'book' : 'books'}`}</small>
-              <ul>
-                @for (const named of person.books; key named.id) {
-                  <li>
-                    <a href={store.router.route({ book: named.id })} onClick={(event: MouseEvent) => { event.preventDefault(); store.openFound(named.id, person.name); }}>{named.name}</a>
-                    <small>{` ${named.mentions}`}</small>
-                  </li>
-                }
-              </ul>
-            </div>
-          }
+            <h3>Characters</h3>
+            @for (const person of store.found.value.characters; key person.name) {
+              <div class="person">
+                <b>{person.name}</b>
+                <small>{` ${person.mentions} mentions, in ${person.books.length} ${person.books.length === 1 ? 'book' : 'books'}`}</small>
+                <ul>
+                  @for (const named of person.books; key named.id) {
+                    <li>
+                      <a href={store.router.route({ book: named.id })} onClick={(event: MouseEvent) => { event.preventDefault(); store.openFound(named.id, person.name); }}>{named.name}</a>
+                      <small>{` ${named.mentions}`}</small>
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
           </>
         }
         <h3>{store.found.value.books.length > 0 ? `Said in ${store.found.value.books.length} ${store.found.value.books.length === 1 ? 'book' : 'books'}` : 'Said in no book indexed'}</h3>
         @for (const saying of store.found.value.books; key saying.id) {
           <p>
-            <a class="name" href={store.router.route({ book: saying.id })} onClick={(event: MouseEvent) => { event.preventDefault(); store.openFound(saying.id, store.found.value.q); }}>{saying.name}</a>
+            <a class="title" href={store.router.route({ book: saying.id })} onClick={(event: MouseEvent) => { event.preventDefault(); store.openFound(saying.id, store.found.value.q); }}>{saying.name}</a>
             <small>{` ${saying.chapters} ${saying.chapters === 1 ? 'chapter' : 'chapters'}`}</small>
           </p>
         }
-      </div>
-    }
-    <div class="row head">
-      <a class="th text-left" data-sort={sorted('name')} href="#" onClick={(event: MouseEvent) => sortBy(event, 'name')}><span>File</span></a>
-      <a class="th text-right" data-sort={sorted('size')} href="#" onClick={(event: MouseEvent) => sortBy(event, 'size')}><span>Size</span></a>
-      <a class="th text-right" data-sort={sorted('chapterCount')} href="#" onClick={(event: MouseEvent) => sortBy(event, 'chapterCount')}><span>Chapters</span></a>
-      <a class="th text-right" data-sort={sorted('updatedAt')} href="#" onClick={(event: MouseEvent) => sortBy(event, 'updatedAt', 'desc')}><span>Date</span></a>
-      <span class="th"><span /></span>
-    </div>
-    @if (!searched.value) {
-      <div class="rows" ref={list} style={`--rows: ${books.value.length}`}>
-        @for (const row of rows.value; key row.id) {
-          <div class="row" style={`--at: ${row.at}`}>
-            <div class="td">
-              <a class="name" href={row.href} title={row.name} onClick={(event: MouseEvent) => { event.preventDefault(); store.openBook(row.place); }}>{row.name}</a>
-              @if (row.description) {
-                <small class="desc" title={row.description}>{row.description}</small>
-              }
-            </div>
-            <div class="td text-right"><small>{row.size}</small></div>
-            <div class="td text-right"><small>{row.chapters}</small></div>
-            <div class="td text-right"><small>{row.date}</small></div>
-            <div class="td">
-              @if (row.deletable) {
-                <a class="delete" onClick={() => store.deleteBook(row.id)}><small>delete</small></a>
-              }
-            </div>
-          </div>
+      </section>
+    } @else {
+      <>
+        @if (store.shelves.value && !store.finding.value && store.shelves.value.latest.length === 0) {
+          <p class="empty">No books yet: drop .txt files on the page to add them.</p>
         }
-      </div>
+        @for (const section of sections.value; key section.key) {
+          <section>
+            <h2>
+              <span>{section.title}</span>
+              @if (section.all) {
+                <button class="link" onClick={() => ask(section.all!)}>See all</button>
+              }
+              @if (section.shuffle) {
+                <button class="link" onClick={() => store.shuffle()}>Shuffle</button>
+              }
+              @if (section.key === 'found') {
+                <button class="link" onClick={() => { filtersOpen.value = false; store.find(null); }}>Back</button>
+              }
+            </h2>
+            <ol class="books">
+              @for (const book of section.books; key book.id) {
+                <li>
+                  <a class="title" href={store.router.route(bookRoute(placeOf(book)))} onClick={(event: MouseEvent) => open(event, book)}>{book.title}</a>
+                  <small class="facts">{factsOf(book)}</small>
+                  @if (book.read?.chapterCount) {
+                    <small class="read">{readOf(book)}</small>
+                  }
+                  @if (book.tags.length > 0 || book.deletable) {
+                    <span class="tags">
+                      @for (const tag of book.tags; key tag) {
+                        <button class="tag" onClick={() => withTag(tag)}>{tag}</button>
+                      }
+                      @if (book.deletable) {
+                        <button class="link delete" onClick={() => store.deleteBook(book.id)}>delete</button>
+                      }
+                    </span>
+                  }
+                </li>
+              }
+            </ol>
+            @if (section.more) {
+              <button class="more" disabled={store.finding.value?.busy} onClick={() => store.findMore()}>Show more</button>
+            }
+            @if (section.key === 'found' && store.searching.value && asked.value.q?.trim()) {
+              <button class="link inside" onClick={() => store.searchLibrary(asked.value.q ?? '')}>{`Search what the books say for “${asked.value.q?.trim()}”`}</button>
+            }
+          </section>
+        }
+        @if (!store.finding.value && (store.shelves.value?.tags.length ?? 0) > 0) {
+          <section>
+            <h2><span>Tags</span></h2>
+            <div class="tags">
+              @for (const counted of store.shelves.value?.tags ?? []; key counted.tag) {
+                <button class="tag" onClick={() => withTag(counted.tag)}>{counted.tag}<small>{` ${counted.count}`}</small></button>
+              }
+            </div>
+          </section>
+        }
+      </>
+    }
+
+    @if (said.value) {
+      <footer>
+        <small>{said.value}</small>
+        <button class="link" onClick={() => store.rescan()} disabled={store.status.value?.scan.running} title="Read again what came, changed or went in the libraries">Rescan</button>
+      </footer>
     }
   </div>
 }

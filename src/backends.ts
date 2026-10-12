@@ -6,8 +6,10 @@
 //   saveProgress(id, record)
 //   names(id)                   the names corrected in a book, as text (or undefined)
 //   saveNames(id, text)
-//   books()                     the books kept: [{ id, name, description, size, deletable }]
-//   addBooks(files)             read and keep [{ name, size, text }]; their records
+//   books(query)                the books asked for, a page of them: { total, offset, books }
+//                               (see catalog.ts for what can be asked, and what a book shows)
+//   tags(limit)                 the tags most books have: [{ tag, count }]
+//   addBooks(files)             read and keep [{ name, size, date, text }]; their records
 //   book(id)                    the record of a book (bookRecord), read again first if an
 //                               older parser read it; null for a book not kept
 //   chapter(id, listed)         a chapter of the record, with its text; null if it is gone
@@ -23,17 +25,16 @@
 // opened as a file, or served by anything else, it keeps them in the browser. The two keep
 // books apart: a book dropped on one is not in the other.
 import { openDB } from 'idb';
-import { Book, bookRecord, PARSER_VERSION } from './book.ts';
+import { bookRecord, PARSER_VERSION } from './book.ts';
 import type { BookRecord } from './book.ts';
 import type { Chapter, Listed } from './parser.ts';
 import type { Reader } from './reading.ts';
+import { entryOf, findBooks, queryString, topTags } from './catalog.ts';
+import type { Listing, Progress, Query, TagCount } from './catalog.ts';
 
-export type FileInfo = { name: string; size: number };
-// a book as the library lists it. `library` and `path` say where it is, for a book of a library
-// the server reads where it is, which is not deleted from the page
-export type BookSummary = { id: string; name: string; description?: string; size: number; library?: string; path?: string; deletable: boolean };
-export type { BookRecord };
-export type Progress = { offset?: number; chapterId?: string; chapterIndex?: number; chapterCount?: number; updatedAt?: string };
+// a file dropped on the page: `date` its time (ms)
+export type FileInfo = { name: string; size: number; date?: number };
+export type { BookRecord, Progress };
 
 export interface Backend {
   settings(): Promise<Record<string, any>>;
@@ -42,7 +43,8 @@ export interface Backend {
   saveProgress(id: string, record: Progress): Promise<unknown>;
   names(id: string): Promise<string | undefined>;
   saveNames(id: string, text: string): Promise<unknown>;
-  books(): Promise<BookSummary[]>;
+  books(query: Query): Promise<Listing>;
+  tags(limit?: number): Promise<TagCount[]>;
   addBooks(files: (FileInfo & { text: string })[]): Promise<BookRecord[]>;
   book(id: string): Promise<BookRecord | null>;
   chapter(id: string, listed: Listed): Promise<Chapter | null>;
@@ -106,7 +108,8 @@ function serverBackend(): Backend {
     saveProgress: (bookId, record) => call('PUT', `progress/${id(bookId)}`, record),
     names: (bookId) => call('GET', `names/${id(bookId)}`),
     saveNames: (bookId, text) => call('PUT', `names/${id(bookId)}`, text),
-    books: () => call('GET', 'books'),
+    books: (query) => call('GET', `books?${queryString(query)}`),
+    tags: (limit = 40) => call('GET', `tags?limit=${limit}`),
     addBooks: (files) => Promise.all(files.map(file => call('POST', 'books', file))),
     book: (bookId) => call('GET', `books/${id(bookId)}`),
     chapter: (bookId, listed) => call('GET', `books/${id(bookId)}/chapters/${id(listed.id)}`),
@@ -142,6 +145,14 @@ async function browserBackend({ readBook }: Reader): Promise<Backend> {
     }
     return found;
   };
+  let catalogued = async () => {
+    let tx = db.transaction(['files', 'books']);
+    let [ids, files, records] = await Promise.all([tx.objectStore('files').getAllKeys(), tx.objectStore('files').getAll(), tx.objectStore('books').getAll()]);
+    let chapters = new Map((records as BookRecord[]).map(record => [record.id, record.chapters.length]));
+    return (files as FileInfo[]).map((file, k) => entryOf({
+      id: String(ids[k]), path: file.name, size: file.size, chapters: chapters.get(String(ids[k])) ?? 0, date: file.date ?? 0, deletable: true,
+    }));
+  };
   let backend: Backend = {
     settings: () => everything('settings'),
     async saveSettings(settings) {
@@ -152,12 +163,14 @@ async function browserBackend({ readBook }: Reader): Promise<Backend> {
     saveProgress: (id, record) => db.put('progress', record, id),
     names: (id) => db.get('names', id),
     saveNames: (id, text) => db.put('names', text, id),
-    // the books as the files they came from, which say what each is
-    books: async () => ((await db.getAll('files')) as FileInfo[]).map(file => ({ ...Book(file), size: file.size, deletable: true })),
+    // the books as the files they came from, which say what each is: a page holds a few, so
+    // every one is looked through here, as the server does through its thousands
+    books: async (query) => findBooks(await catalogued(), await backend.progress(), query),
+    tags: async (limit) => topTags(await catalogued(), limit),
     async addBooks(files) {
       let chapterKeys = (await db.getAllKeys('chapters')) as string[];
       // the books are read before the transaction opens: it would not wait for them
-      let read = await Promise.all(files.map(async ({ name, size, text }) => ({ file: { name, size }, text, book: await readBook({ name }, text) })));
+      let read = await Promise.all(files.map(async ({ name, size, date, text }) => ({ file: { name, size, date: date ?? Date.now() }, text, book: await readBook({ name }, text) })));
       let tx = db.transaction(['files', 'fileContents', 'books', 'chapters'], 'readwrite');
       await Promise.all([
         ...read.flatMap(({ file, text, book }) => [

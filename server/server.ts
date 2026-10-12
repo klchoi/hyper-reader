@@ -24,6 +24,7 @@ import type { IncomingMessage } from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createLibrary } from './library.ts';
+import { queryOf } from '../src/catalog.ts';
 import type { Library, LibraryDir } from './library.ts';
 
 // the page, as built
@@ -62,7 +63,9 @@ function routes(library: Library): Route[] {
     // a book with no names corrected yet has nothing to send, which is no error
     ['GET', /^\/api\/names\/([^/]+)$/, ([id]) => library.names(id), 'text'],
     ['PUT', /^\/api\/names\/([^/]+)$/, ([id], body) => library.saveNames(id, body), 'text'],
-    ['GET', /^\/api\/books$/, () => library.books()],
+    // ?q=&tag=&size=min-max&chapters=min-max&sort=&order=&seed=&offset=&limit= (see src/catalog.ts)
+    ['GET', /^\/api\/books$/, (_, __, query) => library.books(queryOf(query))],
+    ['GET', /^\/api\/tags$/, (_, __, query) => library.tags(Number(query.get('limit')) || undefined)],
     ['POST', /^\/api\/books$/, (_, body) => library.addBook(body ?? {})],
     ['GET', /^\/api\/books\/([^/]+)$/, ([id]) => library.book(id)],
     ['GET', /^\/api\/books\/([^/]+)\/chapters\/([^/]+)$/, ([id, chapterId]) => library.chapter(id, chapterId)],

@@ -34,9 +34,9 @@ describe('the server', () => {
     let answer = type.startsWith('application/json') ? await response.json() : await response.text();
     return { status: response.status, answer };
   };
-  type Summary = { id: string; name: string; library: string; path: string; deletable: boolean };
-  let books = async (): Promise<Summary[]> => (await call('GET', 'books')).answer;
-  let bookNamed = async (name: string) => (await books()).find(book => book.name === name)!;
+  type Shelved = { id: string; title: string; tags: string[]; note?: string; folder?: string; size: number; chapters: number; deletable: boolean };
+  let books = async (query = ''): Promise<Shelved[]> => (await call('GET', `books?limit=100${query}`)).answer.books;
+  let bookNamed = async (title: string) => (await books()).find(book => book.title === title)!;
   // until the scan is done and every book indexed
   let settled = async () => {
     await server.library.scanned();
@@ -77,12 +77,37 @@ describe('the server', () => {
   it('finds the books of a library, each its own by where it is', async () => {
     let found = await books();
     assert.equal(found.length, 2);
-    assert.deepEqual(found.map(book => book.name), ['Sách thử', 'Sách thử']);
+    assert.deepEqual(found.map(book => book.title), ['Sách thử', 'Sách thử']);
     assert.notEqual(found[0].id, found[1].id);
-    assert.ok(found.every(book => /^sach-thu-[0-9a-f]{8}$/.test(book.id) && book.library === 'shelf' && !book.deletable));
+    assert.ok(found.every(book => /^sach-thu-[0-9a-f]{8}$/.test(book.id) && !book.deletable));
+    assert.deepEqual(found.map(book => book.folder).sort(), ['nested', undefined]);
     let { answer: status } = await call('GET', 'library');
     assert.deepEqual(status.libraries, ['shelf']);
     assert.equal(status.scan.files, 2);
+  });
+  it('answers what is asked of the library, a page at a time, and the tags most books have', async () => {
+    let tagged = [
+      { name: 'Một (1-50 chương) (hậu cung, NTL).txt', text: bookText('A') },
+      { name: 'Hai (1-3 chương kết thúc) (Hậu cung).txt', text: bookText('B') },
+    ];
+    let ids = [];
+    for(let book of tagged) ids.push((await call('POST', 'books', book)).answer.id);
+    let asked = async (query: string) => (await call('GET', `books?${query}`)).answer;
+    let found = await asked('tag=h%C3%A2u%20cung&sort=title');
+    assert.equal(found.total, 2);
+    assert.deepEqual(found.books.map((book: Shelved) => [book.title, book.tags]), [['Hai', ['Hậu cung', 'kết thúc']], ['Một', ['hậu cung', 'NTL']]]);
+    assert.equal(found.books[1].note, '1-50 chương');
+    assert.deepEqual((await asked('q=mot')).books.map((book: Shelved) => book.title), ['Một']);
+    assert.deepEqual((await asked('tag=ntl&tag=k%E1%BA%BFt%20th%C3%BAc')).total, 0);
+    let page = await asked('sort=title&limit=2&offset=1');
+    assert.deepEqual([page.total, page.offset, page.books.length], [4, 1, 2]);
+    assert.deepEqual((await asked('sort=random&seed=7')).books.map((book: Shelved) => book.id), (await asked('sort=random&seed=7')).books.map((book: Shelved) => book.id));
+    let largest = Math.max(...(await books()).map(book => book.size));
+    assert.deepEqual([(await asked(`size=${largest + 1}-`)).total, (await asked(`size=-${largest}`)).total], [0, 4]);
+    let { answer: tags } = await call('GET', 'tags?limit=1');
+    // (as either book writes it)
+    assert.deepEqual(tags.map((t: { tag: string; count: number }) => [t.tag.toLowerCase(), t.count]), [['hậu cung', 2]]);
+    for(let id of ids) assert.equal((await call('DELETE', `books/${id}`)).status, 204);
   });
   it('reads a book with the page\'s parser, and cuts a chapter as it does', async () => {
     let { id } = await bookNamed('Sách thử');
@@ -110,9 +135,8 @@ describe('the server', () => {
     assert.ok(fs.existsSync(path.join(data, 'uploads', upload.name)));
     let kept = await bookNamed('Sách tải lên');
     assert.equal(kept.id, record.id);
-    assert.equal(kept.library, 'uploads');
     assert.ok(kept.deletable);
-    let library = (await books()).find(book => book.library === 'shelf')!;
+    let library = (await books()).find(book => !book.deletable)!;
     assert.equal((await call('DELETE', `books/${library.id}`)).status, 403);
     assert.equal((await call('DELETE', `books/${kept.id}`)).status, 204);
     assert.ok(!fs.existsSync(path.join(data, 'uploads', upload.name)));
@@ -139,7 +163,7 @@ describe('the server', () => {
   });
   it('reads a book again when an older parser read it, or its file changed', async () => {
     let file = path.join(shelf, 'Sách thử (1-3 chương).txt');
-    let { id } = (await books()).find(book => book.path === 'Sách thử (1-3 chương).txt')!;
+    let { id } = (await books()).find(book => !book.folder && !book.deletable)!;
     let db = new DatabaseSync(path.join(data, 'library.db'));
     db.prepare('update books set parser = 1 where id = ?').run(id);
     db.close();
@@ -154,7 +178,7 @@ describe('the server', () => {
     await settled();
   });
   it('finds what came, changed and went in a library when scanned again', async () => {
-    let gone = (await books()).find(book => book.library === 'shelf')!;
+    let gone = (await books()).find(book => book.folder === 'nested')!;
     await call('PUT', `progress/${gone.id}`, { offset: 120 });
     fs.rmSync(path.join(shelf, 'nested'), { recursive: true });
     fs.writeFileSync(path.join(shelf, 'Mới (1-3 chương).txt'), bookText('Hoàng Dung'));
@@ -164,7 +188,7 @@ describe('the server', () => {
     assert.equal(scan.files, 2);
     assert.equal(scan.read, 1);
     assert.equal(scan.removed, 1);
-    assert.deepEqual((await books()).map(book => book.name).sort(), ['Mới', 'Sách thử']);
+    assert.deepEqual((await books()).map(book => book.title).sort(), ['Mới', 'Sách thử']);
     // where a book was left outlives it, for it to come back to
     assert.equal((await call('GET', 'progress')).answer[gone.id].offset, 120);
   });

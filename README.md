@@ -31,7 +31,10 @@ processes of their own, and their full text indexed behind them for search (`/ap
 `&book=` for every place in one book), a book opened first; the processes end when they have
 nothing left to do, and with them the memory a big book takes to read (a few hundred MB), so
 the server waits on little (~40-60 MB, and the text of the book being read). The characters a book names most
-are kept with it (`/api/characters?q=`). Where a book was left and its names outlive it, so a
+are kept with it (`/api/characters?q=`). The library is asked of it a page at a time, the server
+looking through all of its books (`/api/books?q=&tag=&size=min-max&chapters=min-max&sort=&offset=&limit=`,
+and `/api/tags` for the tags most books have; see `src/catalog.ts`), so the page holds only the
+few it shows, whatever the size of the library. Where a book was left and its names outlive it, so a
 file that goes and comes back finds them again. It needs nothing but Node (24, for `node:sqlite`
 and for running TypeScript as it is written), answers on this computer only, and runs the page's
 own parser (`src/parser.ts`). Listing the fonts installed
@@ -101,6 +104,10 @@ Vite look for changes, and the server is started again with `docker compose rest
 - `parser.ts` the chapter parser. It touches nothing of the page and nothing of node, so the
   page, its worker, and node (the tests, the tools, the server) all run it as it is.
 - `book.ts` what a book is (`Book`) and what is kept of it (`bookRecord`, `PARSER_VERSION`).
+- `catalog.ts` the library as it is browsed: what a file's name says the book is (its title, its
+  tags in brackets, a note of its length), and the books found by what is asked of the library
+  (words, tags, a size, a length, an order, a page), which the server answers for its thousands
+  and the browser's backend for the few it keeps: the page holds only the page it shows.
 - `reading.ts` the page's reader of books, which hands a book to a worker (`parser-worker.ts`,
   built into the page as a script of its own) and reads it in the page when no worker can run.
 - `main.ts` the page started: the reader of books, and the app mounted on `<body>`.

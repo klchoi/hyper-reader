@@ -15,13 +15,14 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { StatementSync } from 'node:sqlite';
 import type { Part } from '../src/parser.ts';
+import { fold } from '../src/catalog.ts';
 
 // what is searched is folded the same way on both sides. The index takes the text in lower case
 // and with `đ` as `d`, which the tokenizer's removal of diacritics leaves as it is (the tones and
 // the other marks it takes away itself); a name is kept with no marks at all, so `hoang dung`
 // finds `Hoàng Dung`
 export const foldForIndex = (text: string) => text.toLowerCase().replaceAll('đ', 'd');
-export const plain = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replaceAll('đ', 'd').normalize('NFC');
+export const plain = fold;
 
 const MIGRATIONS = [
   `create table books (

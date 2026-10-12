@@ -13,6 +13,8 @@ import { createIndexer } from './indexer.ts';
 import { slug } from '../src/parser.ts';
 import { PARSER_VERSION } from '../src/book.ts';
 import type { BookRecord } from '../src/book.ts';
+import { entryOf, findBooks, topTags } from '../src/catalog.ts';
+import type { Entry, Progress, Query } from '../src/catalog.ts';
 
 const UPLOADS = 'uploads';
 
@@ -67,6 +69,17 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
   // what was left unindexed when the server last stopped
   indexer.nudge();
   let fileOf = (row: BookRow) => path.join(roots.get(row.root) ?? '', row.path);
+  // every book as the library is browsed (see src/catalog.ts), made again once a book came,
+  // changed or went
+  let catalog: Entry[] | null = null;
+  let catalogued = () => catalog ??= store.books().map(row => entryOf({
+    id: row.id, path: row.path, size: row.size, chapters: row.chapterCount, date: row.mtime, deletable: row.root === UPLOADS,
+  }));
+  let forget = (id: string) => {
+    store.forgetBook(id);
+    texts.delete(id);
+    catalog = null;
+  };
   let idOf = (root: string, rel: string, name: string) => `${slug(name).slice(0, 48) || 'book'}-${hashOf(`${root}/${rel.normalize()}`)}`;
 
   // the text the offsets of a book count in, kept for the book read last only: a big one is tens
@@ -95,6 +108,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
     let id = idOf(root, rel, read.name);
     store.keepBook({ id, root, path: rel, ...read });
     texts.delete(id);
+    catalog = null;
     indexer.nudge();
     return id;
   }
@@ -103,12 +117,6 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
   let recordOf = (row: BookRow): BookRecord => ({
     id: row.id, name: row.name, description: row.description ?? undefined, parser: row.parser,
     chapters: store.chapters(row.id).map(listedOf),
-  });
-  let summaryOf = (row: BookRow) => ({
-    id: row.id, name: row.name, description: row.description ?? undefined, size: row.size, library: row.root, path: row.path,
-    chapterCount: row.chapterCount, indexed: row.indexed === PARSER_VERSION,
-    // a book of a library is the reader's file: it is not deleted from here
-    deletable: row.root === UPLOADS,
   });
 
   // ---- scanning
@@ -144,8 +152,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
       }
       // a book whose file is gone goes; where it was left and its names stay, for it to come back to
       for(let gone of known.values()) {
-        store.forgetBook(gone.id);
-        texts.delete(gone.id);
+        forget(gone.id);
         now.removed++;
       }
     }
@@ -169,7 +176,11 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
     saveProgress: async (id: string, record: unknown) => store.saveProgress(id, record),
     names: async (id: string) => store.names(id),
     saveNames: async (id: string, text: string) => store.saveNames(id, text),
-    books: async () => store.books().map(summaryOf),
+    // the books asked for, a page of them (see src/catalog.ts); a book of a library is the
+    // reader's own file, and only those dropped on the page can be deleted from it
+    books: async (query: Query = {}) => findBooks(catalogued(), store.progress() as Record<string, Progress>, query),
+    // the tags most books have
+    tags: async (limit = 40) => topTags(catalogued(), limit),
     // a book dropped on the page, kept with the uploads under its own name: one of that name
     // already there is the same book, written over
     async addBook({ name, text }: { name?: unknown; text?: unknown }) {
@@ -203,7 +214,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
       let row = store.book(id);
       if(!row) return null;
       if(!fs.existsSync(fileOf(row))) {
-        store.forgetBook(id);
+        forget(id);
         return null;
       }
       return recordOf(store.book(await readBook(row.root, row.path))!);
@@ -213,8 +224,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
       if(!row) return;
       if(row.root !== UPLOADS) throw refusal('a book of a library is the reader\'s own file, and is not deleted from here', 403);
       await fs.promises.rm(fileOf(row), { force: true });
-      store.forgetBook(id);
-      texts.delete(id);
+      forget(id);
     },
 
     // ---- the libraries

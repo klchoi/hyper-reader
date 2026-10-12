@@ -2067,87 +2067,6 @@ function own_anchor(node, anchor) {
 	});
 }
 /**
-* Wire up a `ref={expr}` attribute. `expr` may be:
-*   - a callback function — invoked with the element on mount; if it returns
-*     a function, that function runs as the cleanup on unmount.
-*   - a `Tracked` (e.g. from `track()`) — `tracked.value` is set to the
-*     element on mount and reset to `null` on unmount.
-*   - a plain mutable var (`let foo;`) — the element is assigned to the
-*     variable on mount and reset to `null` on unmount.
-*   - an array of any of the above.
-*
-* `get_fn` is invoked through `untrack` so the surrounding render block
-* doesn't subscribe to whatever the thunk happens to read. The supported
-* shape is to pass the ref slot itself (`ref={tracker}`); a foot-gun like
-* `ref={tracker.value}` would otherwise read the cell reactively and cause
-* spurious re-runs. Read untracked, the value is fixed for the life of the
-* enclosing block, so each ref is a single effect block keyed on its state
-* rather than a render block re-evaluating the thunk.
-*
-* @param {Element} element
-* @param {() => any} get_fn
-* @param {(value: any) => void} [set_fn]
-* @returns {void}
-*/
-function ref(element, get_fn, set_fn) {
-	apply_ref(element, untrack(get_fn), set_fn);
-}
-/**
-* @param {Element} element
-* @param {any} ref_value
-* @param {((value: any) => void) | undefined} set_fn
-* @returns {void}
-*/
-function apply_ref(element, ref_value, set_fn) {
-	if (is_array(ref_value)) for (var i = 0; i < ref_value.length; i++) apply_ref(element, ref_value[i], void 0);
-	else if (typeof ref_value === "function") block(8, run_function_ref, {
-		e: element,
-		f: ref_value
-	});
-	else if (is_ripple_object(ref_value)) block(8, run_tracked_ref, {
-		e: element,
-		t: ref_value
-	});
-	else if (set_fn !== void 0) block(8, run_set_ref, {
-		e: element,
-		f: set_fn
-	});
-}
-/**
-* The callback's return value is the effect's teardown.
-* @param {{ e: Element, f: (element: Element) => any }} s
-*/
-function run_function_ref(s) {
-	return s.f(s.e);
-}
-/**
-* @param {{ e: Element, t: { value: any } }} s
-*/
-function run_tracked_ref(s) {
-	s.t.value = s.e;
-	return clear_tracked_ref;
-}
-/**
-* Teardowns keyed on block state receive it (see `run_teardown`).
-* @param {{ e: Element, t: { value: any } }} s
-*/
-function clear_tracked_ref(s) {
-	s.t.value = null;
-}
-/**
-* @param {{ e: Element, f: (value: any) => void }} s
-*/
-function run_set_ref(s) {
-	s.f(s.e);
-	return clear_set_ref;
-}
-/**
-* @param {{ e: Element, f: (value: any) => void }} s
-*/
-function clear_set_ref(s) {
-	s.f(null);
-}
-/**
 * @param {() => (void | (() => void))} fn
 * @returns {Block}
 */
@@ -4778,7 +4697,7 @@ var DIGITS = /\d+(?:\.\d+)?/y;
 var LETTERS = /\p{L}+/uy;
 var NEXT_WORD = / \p{L}+/uy;
 var NEXT_MARK = /\s*(\S)/y;
-var readAt = (re, line, pos) => {
+var readAt$1 = (re, line, pos) => {
 	re.lastIndex = pos;
 	return re.exec(line);
 };
@@ -4815,7 +4734,7 @@ function lexLine(line, lower, names) {
 			continue;
 		}
 		if (/\d/.test(ch)) {
-			let m = readAt(DIGITS, line, pos);
+			let m = readAt$1(DIGITS, line, pos);
 			let [major, minor] = m[0].split(".");
 			if (minor != null && Number(major) === 0) {
 				add("x", pos + m[0].length);
@@ -4828,7 +4747,7 @@ function lexLine(line, lower, names) {
 			});
 			continue;
 		}
-		let letters = readAt(LETTERS, line, pos);
+		let letters = readAt$1(LETTERS, line, pos);
 		if (!letters) {
 			add("S", pos + 1);
 			continue;
@@ -4838,7 +4757,7 @@ function lexLine(line, lower, names) {
 		let words = [lowered];
 		let ahead = pos + word.length;
 		for (let k = 0; k < 4 && NUMBER_STARTS.has(lowered); k++) {
-			let next = readAt(NEXT_WORD, line, ahead);
+			let next = readAt$1(NEXT_WORD, line, ahead);
 			if (!next) break;
 			words.push(lower.slice(ahead + 1, ahead + next[0].length));
 			ahead += next[0].length;
@@ -4862,7 +4781,7 @@ function lexLine(line, lower, names) {
 		});
 		else if (known) add(known[0], pos + known[2], known[1]);
 		else if (lowered === "kết" || lowered === "cuối") {
-			let after = readAt(NEXT_MARK, line, end);
+			let after = readAt$1(NEXT_MARK, line, end);
 			add(!after || /[^\p{L}\p{N}]/u.test(after[1]) ? "E" : "x", end, { word: lowered });
 		} else add("x", end);
 	}
@@ -6140,6 +6059,158 @@ replaceTraps((oldTraps) => ({
 		return isIteratorProp(target, prop) || oldTraps.has(target, prop);
 	}
 }));
+var MOST = 100;
+var fold = (text) => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replaceAll("đ", "d").normalize("NFC");
+var BRACKETED = /[(（[【]([^()（）[\]【】]*)[)）\]】]/gu;
+var LENGTH_WORDS = [
+	"chương",
+	"bộ",
+	"quyển",
+	"tập",
+	"hồi",
+	"phiên ngoại",
+	"ngoại truyện",
+	"tiền truyện",
+	"thiên",
+	"phần"
+];
+var FINISHED = /kết thúc|hoàn thành|hoàn tất|\bfull\b|\bend\b/giu;
+var FINISHED_TAG = "kết thúc";
+var isLength = (piece) => {
+	let lower = piece.toLowerCase();
+	return /\d/.test(lower) && LENGTH_WORDS.some((word) => lower.includes(word)) || /^\d+(?:[.,]\d+)?(?:\s*[-~]\s*\d+(?:[.,]\d+)?)?$/.test(lower);
+};
+var unfinished = (piece) => piece.replace(FINISHED, " ").replace(/\s+/g, " ").trim();
+function describeFile(path) {
+	let parts = path.normalize().split("/");
+	let name = parts.pop().replace(/\.txt$/i, "");
+	let folder = parts[0]?.replace(/^[_\s]+/, "").trim() || void 0;
+	let tags = [];
+	let notes = [];
+	let finished = false;
+	for (let [, inside] of name.matchAll(BRACKETED)) for (let piece of inside.split(/[,，、;；]/u).map((p) => p.trim()).filter(Boolean)) {
+		let rest = unfinished(piece);
+		if (rest !== piece) finished = true;
+		if (isLength(piece) || rest !== piece && (!rest || isLength(rest))) notes.push(piece);
+		else tags.push(piece);
+	}
+	let title = name.replace(BRACKETED, " ").replace(/\s+/g, " ").trim();
+	let tilde = /\s+~\s*(.+)$/u.exec(title);
+	if (tilde) {
+		notes.push(tilde[1]);
+		title = title.slice(0, tilde.index);
+	}
+	title = title.replace(/^[\s\-–—:~·,.]+|[\s\-–—:~·,.]+$/gu, "") || name;
+	if (finished && !tags.some((tag) => fold(tag) === fold("kết thúc"))) tags.push(FINISHED_TAG);
+	return {
+		title: title.replace(/^\p{Ll}/u, (c) => c.toUpperCase()),
+		tags: [...new Map(tags.map((tag) => [fold(tag), tag])).values()],
+		note: notes.join(" · ") || void 0,
+		folder
+	};
+}
+function entryOf({ id, path, size, chapters, date, deletable }) {
+	let described = describeFile(path);
+	return {
+		id,
+		...described,
+		size,
+		chapters,
+		date,
+		deletable,
+		words: fold([
+			described.title,
+			...described.tags,
+			described.folder ?? ""
+		].join(" ")),
+		tagKeys: described.tags.map(fold)
+	};
+}
+var byTitle = new Intl.Collator("vi", {
+	sensitivity: "base",
+	numeric: true
+});
+function shuffled(id, seed) {
+	let hash = (seed ^ 2166136261) >>> 0;
+	for (let k = 0; k < id.length; k++) hash = Math.imul(hash ^ id.charCodeAt(k), 16777619) >>> 0;
+	hash ^= hash >>> 15;
+	return Math.imul(hash, 739982445) >>> 0;
+}
+var within = (value, [min, max] = [null, null]) => (min == null || value >= min) && (max == null || value <= max);
+var readAt = (read) => read?.updatedAt ? Date.parse(read.updatedAt) || 0 : 0;
+function findBooks(entries, progress, query = {}) {
+	let words = fold(query.q ?? "").split(/\s+/).filter(Boolean);
+	let tags = (query.tags ?? []).map(fold);
+	let sort = query.sort ?? "latest";
+	let found = entries.filter((entry) => words.every((word) => entry.words.includes(word)) && tags.every((tag) => entry.tagKeys.includes(tag)) && within(entry.size, query.size) && within(entry.chapters, query.chapters) && (sort !== "read" || readAt(progress[entry.id]) > 0));
+	let seed = query.seed ?? 0;
+	let keys = {
+		latest: (e) => e.date,
+		read: (e) => readAt(progress[e.id]),
+		size: (e) => e.size,
+		chapters: (e) => e.chapters,
+		random: (e) => shuffled(e.id, seed)
+	};
+	let descending = query.order ? query.order === "desc" : sort !== "title" && sort !== "random";
+	if (words.length && !query.sort) {
+		let phrase = words.join(" ");
+		let rank = (entry) => {
+			let title = fold(entry.title);
+			return title.startsWith(phrase) ? 0 : title.includes(phrase) ? 1 : entry.words.includes(phrase) ? 2 : 3;
+		};
+		let ranked = new Map(found.map((entry) => [entry, rank(entry)]));
+		found.sort((a, z) => ranked.get(a) - ranked.get(z) || byTitle.compare(a.title, z.title));
+		descending = query.order === "desc";
+	} else if (sort === "title") found.sort((a, z) => byTitle.compare(a.title, z.title));
+	else {
+		let key = keys[sort];
+		let ranked = new Map(found.map((entry) => [entry, key(entry)]));
+		found.sort((a, z) => ranked.get(a) - ranked.get(z) || byTitle.compare(a.title, z.title));
+	}
+	if (descending) found.reverse();
+	let offset = Math.max(0, Math.floor(query.offset ?? 0));
+	let limit = Math.min(MOST, Math.max(1, Math.floor(query.limit ?? 30)));
+	return {
+		total: found.length,
+		offset,
+		books: found.slice(offset, offset + limit).map(({ words: _words, tagKeys: _tagKeys, ...shown }) => ({
+			...shown,
+			...progress[shown.id] && { read: progress[shown.id] }
+		}))
+	};
+}
+function topTags(entries, limit = 40) {
+	let counted = /* @__PURE__ */ new Map();
+	for (let entry of entries) entry.tags.forEach((tag, k) => {
+		let key = entry.tagKeys[k];
+		let tally = counted.get(key) ?? counted.set(key, {
+			count: 0,
+			spellings: /* @__PURE__ */ new Map()
+		}).get(key);
+		tally.count++;
+		tally.spellings.set(tag, (tally.spellings.get(tag) ?? 0) + 1);
+	});
+	return [...counted.values()].sort((a, z) => z.count - a.count).slice(0, limit).map(({ count, spellings }) => ({
+		tag: [...spellings].sort((a, z) => z[1] - a[1])[0][0],
+		count
+	}));
+}
+var rangeText = ([min, max]) => `${min ?? ""}-${max ?? ""}`;
+function queryString(query) {
+	let params = new URLSearchParams();
+	if (query.q?.trim()) params.set("q", query.q.trim());
+	for (let tag of query.tags ?? []) params.append("tag", tag);
+	if (query.size) params.set("size", rangeText(query.size));
+	if (query.chapters) params.set("chapters", rangeText(query.chapters));
+	for (let key of [
+		"sort",
+		"order",
+		"seed",
+		"offset",
+		"limit"
+	]) if (query[key] != null) params.set(key, String(query[key]));
+	return params.toString();
+}
 //#endregion
 //#region src/backends.ts
 async function chooseBackend(reader) {
@@ -6178,7 +6249,8 @@ function serverBackend() {
 		saveProgress: (bookId, record) => call("PUT", `progress/${id(bookId)}`, record),
 		names: (bookId) => call("GET", `names/${id(bookId)}`),
 		saveNames: (bookId, text) => call("PUT", `names/${id(bookId)}`, text),
-		books: () => call("GET", "books"),
+		books: (query) => call("GET", `books?${queryString(query)}`),
+		tags: (limit = 40) => call("GET", `tags?limit=${limit}`),
 		addBooks: (files) => Promise.all(files.map((file) => call("POST", "books", file))),
 		book: (bookId) => call("GET", `books/${id(bookId)}`),
 		chapter: (bookId, listed) => call("GET", `books/${id(bookId)}/chapters/${id(listed.id)}`),
@@ -6219,6 +6291,23 @@ async function browserBackend({ readBook }) {
 		for (let cursor = await db.transaction(store).store.openCursor(); cursor; cursor = await cursor.continue()) found[cursor.key] = cursor.value;
 		return found;
 	};
+	let catalogued = async () => {
+		let tx = db.transaction(["files", "books"]);
+		let [ids, files, records] = await Promise.all([
+			tx.objectStore("files").getAllKeys(),
+			tx.objectStore("files").getAll(),
+			tx.objectStore("books").getAll()
+		]);
+		let chapters = new Map(records.map((record) => [record.id, record.chapters.length]));
+		return files.map((file, k) => entryOf({
+			id: String(ids[k]),
+			path: file.name,
+			size: file.size,
+			chapters: chapters.get(String(ids[k])) ?? 0,
+			date: file.date ?? 0,
+			deletable: true
+		}));
+	};
 	let backend = {
 		settings: () => everything("settings"),
 		async saveSettings(settings) {
@@ -6229,17 +6318,15 @@ async function browserBackend({ readBook }) {
 		saveProgress: (id, record) => db.put("progress", record, id),
 		names: (id) => db.get("names", id),
 		saveNames: (id, text) => db.put("names", text, id),
-		books: async () => (await db.getAll("files")).map((file) => ({
-			...Book(file),
-			size: file.size,
-			deletable: true
-		})),
+		books: async (query) => findBooks(await catalogued(), await backend.progress(), query),
+		tags: async (limit) => topTags(await catalogued(), limit),
 		async addBooks(files) {
 			let chapterKeys = await db.getAllKeys("chapters");
-			let read = await Promise.all(files.map(async ({ name, size, text }) => ({
+			let read = await Promise.all(files.map(async ({ name, size, date, text }) => ({
 				file: {
 					name,
-					size
+					size,
+					date: date ?? Date.now()
 				},
 				text,
 				book: await readBook({ name }, text)
@@ -9806,6 +9893,13 @@ function detectedNameAt(x, y) {
 //#endregion
 //#region src/store.ts
 var LISTED = 200;
+var FRONT = {
+	reading: 6,
+	latest: 10,
+	random: 6,
+	tags: 40
+};
+var newSeed = () => Math.floor(Math.random() * 2 ** 31);
 var cssFontFamily = (family) => `"${family.replace(/["\\]/g, "")}"`;
 var fontSettings = {
 	reading: {
@@ -9840,15 +9934,17 @@ function applyDataset(key, value) {
 function createStore({ reader }) {
 	const router = createRouter();
 	let backend;
-	const books = track([]);
 	const book = track(null);
 	const chapter = track(null);
 	const opening = track(null);
 	const progress = track({});
-	const settings = track({ sort: {
-		field: "updatedAt",
-		direction: "desc"
-	} });
+	const settings = track({});
+	const shelves = track(null);
+	const finding = track(null);
+	const paletteBooks = track({
+		total: 0,
+		books: []
+	});
 	const palette = track({
 		open: false,
 		text: "",
@@ -9877,19 +9973,16 @@ function createStore({ reader }) {
 	const namesEditorOpen = track(false);
 	const addName = track(null);
 	const fixNames = track(() => nameFixer(names.value));
-	const bookCommands = track(() => books.value.map(({ id, name }) => {
-		let { offset, chapterId } = progress.value[id] || {};
-		return {
-			key: `book:${id}`,
-			label: name,
-			open: {
-				bookId: id,
-				offset,
-				chapterId
-			},
-			term: latinize(name).toLowerCase()
-		};
-	}));
+	const bookCommands = track(() => paletteBooks.value.books.map(({ id, title, read }) => ({
+		key: `book:${id}`,
+		label: title,
+		open: {
+			bookId: id,
+			offset: read?.offset,
+			chapterId: read?.chapterId
+		},
+		term: ""
+	})));
 	const chapterCommands = track(() => {
 		let open = book.value;
 		if (!open) return [];
@@ -9921,9 +10014,9 @@ function createStore({ reader }) {
 			mention: m
 		}));
 	});
-	const named = track(() => (book.value ? chapterCommands.value : bookCommands.value).filter((c) => c.term.includes(palette.value.q)));
+	const named = track(() => book.value ? chapterCommands.value.filter((c) => c.term.includes(palette.value.q)) : bookCommands.value);
 	const commands = track(() => [...named.value.slice(0, LISTED), ...mentionCommands.value]);
-	const unlisted = track(() => Math.max(0, named.value.length - LISTED));
+	const unlisted = track(() => book.value ? Math.max(0, named.value.length - LISTED) : paletteBooks.value.total - paletteBooks.value.books.length);
 	const selectedCommand = track(() => {
 		let found = commands.value;
 		return found[(palette.value.selectedIndex + found.length) % found.length];
@@ -9942,13 +10035,6 @@ function createStore({ reader }) {
 	async function chooseColor(color) {
 		await saveSettings({ [`color:${getColorScheme()}`]: color });
 		highlight();
-	}
-	function sortBy(field, first = "asc") {
-		let { sort } = settings.value;
-		return saveSettings({ sort: {
-			field,
-			direction: sort.field === field && sort.direction === first ? first === "asc" ? "desc" : "asc" : first
-		} });
 	}
 	async function loadFonts(force = false) {
 		if (!force && settings.value.fonts?.length > 0) return;
@@ -9985,19 +10071,110 @@ function createStore({ reader }) {
 		};
 	};
 	const chooseFont = (font) => saveSettings({ [fontSettings[fontPicker.value.target].family]: font });
-	async function loadBooks() {
-		let kept = await backend.books();
-		let byName = new Intl.Collator("vi-VN", { sensitivity: "accent" });
-		kept.sort((a, z) => byName.compare(a.name, z.name));
-		books.value = kept;
+	async function loadShelves() {
+		let seed = newSeed();
+		let [reading, latest, random, tags] = await Promise.all([
+			backend.books({
+				sort: "read",
+				limit: FRONT.reading
+			}),
+			backend.books({
+				sort: "latest",
+				limit: FRONT.latest
+			}),
+			backend.books({
+				sort: "random",
+				seed,
+				limit: FRONT.random
+			}),
+			backend.tags(FRONT.tags)
+		]);
+		shelves.value = {
+			reading: reading.books,
+			latest: latest.books,
+			random: random.books,
+			seed,
+			tags
+		};
+	}
+	async function shuffle() {
+		let seed = newSeed();
+		let { books: random } = await backend.books({
+			sort: "random",
+			seed,
+			limit: FRONT.random
+		});
+		if (shelves.value) shelves.value = {
+			...shelves.value,
+			random,
+			seed
+		};
+	}
+	let findTimer;
+	let asking = 0;
+	function find(query, wait = 0) {
+		clearTimeout(findTimer);
+		let ask = ++asking;
+		if (!query) return void (finding.value = null);
+		finding.value = {
+			query,
+			total: finding.value?.total ?? 0,
+			books: finding.value?.books ?? [],
+			busy: true
+		};
+		findTimer = setTimeout(async () => {
+			let { total, books } = await backend.books({
+				...query,
+				offset: 0,
+				limit: 30
+			});
+			if (ask === asking) finding.value = {
+				query,
+				total,
+				books,
+				busy: false
+			};
+		}, wait);
+	}
+	async function findMore() {
+		let now = finding.value;
+		if (!now || now.busy || now.books.length >= now.total) return;
+		let ask = asking;
+		finding.value = {
+			...now,
+			busy: true
+		};
+		let { total, books } = await backend.books({
+			...now.query,
+			offset: now.books.length,
+			limit: 30
+		});
+		if (ask === asking) finding.value = {
+			...now,
+			total,
+			books: [...now.books, ...books],
+			busy: false
+		};
+	}
+	function refreshLibrary() {
+		loadShelves();
+		if (finding.value) find(finding.value.query);
 	}
 	async function loadProgress() {
 		progress.value = await backend.progress();
 	}
 	let progressTimer;
+	let unsaved = null;
 	function saveProgressLater(open, at, offset, wait) {
 		clearTimeout(progressTimer);
-		progressTimer = setTimeout(() => saveProgress(open, at, offset), wait);
+		unsaved = () => saveProgress(open, at, offset);
+		progressTimer = setTimeout(() => saveNow(), wait);
+	}
+	function saveNow() {
+		clearTimeout(progressTimer);
+		let save = unsaved;
+		unsaved = null;
+		return save?.() ?? Promise.resolve();
 	}
 	async function saveProgress(open, at, offset) {
 		let record = {
@@ -10111,10 +10288,10 @@ function createStore({ reader }) {
 		opening.value = null;
 		book.value = null;
 		chapter.value = null;
-		clearTimeout(progressTimer);
 		router.push({});
 		document.title = "Text Reader";
 		togglePalette(false);
+		saveNow().then(refreshLibrary);
 		await tick();
 		requestAnimationFrame(() => scroll(0, 0));
 	}
@@ -10124,6 +10301,7 @@ function createStore({ reader }) {
 			fileReader.addEventListener("load", () => resolve({
 				name: file.name,
 				size: file.size,
+				date: file.lastModified,
 				text: fileReader.result
 			}));
 			fileReader.readAsText(file);
@@ -10131,7 +10309,7 @@ function createStore({ reader }) {
 		let read = [];
 		for (let file of dropped) read.push(await readFile(file));
 		let added = await backend.addBooks(read);
-		loadBooks();
+		refreshLibrary();
 		watchStatus();
 		let inNewTabs = added;
 		let here;
@@ -10168,7 +10346,7 @@ function createStore({ reader }) {
 	}
 	async function deleteBook(bookId) {
 		await backend.deleteBook(bookId);
-		books.value = books.value.filter((b) => b.id !== bookId);
+		refreshLibrary();
 	}
 	function highlight() {
 		highlightNames(names.value, articleNames);
@@ -10218,7 +10396,7 @@ function createStore({ reader }) {
 			open: opened
 		};
 		if (!opened) return;
-		if (text !== void 0) searchCommands(text);
+		if (text !== void 0 || !book.value) searchCommands(text ?? palette.value.text);
 		await nextTick();
 		document.querySelector("#command-palette input")?.select();
 		highlightMatches();
@@ -10243,6 +10421,7 @@ function createStore({ reader }) {
 		});
 	}
 	let mentionsTimer;
+	let paletteTimer;
 	async function searchCommands(text) {
 		let q = text.trim().toLowerCase();
 		palette.value = {
@@ -10252,7 +10431,25 @@ function createStore({ reader }) {
 			selectedIndex: 0
 		};
 		clearTimeout(mentionsTimer);
+		clearTimeout(paletteTimer);
 		let open = book.value;
+		if (!open) paletteTimer = setTimeout(async () => {
+			let found = await backend.books(q ? {
+				q,
+				limit: 50
+			} : {
+				sort: "read",
+				limit: 50
+			});
+			if (!q && !found.total) found = await backend.books({
+				sort: "latest",
+				limit: 50
+			});
+			if (palette.value.q !== q || book.value) return;
+			paletteBooks.value = found;
+			selectCommand(0);
+			highlightMatches();
+		}, q ? 150 : 0);
 		if (open && backend.searchBook && q.length >= 2) mentionsTimer = setTimeout(async () => {
 			let { indexed, total, mentions: places } = await backend.searchBook(text.trim(), open.id);
 			if (palette.value.q !== q || book.value?.id !== open.id) return;
@@ -10306,7 +10503,7 @@ function createStore({ reader }) {
 		let was = status.value;
 		let now = await backend.status();
 		status.value = now;
-		if (was?.scan.running && !now.scan.running) loadBooks();
+		if (was?.scan.running && !now.scan.running) refreshLibrary();
 		if (now.scan.running || now.index.done < now.index.total) statusTimer = setTimeout(watchStatus, 1500);
 	}
 	async function rescan() {
@@ -10357,7 +10554,7 @@ function createStore({ reader }) {
 		applySettings(await backend.settings());
 		searching.value = !!backend.searchBook;
 		loadProgress();
-		loadBooks();
+		loadShelves();
 		watchStatus();
 		let { book: bookId, offset, chapter: chapterId } = router.current();
 		router.replace({
@@ -10381,7 +10578,6 @@ function createStore({ reader }) {
 	}
 	return {
 		router,
-		books,
 		book,
 		chapter,
 		opening,
@@ -10393,6 +10589,11 @@ function createStore({ reader }) {
 		names,
 		namesEditorOpen,
 		addName,
+		shelves,
+		finding,
+		shuffle,
+		find,
+		findMore,
 		fixNames,
 		commands,
 		unlisted,
@@ -10406,7 +10607,6 @@ function createStore({ reader }) {
 		applySettings,
 		saveSettings,
 		chooseColor,
-		sortBy,
 		loadFonts,
 		toggleSettings,
 		setFontTarget,
@@ -10598,7 +10798,7 @@ function consequent$7(__anchor, { a: pattern, b: open, c: selector, d: activeId,
 	});
 	append(__anchor, li);
 }
-function alternate$3(__anchor, { a: pattern, b: open, c: selector, d: activeId, e: __block }) {
+function alternate$4(__anchor, { a: pattern, b: open, c: selector, d: activeId, e: __block }) {
 	var li_1 = root_3$4();
 	var a = hydrating ? hydrate_first_child() : li_1.firstChild;
 	a.__click = (event) => open(event, get(pattern).offset);
@@ -10624,7 +10824,7 @@ function alternate$3(__anchor, { a: pattern, b: open, c: selector, d: activeId, 
 }
 function if_2$4({ a: pattern, b: open, c: selector, d: activeId, e: __block }) {
 	if (get(pattern).book) return consequent$7;
-	else return alternate$3;
+	else return alternate$4;
 }
 function render_3$4(__prev) {
 	var __a = if_2$4({
@@ -10643,12 +10843,12 @@ function render_4$3(__prev) {
 function consequent_2$4(__anchor, { a: rows, b: activeId, c: open, d: __block, e: digits }) {
 	var ol = root_1$8();
 	{
-		const selector$4 = selector(() => activeId.value);
+		const selector$5 = selector(() => activeId.value);
 		for_block_keyed(ol, () => rows.value, (__anchor, pattern) => {
 			var ifs_1 = if_static(__anchor, if_2$4, 3, {
 				a: pattern,
 				b: open,
-				c: selector$4,
+				c: selector$5,
 				d: activeId,
 				e: __block
 			});
@@ -10656,7 +10856,7 @@ function consequent_2$4(__anchor, { a: rows, b: activeId, c: open, d: __block, e
 				a: UNINITIALIZED,
 				_a: pattern,
 				_b: open,
-				_c: selector$4,
+				_c: selector$5,
 				_d: activeId,
 				_e: __block,
 				_f: ifs_1
@@ -10770,50 +10970,133 @@ function ChapterList() {
 delegate(["click"]);
 //#endregion
 //#region src/Library.tsrx
-var root_1$7 = template_el("div", ["class", "bar"], [
-	["input", [
-		"type",
-		"search",
-		"placeholder",
-		"Search for a character, or for what the books say"
-	]],
-	[
-		"small",
-		null,
-		" "
-	],
-	[
-		"button",
-		["title", "Read again what came, changed or went in the libraries"],
-		"Rescan"
-	]
-], 1);
+var root_2$5 = template_el("button");
 function render$8(__prev) {
-	__prev._a.disabled = __prev._b.status.value?.scan?.running;
+	var __a = get(__prev._a).label;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+	var __b = { selected: with_scope(__prev._c, () => sameRange(__prev._d.value.size, get(__prev._a).range)) };
+	if (__prev.b !== __b) set_class_value(__prev._b, __prev.b = __b);
 }
-function consequent$6(__anchor, { a: store, b: __block, c: said }) {
-	var div_1 = root_1$7();
-	var input = hydrating ? hydrate_first_child() : div_1.firstChild;
-	input.__input = (event) => with_scope(__block, () => store.searchLibrary(event.currentTarget.value));
-	var small = hydrating ? hydrate_next_sibling() : input.nextSibling;
-	expression(hydrating ? hydrate_first_child() : small.firstChild, () => said.value);
-	var button = hydrating ? hydrate_next_sibling() : small.nextSibling;
-	button.__click = () => with_scope(__block, () => store.rescan());
-	render$10(render$8, {
-		_a: button,
-		_b: store
-	});
-	append(__anchor, div_1);
+var root_3$3 = template_el("button");
+function render_1$6(__prev) {
+	var __a = get(__prev._a).label;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+	var __b = { selected: with_scope(__prev._c, () => sameRange(__prev._d.value.chapters, get(__prev._a).range)) };
+	if (__prev.b !== __b) set_class_value(__prev._b, __prev.b = __b);
 }
-function if_1$6({ a: store, b: __block, c: said }) {
-	if (store.searching.value) return consequent$6;
+var root_4$3 = template_el("button");
+function render_2$5(__prev) {
+	var __pattern_2 = get(__prev._a);
+	var __a = __pattern_2.label;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+	var __b = { selected: selector_match(__prev._c, __pattern_2.sort) };
+	if (__prev.b !== __b) set_class_value(__prev._b, __prev.b = __b);
 }
-var root_5$2 = template_el("li", null, [[
+var root_1$7 = template_el("div", ["class", "filters"], [
+	["div", ["class", "choices"]],
+	["div", ["class", "choices"]],
+	["div", ["class", "choices"]]
+]);
+function consequent$6(__anchor, { a: filtersOpen, b: ask, c: __block, d: asked }) {
+	var div_2 = root_1$7();
+	var div_3 = hydrating ? hydrate_first_child() : div_2.firstChild;
+	for_block_keyed(div_3, () => SIZES, (__anchor, pattern) => {
+		var button_1 = root_2$5();
+		button_1.__click = () => ask({ size: get(pattern).range });
+		item({
+			a: "",
+			b: UNINITIALIZED,
+			_a: pattern,
+			_b: button_1,
+			_c: __block,
+			_d: asked
+		});
+		append(__anchor, button_1);
+	}, 4, (pattern) => pattern.label, void 0, void 0, render$8);
+	var div_4 = hydrating ? hydrate_next_sibling() : div_3.nextSibling;
+	for_block_keyed(div_4, () => LENGTHS, (__anchor, pattern_1) => {
+		var button_2 = root_3$3();
+		button_2.__click = () => ask({ chapters: get(pattern_1).range });
+		item({
+			a: "",
+			b: UNINITIALIZED,
+			_a: pattern_1,
+			_b: button_2,
+			_c: __block,
+			_d: asked
+		});
+		append(__anchor, button_2);
+	}, 4, (pattern_1) => pattern_1.label, void 0, void 0, render_1$6);
+	var div_5 = hydrating ? hydrate_next_sibling() : div_4.nextSibling;
+	{
+		const selector$4 = selector(() => asked.value.sort);
+		for_block_keyed(div_5, () => SORTS, (__anchor, pattern_2) => {
+			var button_3 = root_4$3();
+			button_3.__click = () => ask({
+				sort: get(pattern_2).sort,
+				seed: get(pattern_2).sort === "random" ? Math.floor(Math.random() * 2 ** 31) : void 0
+			});
+			item({
+				a: "",
+				b: UNINITIALIZED,
+				_a: pattern_2,
+				_b: button_3,
+				_c: selector$4
+			});
+			append(__anchor, button_3);
+		}, 4, (pattern_2) => pattern_2.label, void 0, void 0, render_2$5);
+	}
+	append(__anchor, div_2);
+}
+function if_1$6({ a: filtersOpen, b: ask, c: __block, d: asked }) {
+	if (filtersOpen.value) return consequent$6;
+}
+var root_6$1 = template_el("button", [
+	"title",
+	"Leave this tag out",
+	"class",
+	"tag selected"
+]);
+function render_3$3(__prev) {
+	var __a = `${get(__prev._a)} ×`;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+}
+var root_5$2 = template_el("div", ["class", "tags asked"]);
+function consequent_1$3(__anchor, { a: asked, b: ask }) {
+	var div_6 = root_5$2();
+	for_block_keyed(div_6, () => asked.value.tags ?? [], (__anchor, pattern_3) => {
+		var button_4 = root_6$1();
+		button_4.__click = () => ask({ tags: (asked.value.tags ?? []).filter((t) => t !== get(pattern_3)) });
+		item({
+			a: "",
+			_a: pattern_3,
+			_b: button_4
+		});
+		append(__anchor, button_4);
+	}, 4, void 0, void 0, void 0, render_3$3);
+	append(__anchor, div_6);
+}
+function if_2$3({ a: asked, b: ask }) {
+	if ((asked.value.tags ?? []).length > 0) return consequent_1$3;
+}
+var root_10 = template_el("li", null, [[
 	"a",
 	null,
 	" "
 ], ["small"]]);
-function render_1$6(__prev) {
+function render_4$2(__prev) {
 	var __a = with_scope(__prev._a, () => __prev._b.router.route({ book: get(__prev._c).id }));
 	if (__prev.a !== __a) set_attribute(__prev._d, "href", __prev.a = __a);
 	var __b = ` ${get(__prev._c).mentions}`;
@@ -10822,7 +11105,7 @@ function render_1$6(__prev) {
 		__prev.b = __b;
 	}
 }
-var root_4$3 = template_el("div", ["class", "person"], [
+var root_9 = template_el("div", ["class", "person"], [
 	[
 		"b",
 		null,
@@ -10831,407 +11114,772 @@ var root_4$3 = template_el("div", ["class", "person"], [
 	["small"],
 	["ul"]
 ]);
-function render_2$5(__prev) {
-	var __pattern = get(__prev._a);
-	var __a = ` ${__pattern.mentions} mentions, in ${__pattern.books.length} ${__pattern.books.length === 1 ? "book" : "books"}`;
+function render_5$2(__prev) {
+	var __pattern_4 = get(__prev._a);
+	var __a = ` ${__pattern_4.mentions} mentions, in ${__pattern_4.books.length} ${__pattern_4.books.length === 1 ? "book" : "books"}`;
 	if (__prev.a !== __a) {
 		set_text_content(__prev._b, __a, __prev.a);
 		__prev.a = __a;
 	}
 }
-var root_3$3 = template(`<h3>Characters</h3><!>`, 1, 2);
-function consequent_1$3(__anchor, { a: store, b: __block }) {
-	var fragment = root_3$3();
+var root_8 = template(`<h3>Characters</h3><!>`, 1, 2);
+function consequent_2$3(__anchor, { a: store, b: __block }) {
+	var fragment = root_8();
 	var h3 = first_child_frag(fragment);
-	for_block_keyed(hydrating ? hydrate_next_sibling() : h3.nextSibling, () => store.found.value.characters, (__anchor, pattern) => {
-		var div_3 = root_4$3();
-		var b = hydrating ? hydrate_first_child() : div_3.firstChild;
-		expression(hydrating ? hydrate_first_child() : b.firstChild, () => get(pattern).name);
-		var small_1 = hydrating ? hydrate_next_sibling() : b.nextSibling;
-		for_block_keyed(hydrating ? hydrate_next_sibling() : small_1.nextSibling, () => get(pattern).books, (__anchor, pattern_1) => {
-			var li = root_5$2();
+	for_block_keyed(hydrating ? hydrate_next_sibling() : h3.nextSibling, () => store.found.value.characters, (__anchor, pattern_4) => {
+		var div_7 = root_9();
+		var b_1 = hydrating ? hydrate_first_child() : div_7.firstChild;
+		expression(hydrating ? hydrate_first_child() : b_1.firstChild, () => get(pattern_4).name);
+		var small = hydrating ? hydrate_next_sibling() : b_1.nextSibling;
+		for_block_keyed(hydrating ? hydrate_next_sibling() : small.nextSibling, () => get(pattern_4).books, (__anchor, pattern_5) => {
+			var li = root_10();
 			var a_1 = hydrating ? hydrate_first_child() : li.firstChild;
 			a_1.__click = (event) => {
 				with_scope(__block, () => event.preventDefault());
-				with_scope(__block, () => store.openFound(get(pattern_1).id, get(pattern).name));
+				with_scope(__block, () => store.openFound(get(pattern_5).id, get(pattern_4).name));
 			};
-			expression(hydrating ? hydrate_first_child() : a_1.firstChild, () => get(pattern_1).name);
+			expression(hydrating ? hydrate_first_child() : a_1.firstChild, () => get(pattern_5).name);
 			item({
 				a: void 0,
 				b: "",
 				_a: __block,
 				_b: store,
-				_c: pattern_1,
+				_c: pattern_5,
 				_d: a_1,
 				_e: hydrating ? hydrate_next_sibling() : a_1.nextSibling
 			});
 			append(__anchor, li);
-		}, 4, (pattern_1) => pattern_1.id, void 0, void 0, render_1$6);
+		}, 4, (pattern_5) => pattern_5.id, void 0, void 0, render_4$2);
 		item({
 			a: "",
-			_a: pattern,
-			_b: small_1
+			_a: pattern_4,
+			_b: small
 		});
-		append(__anchor, div_3);
-	}, 0, (pattern) => pattern.name, void 0, void 0, render_2$5);
+		append(__anchor, div_7);
+	}, 0, (pattern_4) => pattern_4.name, void 0, void 0, render_5$2);
 	append(__anchor, fragment);
 }
-function if_2$3({ a: store, b: __block }) {
-	if (store.found.value.characters.length > 0) return consequent_1$3;
+function if_3$2({ a: store, b: __block }) {
+	if (store.found.value.characters.length > 0) return consequent_2$3;
 }
-var root_6$1 = template_el("p", null, [[
+var root_11 = template_el("p", null, [[
 	"a",
-	["class", "name"],
+	["class", "title"],
 	" "
 ], ["small"]]);
-function render_3$3(__prev) {
-	var __pattern_2 = get(__prev._a);
+function render_6(__prev) {
+	var __pattern_6 = get(__prev._a);
 	var __a = with_scope(__prev._b, () => __prev._c.router.route({ book: get(__prev._a).id }));
 	if (__prev.a !== __a) set_attribute(__prev._d, "href", __prev.a = __a);
-	var __b = ` ${__pattern_2.chapters} ${__pattern_2.chapters === 1 ? "chapter" : "chapters"}`;
+	var __b = ` ${__pattern_6.chapters} ${__pattern_6.chapters === 1 ? "chapter" : "chapters"}`;
 	if (__prev.b !== __b) {
 		set_text_content(__prev._e, __b, __prev.b);
 		__prev.b = __b;
 	}
 }
-var root_2$5 = template_el("div", ["class", "found"], [["h3"]]);
-function render_4$2(__prev) {
-	var __a = if_2$3({
+var root_7 = template_el("section", ["class", "found"], [[
+	"h2",
+	null,
+	[["span"], [
+		"button",
+		["class", "link"],
+		"Back"
+	]]
+], ["h3"]]);
+function render_7(__prev) {
+	var __a = `“${__prev._a.found.value.q}” in the books`;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+	var __b = if_3$2({
 		a: __prev._a,
-		b: __prev._b
+		b: __prev._c
 	});
-	if (__prev.a !== __a) if_update(__prev._c, __prev.a = __a);
-	var __b = __prev._a.found.value.books.length > 0 ? `Said in ${__prev._a.found.value.books.length} ${__prev._a.found.value.books.length === 1 ? "book" : "books"}` : "Said in no book indexed";
-	if (__prev.b !== __b) {
-		set_text_content(__prev._d, __b, __prev.b);
-		__prev.b = __b;
+	if (__prev.b !== __b) if_update(__prev._d, __prev.b = __b);
+	var __c = __prev._a.found.value.books.length > 0 ? `Said in ${__prev._a.found.value.books.length} ${__prev._a.found.value.books.length === 1 ? "book" : "books"}` : "Said in no book indexed";
+	if (__prev.c !== __c) {
+		set_text_content(__prev._e, __c, __prev.c);
+		__prev.c = __c;
 	}
 }
-function consequent_2$3(__anchor, { a: searched, b: store, c: __block }) {
-	var div_2 = root_2$5();
-	var node_2 = hydrating ? hydrate_first_child() : div_2.firstChild;
-	var ifs_1 = if_static(node_2, if_2$3, 0, {
+var root_13 = template_el("p", ["class", "empty"], "No books yet: drop .txt files on the page to add them.");
+function consequent_4(__anchor, store) {
+	append(__anchor, root_13());
+}
+function if_4$1(store) {
+	if (store.shelves.value && !store.finding.value && store.shelves.value.latest.length === 0) return consequent_4;
+}
+var root_15 = template_el("button", ["class", "link"], "See all");
+function consequent_5(__anchor, { a: pattern_7, b: ask }) {
+	var button_6 = root_15();
+	button_6.__click = () => ask(get(pattern_7).all);
+	append(__anchor, button_6);
+}
+function if_5({ a: pattern_7, b: ask }) {
+	if (get(pattern_7).all) return consequent_5;
+}
+var root_16 = template_el("button", ["class", "link"], "Shuffle");
+function consequent_6(__anchor, { a: pattern_7, b: __block, c: store }) {
+	var button_7 = root_16();
+	button_7.__click = () => with_scope(__block, () => store.shuffle());
+	append(__anchor, button_7);
+}
+function if_6({ a: pattern_7, b: __block, c: store }) {
+	if (get(pattern_7).shuffle) return consequent_6;
+}
+var root_17 = template_el("button", ["class", "link"], "Back");
+function consequent_7(__anchor, { a: pattern_7, b: filtersOpen, c: __block, d: store }) {
+	var button_8 = root_17();
+	button_8.__click = () => {
+		filtersOpen.value = false;
+		with_scope(__block, () => store.find(null));
+	};
+	append(__anchor, button_8);
+}
+function if_7({ a: pattern_7, b: filtersOpen, c: __block, d: store }) {
+	if (get(pattern_7).key === "found") return consequent_7;
+}
+var root_19 = template_el("small", ["class", "read"], " ");
+function consequent_8(__anchor, { a: pattern_8, b: readOf }) {
+	var small_4 = root_19();
+	expression(hydrating ? hydrate_first_child() : small_4.firstChild, () => readOf(get(pattern_8)));
+	append(__anchor, small_4);
+}
+function if_8({ a: pattern_8, b: readOf }) {
+	if (get(pattern_8).read?.chapterCount) return consequent_8;
+}
+var root_21 = template_el("button", ["class", "tag"], " ");
+var root_22 = template_el("button", ["class", "link delete"], "delete");
+function consequent_9(__anchor, { a: pattern_8, b: __block, c: store }) {
+	var button_10 = root_22();
+	button_10.__click = () => with_scope(__block, () => store.deleteBook(get(pattern_8).id));
+	append(__anchor, button_10);
+}
+function if_9({ a: pattern_8, b: __block, c: store }) {
+	if (get(pattern_8).deletable) return consequent_9;
+}
+var root_20 = template_el("span", ["class", "tags"], [null]);
+function render_8(__prev) {
+	var __a = if_9({
+		a: __prev._a,
+		b: __prev._b,
+		c: __prev._c
+	});
+	if (__prev.a !== __a) if_update(__prev._d, __prev.a = __a);
+}
+function consequent_10(__anchor, { a: pattern_8, b: withTag, c: __block, d: store }) {
+	var span_2 = root_20();
+	for_block_keyed(hydrating ? hydrate_first_child() : span_2.firstChild, () => get(pattern_8).tags, (__anchor, pattern_9) => {
+		var button_9 = root_21();
+		button_9.__click = () => withTag(get(pattern_9));
+		expression(hydrating ? hydrate_first_child() : button_9.firstChild, () => get(pattern_9));
+		append(__anchor, button_9);
+	}, 0);
+	render$10(render_8, {
+		a: UNINITIALIZED,
+		_a: pattern_8,
+		_b: __block,
+		_c: store,
+		_d: if_static(hydrating ? hydrate_next_sibling() : append_into(span_2, true), if_9, 2, {
+			a: pattern_8,
+			b: __block,
+			c: store
+		})
+	});
+	append(__anchor, span_2);
+}
+function if_10({ a: pattern_8, b: withTag, c: __block, d: store }) {
+	if (get(pattern_8).tags.length > 0 || get(pattern_8).deletable) return consequent_10;
+}
+var root_18 = template_el("li", null, [[
+	"a",
+	["class", "title"],
+	" "
+], [
+	"small",
+	["class", "facts"],
+	" "
+]]);
+function render_9(__prev) {
+	var __a = with_scope(__prev._a, () => __prev._b.router.route(bookRoute(__prev._c(get(__prev._d)))));
+	if (__prev.a !== __a) set_attribute(__prev._e, "href", __prev.a = __a);
+	var __b = if_8({
+		a: __prev._d,
+		b: __prev._f
+	});
+	if (__prev.b !== __b) if_update(__prev._g, __prev.b = __b);
+	var __c = if_10({
+		a: __prev._d,
+		b: __prev._h,
+		c: __prev._a,
+		d: __prev._b
+	});
+	if (__prev.c !== __c) if_update(__prev._i, __prev.c = __c);
+}
+var root_23 = template_el("button", ["class", "more"], "Show more");
+function render_10(__prev) {
+	__prev._a.disabled = __prev._b.finding.value?.busy;
+}
+function consequent_11(__anchor, { a: pattern_7, b: __block, c: store }) {
+	var button_11 = root_23();
+	button_11.__click = () => with_scope(__block, () => store.findMore());
+	render$10(render_10, {
+		_a: button_11,
+		_b: store
+	});
+	append(__anchor, button_11);
+}
+function if_11({ a: pattern_7, b: __block, c: store }) {
+	if (get(pattern_7).more) return consequent_11;
+}
+var root_24 = template_el("button", ["class", "link inside"]);
+function render_11(__prev) {
+	var __a = `Search what the books say for “${with_scope(__prev._a, () => __prev._b.value.q?.trim())}”`;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._c, __a, __prev.a);
+		__prev.a = __a;
+	}
+}
+function consequent_12(__anchor, { a: pattern_7, b: store, c: __block, d: asked }) {
+	var button_12 = root_24();
+	button_12.__click = () => with_scope(__block, () => store.searchLibrary(asked.value.q ?? ""));
+	render$10(render_11, {
+		a: "",
+		_a: __block,
+		_b: asked,
+		_c: button_12
+	});
+	append(__anchor, button_12);
+}
+function if_12({ a: pattern_7, b: store, c: __block, d: asked }) {
+	if (get(pattern_7).key === "found" && store.searching.value && with_scope(__block, () => asked.value.q?.trim())) return consequent_12;
+}
+var root_14 = template_el("section", null, [[
+	"h2",
+	null,
+	[["span"]]
+], ["ol", ["class", "books"]]]);
+function render_12(__prev) {
+	var __a = get(__prev._a).title;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+	var __b = if_5({
+		a: __prev._a,
+		b: __prev._c
+	});
+	if (__prev.b !== __b) if_update(__prev._d, __prev.b = __b);
+	var __c = if_6({
+		a: __prev._a,
+		b: __prev._e,
+		c: __prev._f
+	});
+	if (__prev.c !== __c) if_update(__prev._g, __prev.c = __c);
+	var __d = if_7({
+		a: __prev._a,
+		b: __prev._h,
+		c: __prev._e,
+		d: __prev._f
+	});
+	if (__prev.d !== __d) if_update(__prev._i, __prev.d = __d);
+	var __e = if_11({
+		a: __prev._a,
+		b: __prev._e,
+		c: __prev._f
+	});
+	if (__prev.e !== __e) if_update(__prev._j, __prev.e = __e);
+	var __f = if_12({
+		a: __prev._a,
+		b: __prev._f,
+		c: __prev._e,
+		d: __prev._k
+	});
+	if (__prev.f !== __f) if_update(__prev._l, __prev.f = __f);
+}
+var root_26 = template_el("button", ["class", "tag"], [null, ["small"]]);
+function render_13(__prev) {
+	var __a = ` ${get(__prev._a).count}`;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+}
+var root_25 = template_el("section", null, [[
+	"h2",
+	null,
+	[[
+		"span",
+		null,
+		"Tags"
+	]]
+], ["div", ["class", "tags"]]]);
+function consequent_13(__anchor, { a: store, b: withTag }) {
+	var section_3 = root_25();
+	var h2_2 = hydrating ? hydrate_first_child() : section_3.firstChild;
+	for_block_keyed(hydrating ? hydrate_next_sibling() : h2_2.nextSibling, () => store.shelves.value?.tags ?? [], (__anchor, pattern_10) => {
+		var button_13 = root_26();
+		button_13.__click = () => withTag(get(pattern_10).tag);
+		var expression_18 = hydrating ? hydrate_first_child() : button_13.firstChild;
+		expression(expression_18, () => get(pattern_10).tag);
+		item({
+			a: "",
+			_a: pattern_10,
+			_b: hydrating ? hydrate_next_sibling() : expression_18.nextSibling
+		});
+		append(__anchor, button_13);
+	}, 4, (pattern_10) => pattern_10.tag, void 0, void 0, render_13);
+	append(__anchor, section_3);
+}
+function if_13({ a: store, b: withTag }) {
+	if (!store.finding.value && (store.shelves.value?.tags?.length ?? 0) > 0) return consequent_13;
+}
+var root_12 = template(`<!><!><!>`, 1, 3);
+function render_14(__prev) {
+	var __a = if_4$1(__prev._a);
+	if (__prev.a !== __a) if_update(__prev._b, __prev.a = __a);
+	var __b = if_13({
+		a: __prev._a,
+		b: __prev._c
+	});
+	if (__prev.b !== __b) if_update(__prev._d, __prev.b = __b);
+}
+function consequent_3$2(__anchor, { a: store, b: __block, c: sections, d: ask, e: filtersOpen, f: open, g: factsOf, h: readOf, i: withTag, j: placeOf, k: asked }) {
+	var section_1 = root_7();
+	var h2 = hydrating ? hydrate_first_child() : section_1.firstChild;
+	var span = hydrating ? hydrate_first_child() : h2.firstChild;
+	var button_5 = hydrating ? hydrate_next_sibling() : span.nextSibling;
+	button_5.__click = () => with_scope(__block, () => store.searchLibrary(""));
+	var node_3 = hydrating ? hydrate_next_sibling() : h2.nextSibling;
+	var ifs_2 = if_static(node_3, if_3$2, 0, {
 		a: store,
 		b: __block
 	});
-	var h3_1 = hydrating ? hydrate_next_sibling() : node_2;
-	for_block_keyed(hydrating ? hydrate_next_sibling() : append_into(div_2), () => store.found.value.books, (__anchor, pattern_2) => {
-		var p = root_6$1();
+	var h3_1 = hydrating ? hydrate_next_sibling() : node_3;
+	for_block_keyed(hydrating ? hydrate_next_sibling() : append_into(section_1), () => store.found.value.books, (__anchor, pattern_6) => {
+		var p = root_11();
 		var a_2 = hydrating ? hydrate_first_child() : p.firstChild;
 		a_2.__click = (event) => {
 			with_scope(__block, () => event.preventDefault());
-			with_scope(__block, () => store.openFound(get(pattern_2).id, store.found.value.q));
+			with_scope(__block, () => store.openFound(get(pattern_6).id, store.found.value.q));
 		};
-		expression(hydrating ? hydrate_first_child() : a_2.firstChild, () => get(pattern_2).name);
+		expression(hydrating ? hydrate_first_child() : a_2.firstChild, () => get(pattern_6).name);
 		item({
 			a: void 0,
 			b: "",
-			_a: pattern_2,
+			_a: pattern_6,
 			_b: __block,
 			_c: store,
 			_d: a_2,
 			_e: hydrating ? hydrate_next_sibling() : a_2.nextSibling
 		});
 		append(__anchor, p);
-	}, 0, (pattern_2) => pattern_2.id, void 0, void 0, render_3$3);
-	render$10(render_4$2, {
-		a: UNINITIALIZED,
-		b: "",
+	}, 0, (pattern_6) => pattern_6.id, void 0, void 0, render_6);
+	render$10(render_7, {
+		a: "",
+		b: UNINITIALIZED,
+		c: "",
 		_a: store,
-		_b: __block,
-		_c: ifs_1,
-		_d: h3_1
+		_b: span,
+		_c: __block,
+		_d: ifs_2,
+		_e: h3_1
 	});
-	append(__anchor, div_2);
+	append(__anchor, section_1);
 }
-function if_3$2({ a: searched, b: store, c: __block }) {
-	if (searched.value) return consequent_2$3;
-}
-var root_9 = template_el("small", ["class", "desc"], " ");
-function render_5$2(__prev) {
-	var __a = get(__prev._a).description;
-	if (__prev.a !== __a) set_property_value(__prev._b, "title", __prev.a = __a);
-}
-function consequent_3$2(__anchor, pattern_3) {
-	var small_4 = root_9();
-	expression(hydrating ? hydrate_first_child() : small_4.firstChild, () => get(pattern_3).description);
-	render$10(render_5$2, {
-		a: void 0,
-		_a: pattern_3,
-		_b: small_4
-	});
-	append(__anchor, small_4);
-}
-function if_4$1(pattern_3) {
-	if (get(pattern_3).description) return consequent_3$2;
-}
-var root_10 = template_el("a", ["class", "delete"], [[
-	"small",
-	null,
-	"delete"
-]]);
-function consequent_4(__anchor, { a: pattern_3, b: __block, c: store }) {
-	var a_8 = root_10();
-	a_8.__click = () => with_scope(__block, () => store.deleteBook(get(pattern_3).id));
-	append(__anchor, a_8);
-}
-function if_5({ a: pattern_3, b: __block, c: store }) {
-	if (get(pattern_3).deletable) return consequent_4;
-}
-var root_8 = template(`<div class=row><div class=td><a class=name> </a></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class=td><!>`);
-function render_6(__prev) {
-	var __pattern_3 = get(__prev._a);
-	var __a = __pattern_3.href;
-	if (__prev.a !== __a) set_attribute(__prev._b, "href", __prev.a = __a);
-	var __b = __pattern_3.name;
-	if (__prev.b !== __b) set_attribute(__prev._b, "title", __prev.b = __b);
-	var __c = if_4$1(__prev._a);
-	if (__prev.c !== __c) if_update(__prev._c, __prev.c = __c);
-	var __d = if_5({
-		a: __prev._a,
-		b: __prev._d,
-		c: __prev._e
-	});
-	if (__prev.d !== __d) if_update(__prev._f, __prev.d = __d);
-	set_style(__prev._g, `--at: ${__pattern_3.at}`, void 0);
-}
-var root_7 = template_el("div", ["class", "rows"]);
-function render_7(__prev) {
-	set_style(__prev._a, `--rows: ${__prev._b.value.length}`, void 0);
-}
-function consequent_5(__anchor, { a: searched, b: list, c: rows, d: __block, e: store, f: books }) {
-	var div_5 = root_7();
-	ref(div_5, () => list.v, (v) => list.v = v);
-	for_block_keyed(div_5, () => rows.value, (__anchor, pattern_3) => {
-		var div_6 = root_8();
-		var div_7 = hydrating ? hydrate_first_child() : div_6.firstChild;
-		var a_7 = hydrating ? hydrate_first_child() : div_7.firstChild;
-		a_7.__click = (event) => {
-			with_scope(__block, () => event.preventDefault());
-			with_scope(__block, () => store.openBook(get(pattern_3).place));
-		};
-		expression(hydrating ? hydrate_first_child() : a_7.firstChild, () => get(pattern_3).name);
-		var ifs_3 = if_static(hydrating ? hydrate_next_sibling() : append_into(div_7, true), if_4$1, 2, pattern_3);
-		var div_8 = hydrating ? hydrate_next_sibling() : div_7.nextSibling;
-		var small_5 = hydrating ? hydrate_first_child() : div_8.firstChild;
-		expression(hydrating ? hydrate_first_child() : small_5.firstChild, () => get(pattern_3).size);
-		var div_9 = hydrating ? hydrate_next_sibling() : div_8.nextSibling;
-		var small_6 = hydrating ? hydrate_first_child() : div_9.firstChild;
-		expression(hydrating ? hydrate_first_child() : small_6.firstChild, () => get(pattern_3).chapters);
-		var div_10 = hydrating ? hydrate_next_sibling() : div_9.nextSibling;
-		var small_7 = hydrating ? hydrate_first_child() : div_10.firstChild;
-		expression(hydrating ? hydrate_first_child() : small_7.firstChild, () => get(pattern_3).date);
-		var div_11 = hydrating ? hydrate_next_sibling() : div_10.nextSibling;
+function alternate$3(__anchor, { a: store, b: __block, c: sections, d: ask, e: filtersOpen, f: open, g: factsOf, h: readOf, i: withTag, j: placeOf, k: asked }) {
+	var fragment_1 = root_12();
+	var node_6 = first_child_frag(fragment_1);
+	var ifs_3 = if_static(node_6, if_4$1, 0, store);
+	var node_7 = hydrating ? hydrate_next_sibling() : node_6.nextSibling;
+	for_block_keyed(node_7, () => sections.value, (__anchor, pattern_7) => {
+		var section_2 = root_14();
+		var h2_1 = hydrating ? hydrate_first_child() : section_2.firstChild;
+		var span_1 = hydrating ? hydrate_first_child() : h2_1.firstChild;
+		var ifs_4 = if_static(hydrating ? hydrate_next_sibling() : append_into(h2_1), if_5, 2, {
+			a: pattern_7,
+			b: ask
+		});
+		var ifs_5 = if_static(hydrating ? hydrate_next_sibling() : append_into(h2_1), if_6, 2, {
+			a: pattern_7,
+			b: __block,
+			c: store
+		});
+		var ifs_6 = if_static(hydrating ? hydrate_next_sibling() : append_into(h2_1, true), if_7, 2, {
+			a: pattern_7,
+			b: filtersOpen,
+			c: __block,
+			d: store
+		});
+		for_block_keyed(hydrating ? hydrate_next_sibling() : h2_1.nextSibling, () => get(pattern_7).books, (__anchor, pattern_8) => {
+			var li_1 = root_18();
+			var a_3 = hydrating ? hydrate_first_child() : li_1.firstChild;
+			a_3.__click = (event) => open(event, get(pattern_8));
+			expression(hydrating ? hydrate_first_child() : a_3.firstChild, () => get(pattern_8).title);
+			var small_3 = hydrating ? hydrate_next_sibling() : a_3.nextSibling;
+			expression(hydrating ? hydrate_first_child() : small_3.firstChild, () => factsOf(get(pattern_8)));
+			item({
+				a: void 0,
+				b: UNINITIALIZED,
+				c: UNINITIALIZED,
+				_a: __block,
+				_b: store,
+				_c: placeOf,
+				_d: pattern_8,
+				_e: a_3,
+				_f: readOf,
+				_g: if_static(hydrating ? hydrate_next_sibling() : append_into(li_1), if_8, 2, {
+					a: pattern_8,
+					b: readOf
+				}),
+				_h: withTag,
+				_i: if_static(hydrating ? hydrate_next_sibling() : append_into(li_1, true), if_10, 2, {
+					a: pattern_8,
+					b: withTag,
+					c: __block,
+					d: store
+				})
+			});
+			append(__anchor, li_1);
+		}, 4, (pattern_8) => pattern_8.id, void 0, void 0, render_9);
 		item({
-			a: void 0,
-			b: void 0,
+			a: "",
+			b: UNINITIALIZED,
 			c: UNINITIALIZED,
 			d: UNINITIALIZED,
-			_a: pattern_3,
-			_b: a_7,
-			_c: ifs_3,
-			_d: __block,
-			_e: store,
-			_f: if_static(hydrating ? hydrate_first_child() : div_11.firstChild, if_5, 2, {
-				a: pattern_3,
+			e: UNINITIALIZED,
+			f: UNINITIALIZED,
+			_a: pattern_7,
+			_b: span_1,
+			_c: ask,
+			_d: ifs_4,
+			_e: __block,
+			_f: store,
+			_g: ifs_5,
+			_h: filtersOpen,
+			_i: ifs_6,
+			_j: if_static(hydrating ? hydrate_next_sibling() : append_into(section_2), if_11, 2, {
+				a: pattern_7,
 				b: __block,
 				c: store
 			}),
-			_g: div_6
+			_k: asked,
+			_l: if_static(hydrating ? hydrate_next_sibling() : append_into(section_2, true), if_12, 2, {
+				a: pattern_7,
+				b: store,
+				c: __block,
+				d: asked
+			})
 		});
-		append(__anchor, div_6);
-	}, 4, (pattern_3) => pattern_3.id, void 0, void 0, render_6);
-	render$10(render_7, {
-		_a: div_5,
-		_b: books
+		append(__anchor, section_2);
+	}, 0, (pattern_7) => pattern_7.key, void 0, void 0, render_12);
+	render$10(render_14, {
+		a: UNINITIALIZED,
+		b: UNINITIALIZED,
+		_a: store,
+		_b: ifs_3,
+		_c: withTag,
+		_d: if_static(hydrating ? hydrate_next_sibling() : node_7.nextSibling, if_13, 0, {
+			a: store,
+			b: withTag
+		})
 	});
-	append(__anchor, div_5);
+	append(__anchor, fragment_1);
 }
-function if_6({ a: searched, b: list, c: rows, d: __block, e: store, f: books }) {
-	if (!searched.value) return consequent_5;
+function if_14({ a: store, b: __block, c: sections, d: ask, e: filtersOpen, f: open, g: factsOf, h: readOf, i: withTag, j: placeOf, k: asked }) {
+	if (store.found.value.q) return consequent_3$2;
+	else return alternate$3;
 }
-var root$7 = template(`<div class=table><div class="row head"><a href=# class="th text-left"><span>File</span></a><a href=# class="th text-right"><span>Size</span></a><a href=# class="th text-right"><span>Chapters</span></a><a href=# class="th text-right"><span>Date</span></a><span class=th><span>`);
-function render_8(__prev) {
-	var __a = if_1$6({
+var root_27 = template_el("footer", null, [[
+	"small",
+	null,
+	" "
+], [
+	"button",
+	[
+		"title",
+		"Read again what came, changed or went in the libraries",
+		"class",
+		"link"
+	],
+	"Rescan"
+]]);
+function render_15(__prev) {
+	__prev._a.disabled = __prev._b.status.value?.scan?.running;
+}
+function consequent_14(__anchor, { a: said, b: __block, c: store }) {
+	var footer = root_27();
+	var small_6 = hydrating ? hydrate_first_child() : footer.firstChild;
+	expression(hydrating ? hydrate_first_child() : small_6.firstChild, () => said.value);
+	var button_14 = hydrating ? hydrate_next_sibling() : small_6.nextSibling;
+	button_14.__click = () => with_scope(__block, () => store.rescan());
+	render$10(render_15, {
+		_a: button_14,
+		_b: store
+	});
+	append(__anchor, footer);
+}
+function if_15({ a: said, b: __block, c: store }) {
+	if (said.value) return consequent_14;
+}
+var root$7 = template_el("div", ["class", "library"], [[
+	"div",
+	["class", "find"],
+	[["input", [
+		"type",
+		"search",
+		"placeholder",
+		"Find a book: a title, a tag, a folder"
+	]], [
+		"button",
+		null,
+		"Filters"
+	]]
+]], 1);
+function render_16(__prev) {
+	var __filtersOpen_value = __prev._a.value;
+	var __a = __prev._b.value.q ?? "";
+	if (__prev.a !== __a) set_value(__prev._c, __prev.a = __a);
+	var __b = __filtersOpen_value;
+	if (__prev.b !== __b) set_attribute_value(__prev._d, "aria-expanded", __prev.b = __b);
+	var __c = { selected: __filtersOpen_value || __prev._e.value };
+	if (__prev.c !== __c) set_class_value(__prev._d, __prev.c = __c);
+	var __d = if_1$6({
 		a: __prev._a,
-		b: __prev._b,
-		c: __prev._c
+		b: __prev._f,
+		c: __prev._g,
+		d: __prev._b
 	});
-	if (__prev.a !== __a) if_update(__prev._d, __prev.a = __a);
-	var __b = if_3$2({
-		a: __prev._e,
-		b: __prev._a,
-		c: __prev._b
+	if (__prev.d !== __d) if_update(__prev._h, __prev.d = __d);
+	var __e = if_2$3({
+		a: __prev._b,
+		b: __prev._f
 	});
-	if (__prev.b !== __b) if_update(__prev._f, __prev.b = __b);
-	var __c = __prev._g("name");
-	if (__prev.c !== __c) set_attribute(__prev._h, "data-sort", __prev.c = __c);
-	var __d = __prev._g("size");
-	if (__prev.d !== __d) set_attribute(__prev._i, "data-sort", __prev.d = __d);
-	var __e = __prev._g("chapterCount");
-	if (__prev.e !== __e) set_attribute(__prev._j, "data-sort", __prev.e = __e);
-	var __f = __prev._g("updatedAt");
-	if (__prev.f !== __f) set_attribute(__prev._k, "data-sort", __prev.f = __f);
-	var __g = if_6({
-		a: __prev._e,
-		b: __prev._l,
-		c: __prev._m,
-		d: __prev._b,
+	if (__prev.e !== __e) if_update(__prev._i, __prev.e = __e);
+	var __f = if_14({
+		a: __prev._j,
+		b: __prev._g,
+		c: __prev._k,
+		d: __prev._f,
 		e: __prev._a,
-		f: __prev._n
+		f: __prev._l,
+		g: __prev._m,
+		h: __prev._n,
+		i: __prev._o,
+		j: __prev._p,
+		k: __prev._b
 	});
-	if (__prev.g !== __g) if_update(__prev._o, __prev.g = __g);
+	if (__prev.f !== __f) if_update(__prev._q, __prev.f = __f);
+	var __g = if_15({
+		a: __prev._r,
+		b: __prev._g,
+		c: __prev._j
+	});
+	if (__prev.g !== __g) if_update(__prev._s, __prev.g = __g);
 }
 function Library_render(__anchor, __block) {
 	const store = with_scope(__block, () => StoreContext.get());
-	const books = track(() => {
-		let progress = store.progress.value;
-		let { field, direction } = store.settings.value.sort;
-		let entries = with_scope(__block, () => store.books.value.map((book) => {
-			let kept = progress[book.id] || {};
-			return {
-				book,
-				kept,
-				updated: with_scope(__block, () => new Date(kept.updatedAt || 0).getTime())
-			};
-		}));
-		let compare = (a, z) => {
-			if (field === "name") return with_scope(__block, () => byName.compare(a.book.name, z.book.name));
-			if (field === "size") return a.book.size - z.book.size;
-			if (field === "updatedAt") return a.updated - z.updated;
-			if (field === "chapterCount") return (a.kept.chapterCount || 1) - (z.kept.chapterCount || 1);
-			return 0;
+	const filtersOpen = track(false, __block, "s8sfv9");
+	const asked = track(() => store.finding.value?.query ?? {}, __block, "1ys3ov5");
+	const narrowed = track(() => !!(asked.value.size || asked.value.chapters || asked.value.sort), __block, "10wjbmk");
+	const ask = (change, wait = 0) => {
+		let query = {
+			...asked.value,
+			...change
 		};
-		return with_scope(__block, () => entries.sort((a, z) => direction === "desc" ? -compare(a, z) || 0 : compare(a, z)));
-	}, __block, "s8sfv9");
-	const range = track({
-		first: 0,
-		last: with_scope(__block, () => Math.ceil(innerHeight / 40)) + AROUND
-	}, __block, "1ys3ov5");
-	let list = { v: void 0 };
-	let frame = 0;
-	const measure = () => {
-		frame = 0;
-		if (!list.v) return;
-		let above = -with_scope(__block, () => list.v.getBoundingClientRect()).top;
-		let height = with_scope(__block, () => list.v.firstElementChild?.getBoundingClientRect()).height || 60;
-		let first = with_scope(__block, () => Math.max(0, Math.floor(above / height) - AROUND));
-		let last = with_scope(__block, () => Math.max(first, Math.ceil((above + innerHeight) / height) + AROUND));
-		if (first !== range.value.first || last !== range.value.last) range.value = {
-			first,
-			last
-		};
+		if ("q" in change) with_scope(__block, () => store.searchLibrary(""));
+		let something = with_scope(__block, () => query.q?.trim()) || query.tags?.length || query.size || query.chapters || query.sort;
+		with_scope(__block, () => store.find(something ? query : null, wait));
 	};
-	const measureSoon = () => {
-		frame ||= with_scope(__block, () => requestAnimationFrame(measure));
-	};
-	user_effect(() => {
-		with_scope(__block, () => addEventListener("scroll", measureSoon, { passive: true }));
-		with_scope(__block, () => addEventListener("resize", measureSoon));
-		return () => {
-			with_scope(__block, () => removeEventListener("scroll", measureSoon));
-			with_scope(__block, () => removeEventListener("resize", measureSoon));
-			with_scope(__block, () => cancelAnimationFrame(frame));
-		};
+	const withTag = (tag) => ask({ tags: [.../* @__PURE__ */ new Set([...asked.value.tags ?? [], tag])] });
+	const sections = track(() => {
+		let now = store.finding.value;
+		if (now) return [{
+			key: "found",
+			title: now.busy && !now.books.length ? "Looking…" : `${with_scope(__block, () => now.total.toLocaleString())} ${now.total === 1 ? "book" : "books"}`,
+			books: now.books,
+			more: now.books.length < now.total
+		}];
+		let front = store.shelves.value;
+		if (!front) return [];
+		let shown = [
+			{
+				key: "reading",
+				title: "Continue reading",
+				books: front.reading,
+				all: { sort: "read" }
+			},
+			{
+				key: "latest",
+				title: "New & updated",
+				books: front.latest,
+				all: { sort: "latest" }
+			},
+			{
+				key: "random",
+				title: "Something different",
+				books: front.random,
+				shuffle: true
+			}
+		];
+		return with_scope(__block, () => shown.filter((section) => section.books.length > 0));
+	}, __block, "1w4jtrn");
+	const placeOf = (book) => ({
+		bookId: book.id,
+		offset: book.read?.offset,
+		chapterId: book.read?.chapterId
 	});
-	const rows = track(() => {
-		let { first, last } = range.value;
-		return with_scope(__block, () => books.value.slice(first, last).map(({ book, kept }, k) => {
-			let place = {
-				bookId: book.id,
-				offset: kept.offset,
-				chapterId: kept.chapterId
-			};
-			return {
-				id: book.id,
-				at: first + k,
-				name: book.name,
-				description: book.description,
-				place,
-				href: with_scope(__block, () => store.router.route(bookRoute(place))),
-				size: with_scope(__block, () => formatSize(book.size)),
-				deletable: book.deletable,
-				chapters: !kept.chapterCount ? "-" : `${kept.chapterIndex}/${kept.chapterCount}`,
-				date: with_scope(__block, () => formatDate(kept.updatedAt)) || "-"
-			};
-		}));
-	}, __block, "10wjbmk");
+	const factsOf = (book) => with_scope(__block, () => [
+		formatSize(book.size),
+		`${book.chapters.toLocaleString()} ${book.chapters === 1 ? "chapter" : "chapters"}`,
+		dayOf(book.date),
+		book.folder
+	].filter(Boolean).join(" · "));
+	const readOf = (book) => book.read?.chapterCount ? `Chapter ${book.read.chapterIndex} of ${book.read.chapterCount}, ${with_scope(__block, () => formatDate(book.read.updatedAt)) ?? ""}` : "";
+	const open = (event, book) => {
+		with_scope(__block, () => event.preventDefault());
+		with_scope(__block, () => store.openBook(placeOf(book)));
+	};
 	const said = track(() => {
 		let now = store.status.value;
 		if (!now) return "";
 		let { scan, index } = now;
-		let parts = [`${now.books} books`];
+		let parts = [`${with_scope(__block, () => now.books.toLocaleString())} books`];
 		if (scan.running) with_scope(__block, () => parts.push(scan.toRead ? `reading ${scan.read}/${scan.toRead}` : "looking for books"));
 		if (index.done < index.total) with_scope(__block, () => parts.push(`indexed ${index.done}/${index.total}`));
 		return with_scope(__block, () => parts.join(" · "));
-	}, __block, "1w4jtrn");
-	const searched = track(() => store.found.value.q !== "", __block, "s7ukh6");
-	user_effect(() => {
-		if (!searched.value && books.value.length > 0) measureSoon();
-	});
-	const sorted = (field) => store.settings.value.sort.field === field ? store.settings.value.sort.direction : void 0;
-	const sortBy = (event, field, first = "asc") => {
-		with_scope(__block, () => event.preventDefault());
-		with_scope(__block, () => store.sortBy(field, first));
-	};
+	}, __block, "s7ukh6");
 	var div = root$7();
-	var node = hydrating ? hydrate_first_child() : div.firstChild;
-	var ifs = if_static(node, if_1$6, 0, {
-		a: store,
-		b: __block,
-		c: said
-	});
-	var node_1 = hydrating ? hydrate_next_sibling() : node;
-	var ifs_2 = if_static(node_1, if_3$2, 0, {
-		a: searched,
-		b: store,
-		c: __block
-	});
-	var div_4 = hydrating ? hydrate_next_sibling() : node_1;
-	var a_3 = hydrating ? hydrate_first_child() : div_4.firstChild;
-	a_3.__click = (event) => sortBy(event, "name");
-	var a_4 = hydrating ? hydrate_next_sibling() : a_3.nextSibling;
-	a_4.__click = (event) => sortBy(event, "size");
-	var a_5 = hydrating ? hydrate_next_sibling() : a_4.nextSibling;
-	a_5.__click = (event) => sortBy(event, "chapterCount");
-	var a_6 = hydrating ? hydrate_next_sibling() : a_5.nextSibling;
-	a_6.__click = (event) => sortBy(event, "updatedAt", "desc");
-	render$10(render_8, {
-		a: UNINITIALIZED,
-		b: UNINITIALIZED,
-		c: void 0,
-		d: void 0,
-		e: void 0,
-		f: void 0,
+	var div_1 = hydrating ? hydrate_first_child() : div.firstChild;
+	var input = hydrating ? hydrate_first_child() : div_1.firstChild;
+	input.__input = (event) => ask({ q: event.currentTarget.value }, 250);
+	var button = hydrating ? hydrate_next_sibling() : input.nextSibling;
+	button.__click = () => {
+		filtersOpen.value = !filtersOpen.value;
+	};
+	render$10(render_16, {
+		a: void 0,
+		b: void 0,
+		c: UNINITIALIZED,
+		d: UNINITIALIZED,
+		e: UNINITIALIZED,
+		f: UNINITIALIZED,
 		g: UNINITIALIZED,
-		_a: store,
-		_b: __block,
-		_c: said,
-		_d: ifs,
-		_e: searched,
-		_f: ifs_2,
-		_g: sorted,
-		_h: a_3,
-		_i: a_4,
-		_j: a_5,
-		_k: a_6,
-		_l: list,
-		_m: rows,
-		_n: books,
-		_o: if_static(hydrating ? hydrate_next_sibling() : append_into(div, true), if_6, 0, {
-			a: searched,
-			b: list,
-			c: rows,
-			d: __block,
-			e: store,
-			f: books
+		_a: filtersOpen,
+		_b: asked,
+		_c: input,
+		_d: button,
+		_e: narrowed,
+		_f: ask,
+		_g: __block,
+		_h: if_static(hydrating ? hydrate_next_sibling() : append_into(div), if_1$6, 0, {
+			a: filtersOpen,
+			b: ask,
+			c: __block,
+			d: asked
+		}),
+		_i: if_static(hydrating ? hydrate_next_sibling() : append_into(div), if_2$3, 0, {
+			a: asked,
+			b: ask
+		}),
+		_j: store,
+		_k: sections,
+		_l: open,
+		_m: factsOf,
+		_n: readOf,
+		_o: withTag,
+		_p: placeOf,
+		_q: if_static(hydrating ? hydrate_next_sibling() : append_into(div), if_14, 0, {
+			a: store,
+			b: __block,
+			c: sections,
+			d: ask,
+			e: filtersOpen,
+			f: open,
+			g: factsOf,
+			h: readOf,
+			i: withTag,
+			j: placeOf,
+			k: asked
+		}),
+		_r: said,
+		_s: if_static(hydrating ? hydrate_next_sibling() : append_into(div, true), if_15, 0, {
+			a: said,
+			b: __block,
+			c: store
 		})
 	});
 	append(__anchor, div);
 }
 Library[RENDER_ENTRY] = Library_render;
-var AROUND = 10;
-var byName = new Intl.Collator("vi-VN", { sensitivity: "accent" });
+var SIZES = [
+	{ label: "Any size" },
+	{
+		label: "Under 1 MB",
+		range: [null, 1e6]
+	},
+	{
+		label: "1–5 MB",
+		range: [1e6, 5e6]
+	},
+	{
+		label: "5–20 MB",
+		range: [5e6, 2e7]
+	},
+	{
+		label: "Over 20 MB",
+		range: [2e7, null]
+	}
+];
+var LENGTHS = [
+	{ label: "Any length" },
+	{
+		label: "Under 50 chapters",
+		range: [null, 49]
+	},
+	{
+		label: "50–200",
+		range: [50, 200]
+	},
+	{
+		label: "200–1,000",
+		range: [201, 1e3]
+	},
+	{
+		label: "Over 1,000",
+		range: [1001, null]
+	}
+];
+var SORTS = [
+	{ label: "Best match" },
+	{
+		label: "Newest",
+		sort: "latest"
+	},
+	{
+		label: "Last read",
+		sort: "read"
+	},
+	{
+		label: "Title",
+		sort: "title"
+	},
+	{
+		label: "Largest",
+		sort: "size"
+	},
+	{
+		label: "Most chapters",
+		sort: "chapters"
+	},
+	{
+		label: "Random",
+		sort: "random"
+	}
+];
+var sameRange = (a, b) => (a?.[0] ?? null) === (b?.[0] ?? null) && (a?.[1] ?? null) === (b?.[1] ?? null);
+var dayOf = (ms) => ms ? new Date(ms).toLocaleDateString("sv-SE") : "";
 function Library() {
 	return tsrx_element(Library_render);
 }
@@ -12644,7 +13292,7 @@ a {
 
 nav,
 aside,
-.table,
+.library,
 dialog,
 #add-name {
   font-family: var(--ui-font, Reader);
@@ -12949,86 +13597,190 @@ main {
   }
 }
 
-/** table **/
-/* the library, where the chapter list and the paper stand when a book is open. Its rows are
-   made only as they come in sight (see Library.tsrx), so they cannot size their columns by
-   what is in them: every row, the header's too, has the same, and all are one height (a name
-   and a line under it), a name too long for its column cut short */
-.table {
-  --columns: minmax(0, 1fr) 7ch 7ch 14ch 5ch;
-  --row: calc(1.2em + 1.2em * 0.875 + var(--gap));
+/** the library **/
+/* where the chapter list and the paper stand when a book is open: one column of books, as wide as
+   reads well, the whole width of a phone. The search stays at the top as the books scroll */
+.library {
   grid-column: 1 / 3;
-  padding: 0 var(--gap) var(--gap);
   background: var(--paper-background-color);
   box-shadow: 0px 6px 12px 3px var(--paper-shadow-color);
   outline: 1px solid var(--paper-outline-color);
-  line-height: 1.2;
+  line-height: 1.3;
   align-self: stretch;
-}
-.table .row {
-  display: grid;
-  grid-template-columns: var(--columns);
-  column-gap: calc(var(--gap) * 2);
-}
-.table .head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--paper-background-color);
-}
-.table .rows {
-  position: relative;
-  height: calc(var(--row) * var(--rows, 0));
-  .row {
-    position: absolute;
-    inset: calc(var(--row) * var(--at)) 0 auto;
-    height: var(--row);
-    padding-top: calc(var(--gap) / 2);
+  padding: 0 max(var(--gap), calc((100% - 46rem) / 2)) calc(var(--gap) * 2);
+  button {
+    appearance: none;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
+  .link {
+    color: var(--link-color);
+    font-size: 0.8em;
+  }
+  .find {
+    display: flex;
+    gap: calc(var(--gap) / 2);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: var(--gap) 0 calc(var(--gap) / 2);
+    background: var(--paper-background-color);
+    input {
+      flex: 1;
+      min-width: 0;
+      font: inherit;
+      font-size: 0.9em;
+      padding: 0.6ex 1.2ex;
+      color: var(--body-font-color);
+      background: var(--body-background-color);
+      border: 1px solid var(--paper-outline-color);
+      border-radius: 0.8ex;
+    }
+    button {
+      font-size: 0.8em;
+      padding: 0.4ex 1.2ex;
+      border: 1px solid var(--paper-outline-color);
+      border-radius: 0.8ex;
+      &.selected {
+        color: var(--link-color);
+        border-color: currentColor;
+      }
+    }
+  }
+  .filters {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--gap) / 2);
+    margin-bottom: calc(var(--gap) / 2);
+  }
+  .choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6ex;
+  }
+  /* a choice, and a tag: a word in a pill */
+  .choices button,
+  .tag {
+    font-size: 0.7em;
+    padding: 0.2ex 1ex;
+    border-radius: 99px;
+    outline: 1px solid var(--horizontal-line-color);
+    &:hover,
+    &.selected {
+      color: var(--link-color);
+      outline-color: currentColor;
+    }
+    small {
+      opacity: 0.6;
+    }
+  }
+  .choices button {
+    font-size: 0.75em;
+    &.selected {
+      font-weight: bold;
+    }
+  }
+  section {
+    margin-top: var(--gap);
+  }
+  h2 {
+    display: flex;
+    align-items: baseline;
+    gap: var(--gap);
+    font-size: 0.9em;
+    margin: 0 0 calc(var(--gap) / 2);
+    span {
+      flex: 1;
+    }
+  }
+  h3 {
+    font-size: 0.8em;
+    font-weight: normal;
+    opacity: 0.6;
+    margin: var(--gap) 0 calc(var(--gap) / 2);
+  }
+  .books {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--gap) * 0.75);
+    li {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.3ex;
+    }
+  }
+  .title {
+    font-weight: bold;
+    overflow-wrap: anywhere;
+  }
+  .facts {
+    font-size: 0.75em;
+    opacity: 0.7;
+  }
+  .read {
+    font-size: 0.75em;
+    color: var(--link-color);
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5ex;
+    &.asked {
+      margin-bottom: calc(var(--gap) / 2);
+      .tag {
+        font-size: 0.8em;
+      }
+    }
+  }
+  .delete {
+    font-size: 0.7em;
+  }
+  .more {
+    margin-top: var(--gap);
+    width: 100%;
+    padding: 0.6ex;
+    font-size: 0.8em;
+    border-radius: 0.8ex;
+    outline: 1px solid var(--horizontal-line-color);
+  }
+  .inside {
+    display: block;
+    margin-top: var(--gap);
+  }
+  .empty {
+    margin-top: calc(var(--gap) * 2);
+    opacity: 0.7;
+  }
+  .found {
+    p {
+      margin: 0 0 calc(var(--gap) / 2);
+    }
+    .person {
+      margin-bottom: calc(var(--gap) / 2);
+      ul {
+        list-style: none;
+        margin: 0.3ex 0 0 1.5em;
+      }
+    }
+  }
+  footer {
+    display: flex;
+    align-items: baseline;
+    gap: var(--gap);
+    margin-top: calc(var(--gap) * 2);
+    opacity: 0.7;
   }
 }
-.table .td {
-  min-width: 0;
-}
-.table .name,
-.table .desc {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.table .name {
-  font-weight: bold;
-}
-.table .th {
-  white-space: nowrap;
-  padding: calc(var(--gap)/2) 0;
-  position: relative;
-}
-.table .th::before {
-  content: '';
-  display: block;
-  border-bottom: 1px solid var(--horizontal-line-color);
-  width: calc(100% + 1ex);
-  height: calc(2ex + 2px);
-  box-shadow: 0 calc(1ex - 5px) 1.4ex -1ex rgba(0, 0, 0, .5);
-  position: absolute;
-  bottom: -1px;
-  left: calc(-1ex / 2);
-}
-.table .th span {
-  display: inline-block;
-  position: relative;
-}
-.table .th span::after {
-  position: absolute;
-  bottom: calc(1ex/4);
-  right: -1.8ex;
-  color: var(--body-font-color);
-}
-.table .th[data-sort=asc] span::after { content: '↑'; }
-.table .th[data-sort=desc] span::after { content: '↓'; }
-.table .delete { color: inherit; }
-.table .delete:hover { color: var(--link-color); }
 
 /** zen mode **/
 [data-zen=true] nav {
@@ -13385,63 +14137,6 @@ main {
 .text-right { text-align: right; }
 .text-center { text-align: center; }
 .indent-none { text-indent: 0; }
-
-/** the library searched, and its libraries **/
-.table .bar {
-  display: flex;
-  align-items: center;
-  gap: var(--gap);
-  padding-top: var(--gap);
-
-  input {
-    flex: 1;
-    font: inherit;
-    font-size: 0.9em;
-    padding: 0.6ex 1.2ex;
-    color: var(--body-font-color);
-    background: var(--body-background-color);
-    border: 1px solid var(--paper-outline-color);
-    border-radius: 0.8ex;
-  }
-  small {
-    white-space: nowrap;
-  }
-  button {
-    font: inherit;
-    font-size: 0.8em;
-    padding: 0.4ex 1.2ex;
-    color: var(--body-font-color);
-    background: var(--body-background-color);
-    border: 1px solid var(--paper-outline-color);
-    border-radius: 0.8ex;
-    cursor: pointer;
-    &:disabled {
-      opacity: 0.5;
-      cursor: default;
-    }
-  }
-}
-.table .found {
-  h3 {
-    font-size: 0.8em;
-    font-weight: normal;
-    opacity: 0.6;
-    margin: var(--gap) 0 calc(var(--gap) / 2);
-  }
-  p {
-    margin: 0 0 calc(var(--gap) / 2);
-  }
-  .person {
-    margin-bottom: calc(var(--gap) / 2);
-    ul {
-      list-style: none;
-      margin: 0.3ex 0 0 1.5em;
-    }
-  }
-  a.name {
-    font-weight: bold;
-  }
-}
 
 /** the places a book says what was searched for **/
 #command-palette[open] {

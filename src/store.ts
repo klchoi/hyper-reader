@@ -5,7 +5,9 @@
 import { Context, tick, track } from 'ripple';
 import type { Tracked } from 'ripple';
 import { chooseBackend } from './backends.ts';
-import type { Backend, BookRecord, BookSaying, BookSummary, FileInfo, LibraryStatus, Mention, Person, Progress } from './backends.ts';
+import type { Backend, BookRecord, BookSaying, FileInfo, LibraryStatus, Mention, Person, Progress } from './backends.ts';
+import { PAGE } from './catalog.ts';
+import type { Query, Shelved, TagCount } from './catalog.ts';
 import { articleNames, commandPaletteNames, highlightNames, nameFixer, namesWith, offerFor } from './names.ts';
 import type { AddNameAt, AddNameOffer } from './names.ts';
 import { bookRoute, chapterAt, createRouter, getColorScheme, markFound, nextTick, toOffset } from './places.ts';
@@ -18,6 +20,9 @@ export type Page = { reader: Reader };
 
 // the most books or chapters the palette lists at once
 const LISTED = 200;
+// how many books the library's front shows of each kind, and of tags
+const FRONT = { reading: 6, latest: 10, random: 6, tags: 40 };
+const newSeed = () => Math.floor(Math.random() * 2 ** 31);
 
 export type Settings = Record<string, any>;
 // what the palette offers: a book, a chapter, or a place in the book that says what was typed
@@ -53,13 +58,19 @@ export function createStore({ reader }: Page) {
   const router = createRouter();
   let backend: Backend;
 
-  const books = track<BookSummary[]>([]);
   const book = track<BookRecord | null>(null);
   const chapter = track<Chapter | null>(null);
   // the chapter asked for, while its text is on its way: the list shows it as the one read
   const opening = track<string | null>(null);
   const progress = track<Record<string, Progress>>({});
-  const settings = track<Settings>({ sort: { field: 'updatedAt', direction: 'desc' } });
+  const settings = track<Settings>({});
+  // the library, which the backend looks through and the page shows a page of: its front (the
+  // books being read, the newest, a few at random in the order of `seed`, and the tags most books
+  // have), and what it was asked for, with what was found so far of how many
+  const shelves = track<{ reading: Shelved[]; latest: Shelved[]; random: Shelved[]; seed: number; tags: TagCount[] } | null>(null);
+  const finding = track<{ query: Query; total: number; books: Shelved[]; busy: boolean } | null>(null);
+  // the books the palette offers with no book open, asked of the backend as it is typed
+  const paletteBooks = track<{ total: number; books: Shelved[] }>({ total: 0, books: [] });
   // `text` as typed, `q` as searched for
   const palette = track({ open: false, text: '', q: '', selectedIndex: 0 });
   // the places in the book open that say what the palette was given, and whether the whole book
@@ -79,12 +90,11 @@ export function createStore({ reader }: Page) {
   // the names as the list corrects them, made again only when the list changes
   const fixNames = track(() => nameFixer(names.value));
 
-  // what the command palette offers: the books, or the chapters of the one open, searchable
-  // under both spellings of a corrected title
-  const bookCommands = track(() => books.value.map(({ id, name }) => {
-    let { offset, chapterId } = progress.value[id] || {};
-    return { key: `book:${id}`, label: name, open: { bookId: id, offset, chapterId }, term: latinize(name).toLowerCase() };
-  }));
+  // what the command palette offers: the books the backend found, or the chapters of the one
+  // open, searchable under both spellings of a corrected title
+  const bookCommands = track(() => paletteBooks.value.books.map(({ id, title, read }) => (
+    { key: `book:${id}`, label: title, open: { bookId: id, offset: read?.offset, chapterId: read?.chapterId }, term: '' }
+  )));
   const chapterCommands = track(() => {
     let open = book.value;
     if (!open) return [];
@@ -99,11 +109,11 @@ export function createStore({ reader }: Page) {
     if (!open || mentions.value.q !== palette.value.q) return [];
     return mentions.value.found.map(m => ({ key: `at:${m.offset}`, label: `${m.before}${m.match}${m.after}`, term: '', open: { bookId: open.id, offset: m.offset }, mention: m }));
   });
-  // the books or chapters named so, of which the palette lists the first LISTED (a library of
-  // thousands is narrowed by typing), and the places in the book that say it
-  const named = track(() => (book.value ? chapterCommands.value : bookCommands.value).filter(c => c.term.includes(palette.value.q)));
+  // the chapters named so, of which the palette lists the first LISTED (a book of thousands is
+  // narrowed by typing), or the books found so; and the places in the book that say it
+  const named = track(() => (book.value ? chapterCommands.value.filter(c => c.term.includes(palette.value.q)) : bookCommands.value));
   const commands = track<Command[]>(() => [...named.value.slice(0, LISTED), ...mentionCommands.value]);
-  const unlisted = track(() => Math.max(0, named.value.length - LISTED));
+  const unlisted = track(() => (book.value ? Math.max(0, named.value.length - LISTED) : paletteBooks.value.total - paletteBooks.value.books.length));
   const selectedCommand = track(() => {
     let found = commands.value;
     return found[(palette.value.selectedIndex + found.length) % found.length];
@@ -121,11 +131,6 @@ export function createStore({ reader }: Page) {
   async function chooseColor(color: string) {
     await saveSettings({ [`color:${getColorScheme()}`]: color });
     highlight();
-  }
-  function sortBy(field: string, first: 'asc' | 'desc' = 'asc') {
-    let { sort } = settings.value;
-    let direction = sort.field === field && sort.direction === first ? (first === 'asc' ? 'desc' : 'asc') : first;
-    return saveSettings({ sort: { field, direction } });
   }
 
   // ---- fonts
@@ -161,11 +166,51 @@ export function createStore({ reader }: Page) {
   const chooseFont = (font: string) => saveSettings({ [fontSettings[fontPicker.value.target].family]: font });
 
   // ---- the library
-  async function loadBooks() {
-    let kept = await backend.books();
-    let byName = new Intl.Collator('vi-VN', { sensitivity: 'accent' });
-    kept.sort((a, z) => byName.compare(a.name, z.name));
-    books.value = kept;
+  // its front, asked of the backend
+  async function loadShelves() {
+    let seed = newSeed();
+    let [reading, latest, random, tags] = await Promise.all([
+      backend.books({ sort: 'read', limit: FRONT.reading }),
+      backend.books({ sort: 'latest', limit: FRONT.latest }),
+      backend.books({ sort: 'random', seed, limit: FRONT.random }),
+      backend.tags(FRONT.tags),
+    ]);
+    shelves.value = { reading: reading.books, latest: latest.books, random: random.books, seed, tags };
+  }
+  // other books at random
+  async function shuffle() {
+    let seed = newSeed();
+    let { books: random } = await backend.books({ sort: 'random', seed, limit: FRONT.random });
+    if (shelves.value) shelves.value = { ...shelves.value, random, seed };
+  }
+  // the library asked for `query`: the first page of the books it has so, `wait` ms after it
+  // was last asked (as it is typed). Null is its front again
+  let findTimer: ReturnType<typeof setTimeout> | undefined;
+  let asking = 0;
+  function find(query: Query | null, wait = 0) {
+    clearTimeout(findTimer);
+    let ask = ++asking;
+    if (!query) return void (finding.value = null);
+    // what was found stays in sight until what is asked now comes
+    finding.value = { query, total: finding.value?.total ?? 0, books: finding.value?.books ?? [], busy: true };
+    findTimer = setTimeout(async () => {
+      let { total, books } = await backend.books({ ...query, offset: 0, limit: PAGE });
+      if (ask === asking) finding.value = { query, total, books, busy: false };
+    }, wait);
+  }
+  // the next page of what was asked
+  async function findMore() {
+    let now = finding.value;
+    if (!now || now.busy || now.books.length >= now.total) return;
+    let ask = asking;
+    finding.value = { ...now, busy: true };
+    let { total, books } = await backend.books({ ...now.query, offset: now.books.length, limit: PAGE });
+    if (ask === asking) finding.value = { ...now, total, books: [...now.books, ...books], busy: false };
+  }
+  // the library's lists asked again: a book came, went, or was read
+  function refreshLibrary() {
+    loadShelves();
+    if (finding.value) find(finding.value.query);
   }
   async function loadProgress() {
     progress.value = await backend.progress();
@@ -175,9 +220,18 @@ export function createStore({ reader }: Page) {
   // a book's progress is saved a while after the reader stops: 10s after a chapter opens, 3s
   // after a scroll
   let progressTimer: ReturnType<typeof setTimeout> | undefined;
+  let unsaved: (() => Promise<void>) | null = null;
   function saveProgressLater(open: BookRecord, at: Chapter, offset: number, wait: number) {
     clearTimeout(progressTimer);
-    progressTimer = setTimeout(() => saveProgress(open, at, offset), wait);
+    unsaved = () => saveProgress(open, at, offset);
+    progressTimer = setTimeout(() => saveNow(), wait);
+  }
+  // the progress waiting to be saved, saved at once: the book is left
+  function saveNow() {
+    clearTimeout(progressTimer);
+    let save = unsaved;
+    unsaved = null;
+    return save?.() ?? Promise.resolve();
   }
   async function saveProgress(open: BookRecord, at: Chapter, offset?: number) {
     let record: Progress = {
@@ -292,10 +346,11 @@ export function createStore({ reader }: Page) {
     opening.value = null;
     book.value = null;
     chapter.value = null;
-    clearTimeout(progressTimer);
     router.push({});
     document.title = 'Text Reader';
     togglePalette(false);
+    // where the book was left is the first of the books being read
+    saveNow().then(refreshLibrary);
     await tick();
     requestAnimationFrame(() => scroll(0, 0));
   }
@@ -306,13 +361,13 @@ export function createStore({ reader }: Page) {
   async function storeFiles(dropped: File[]) {
     let readFile = (file: File) => new Promise<FileInfo & { text: string }>(resolve => {
       let fileReader = new FileReader();
-      fileReader.addEventListener('load', () => resolve({ name: file.name, size: file.size, text: fileReader.result as string }));
+      fileReader.addEventListener('load', () => resolve({ name: file.name, size: file.size, date: file.lastModified, text: fileReader.result as string }));
       fileReader.readAsText(file);
     });
     let read = [];
     for (let file of dropped) read.push(await readFile(file));
     let added = await backend.addBooks(read);
-    loadBooks();
+    refreshLibrary();
     watchStatus();
 
     let inNewTabs = added;
@@ -349,7 +404,7 @@ export function createStore({ reader }: Page) {
   }
   async function deleteBook(bookId: string) {
     await backend.deleteBook(bookId);
-    books.value = books.value.filter(b => b.id !== bookId);
+    refreshLibrary();
   }
 
   // ---- names
@@ -393,7 +448,7 @@ export function createStore({ reader }: Page) {
     if (opened === palette.value.open && text === undefined) return;
     palette.value = { ...palette.value, open: opened };
     if (!opened) return;
-    if (text !== undefined) searchCommands(text);
+    if (text !== undefined || !book.value) searchCommands(text ?? palette.value.text);
     await nextTick();
     document.querySelector<HTMLInputElement>('#command-palette input')?.select();
     highlightMatches();
@@ -414,11 +469,25 @@ export function createStore({ reader }: Page) {
   // the palette given `text`: the chapters (or books) named so, and in a book every place that
   // says it, asked of the backend a moment after the typing stops
   let mentionsTimer: ReturnType<typeof setTimeout> | undefined;
+  let paletteTimer: ReturnType<typeof setTimeout> | undefined;
   async function searchCommands(text: string) {
     let q = text.trim().toLowerCase();
     palette.value = { ...palette.value, text, q, selectedIndex: 0 };
     clearTimeout(mentionsTimer);
+    clearTimeout(paletteTimer);
     let open = book.value;
+    // with no book open, the books named so, asked of the backend (the books being read when
+    // nothing is typed, or the newest when none is)
+    if (!open) {
+      paletteTimer = setTimeout(async () => {
+        let found = await backend.books(q ? { q, limit: 50 } : { sort: 'read', limit: 50 });
+        if (!q && !found.total) found = await backend.books({ sort: 'latest', limit: 50 });
+        if (palette.value.q !== q || book.value) return;
+        paletteBooks.value = found;
+        selectCommand(0);
+        highlightMatches();
+      }, q ? 150 : 0);
+    }
     if (open && backend.searchBook && q.length >= 2) {
       mentionsTimer = setTimeout(async () => {
         let { indexed, total, mentions: places } = await backend.searchBook!(text.trim(), open.id);
@@ -471,7 +540,7 @@ export function createStore({ reader }: Page) {
     let was = status.value;
     let now = await backend.status();
     status.value = now;
-    if (was?.scan.running && !now.scan.running) loadBooks();
+    if (was?.scan.running && !now.scan.running) refreshLibrary();
     if (now.scan.running || now.index.done < now.index.total) statusTimer = setTimeout(watchStatus, 1500);
   }
   async function rescan() {
@@ -510,7 +579,7 @@ export function createStore({ reader }: Page) {
     applySettings(await backend.settings());
     searching.value = !!backend.searchBook;
     loadProgress();
-    loadBooks();
+    loadShelves();
     watchStatus();
     // an older link (`/#book=...` on a page that has paths) is written as the page writes it now
     let { book: bookId, offset, chapter: chapterId } = router.current();
@@ -525,10 +594,11 @@ export function createStore({ reader }: Page) {
 
   return {
     router,
-    books, book, chapter, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
+    book, chapter, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
+    shelves, finding, shuffle, find, findMore,
     fixNames, commands, unlisted, selectedCommand, mentions, searching, status, found,
     start, follow,
-    applySettings, saveSettings, chooseColor, sortBy,
+    applySettings, saveSettings, chooseColor,
     loadFonts, toggleSettings, setFontTarget, setFontQuery, chooseFont,
     openBook, openNextChapter, trackReadingOffset, showLibrary,
     storeFiles, refreshBook, deleteBook,

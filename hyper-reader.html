@@ -5794,6 +5794,10 @@ function createReader({ makeWorker, console = globalThis.console } = {}) {
 			let worker = makeWorker(({ id, chapters, error }) => {
 				let job = reading.get(id);
 				reading.delete(id);
+				if (!reading.size && parserWorker === worker) {
+					worker.terminate();
+					parserWorker = void 0;
+				}
 				if (!job) return;
 				if (error || !chapters) job.resolve(readInPage(job.name, job.text, `the worker failed: ${error}`));
 				else {

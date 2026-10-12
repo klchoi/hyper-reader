@@ -22,21 +22,24 @@ const scope = `
 
 // a page: its reader, with a worker on one of node's threads
 function page({ failing = false, missing = false } = {}) {
+  // the workers made, and those let go
+  let workers = { made: 0, ended: 0 };
   let makeWorker: MakeWorker = (answered, failed) => {
     if(failing) {
       setTimeout(failed, 0);
       return { postMessage() {}, terminate() {} };
     }
+    workers.made++;
     let thread = new Worker(scope, { eval: true });
     thread.on('message', answered);
     thread.on('error', () => failed());
-    return { postMessage: (job) => thread.postMessage(job), terminate: () => { thread.terminate(); } };
+    return { postMessage: (job) => thread.postMessage(job), terminate: () => { workers.ended++; thread.terminate(); } };
   };
   let said: string[] = [];
   let console = { info: (...message: unknown[]) => { said.push(message.join(' ')); } };
   // no `makeWorker` is a browser that has no workers
   let reader = createReader({ makeWorker: missing ? undefined : makeWorker, console });
-  return { ...reader, said };
+  return { ...reader, said, workers };
 }
 
 describe('reading a book in a worker', () => {
@@ -57,6 +60,15 @@ describe('reading a book in a worker', () => {
     let [a, b] = await Promise.all([readBook(file, text), readBook({ name: 'Khác.txt' }, text.replaceAll('Tiêu đề', 'Tên'))]);
     assert.ok(a.chapters[1].title.includes('Tiêu đề'));
     assert.ok(b.chapters[1].title.includes('Tên'));
+  });
+  it('lets its worker go once it has read all it was given, and makes another for the next', async () => {
+    let { readBook, stop: s, workers } = page();
+    stop = s;
+    await Promise.all([readBook(file, text), readBook({ name: 'Khác.txt' }, text)]);
+    assert.deepEqual(workers, { made: 1, ended: 1 });
+    let book = await readBook(file, text);
+    assert.equal(book.chapters.length, 4);
+    assert.deepEqual(workers, { made: 2, ended: 2 });
   });
   it('reads the book itself where a worker cannot be made', async () => {
     let { readBook, stop: s, said } = page({ missing: true });

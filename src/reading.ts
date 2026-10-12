@@ -1,6 +1,7 @@
 // Reading a book takes a while when it is big, so it is done in a worker (parser-worker.ts),
-// and the page stays where it was. Where no worker can be made, or one fails, the page reads the
-// book itself. It asks nothing of the browser but the worker it is given, so the tests can give
+// and the page stays where it was. The worker goes once it has read all it was given, and what
+// reading took (a few hundred MB for a big book) with it; the next book has a new one. Where no
+// worker can be made, or one fails, the page reads the book itself. It asks nothing of the browser but the worker it is given, so the tests can give
 // it one of node's threads (test/worker.test.ts).
 import { Book } from './book.ts';
 import { extractChapters, normalizeFileContent } from './parser.ts';
@@ -29,6 +30,10 @@ export function createReader({ makeWorker, console = globalThis.console }: { mak
       let worker = makeWorker(({ id, chapters, error }) => {
         let job = reading.get(id);
         reading.delete(id);
+        if (!reading.size && parserWorker === worker) {
+          worker.terminate();
+          parserWorker = undefined;
+        }
         if (!job) return;
         if (error || !chapters) job.resolve(readInPage(job.name, job.text, `the worker failed: ${error}`));
         else {

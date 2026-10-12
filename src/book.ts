@@ -4,7 +4,7 @@ import type { Chapter, Listed } from './parser.ts';
 
 // bump when a change to the parser should reach the books already stored, which
 // are parsed again the next time they are opened
-export const PARSER_VERSION = 15;
+export const PARSER_VERSION = 16;
 
 export type BookInfo = { id: string; name: string; description?: string };
 // what is kept of a book: the list of its chapters, without their text

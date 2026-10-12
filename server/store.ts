@@ -73,6 +73,8 @@ const MIGRATIONS = [
   end;`,
   // a part that is one of the chapters its whole runs over, the number of that chapter
   'alter table chapters add column part_chapter integer;',
+  // ...which the parser no longer makes: a run of chapters is chapters
+  'alter table chapters drop column part_chapter;',
 ];
 
 function openStore(file: string) {
@@ -110,7 +112,7 @@ export type BookRow = {
 };
 export type ChapterRow = {
   rowid: number; n: number; id: string; title: string; offset: number; end: number;
-  grp: string | null; part_of: string | null; part_text: string | null; part_chapter: number | null;
+  grp: string | null; part_of: string | null; part_text: string | null;
 };
 // a book as a reader reads it (see read-worker.ts): what it is called, its size and time, the
 // parser that read it, its chapters (where each begins and ends in the text as read) and the
@@ -139,7 +141,7 @@ export function createStore(file: string) {
     books: () => sql(`select ${BOOK_COLUMNS} from books order by name`).all() as BookRow[],
     booksIn: (root: string) => sql(`select ${BOOK_COLUMNS} from books where root = ?`).all(root) as BookRow[],
     book: (id: string) => (sql(`select ${BOOK_COLUMNS} from books where id = ?`).get(id) ?? null) as BookRow | null,
-    chapters: (id: string) => sql('select rowid, n, id, title, offset, "end", grp, part_of, part_text, part_chapter from chapters where book_id = ? order by n').all(id) as ChapterRow[],
+    chapters: (id: string) => sql('select rowid, n, id, title, offset, "end", grp, part_of, part_text from chapters where book_id = ? order by n').all(id) as ChapterRow[],
     // a book read: its row, and its chapters and characters in place of what it had
     keepBook({ id, root, path, name, description, size, mtime, parser, chapters, characters }: BookRead & { id: string; root: string; path: string }) {
       transaction(db, () => {
@@ -151,8 +153,8 @@ export function createStore(file: string) {
                description = excluded.description, size = excluded.size, mtime = excluded.mtime,
                parser = excluded.parser, indexed = 0, chapter_count = excluded.chapter_count`)
           .run(id, root, path, name, description ?? null, size, mtime, parser, chapters.length, new Date().toISOString());
-        let chapter = sql('insert into chapters (book_id, n, id, title, offset, "end", grp, part_of, part_text, part_chapter) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        chapters.forEach((c, n) => chapter.run(id, n, c.id, c.title, c.offset, c.end, c.group ?? null, c.part?.of ?? null, c.part?.text ?? null, c.part?.chapter ?? null));
+        let chapter = sql('insert into chapters (book_id, n, id, title, offset, "end", grp, part_of, part_text) values (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        chapters.forEach((c, n) => chapter.run(id, n, c.id, c.title, c.offset, c.end, c.group ?? null, c.part?.of ?? null, c.part?.text ?? null));
         let character = sql('insert into characters (book_id, name, folded, mentions) values (?, ?, ?, ?)');
         for(let { name: who, mentions } of characters) character.run(id, who, plain(who), mentions);
       });
@@ -212,7 +214,7 @@ export function createStore(file: string) {
     },
     // the chapters a phrase is in: of one book, in order, or of the whole library, by book
     chaptersSaying: (phrase: string, bookId: string) => sql(`select c.rowid, c.n, c.id, c.title, c.offset, c."end", c.book_id as bookId from chapter_text
-                  join chapters c on c.rowid = chapter_text.rowid where chapter_text match ? and c.book_id = ? order by c.n`).all(phrase, bookId) as (Omit<ChapterRow, 'grp' | 'part_of' | 'part_text' | 'part_chapter'> & { bookId: string })[],
+                  join chapters c on c.rowid = chapter_text.rowid where chapter_text match ? and c.book_id = ? order by c.n`).all(phrase, bookId) as (Omit<ChapterRow, 'grp' | 'part_of' | 'part_text'> & { bookId: string })[],
     booksSaying: (phrase: string, limit = 100) => sql(`select c.book_id as id, b.name, count(*) as chapters from chapter_text
                   join chapters c on c.rowid = chapter_text.rowid join books b on b.id = c.book_id
                   where chapter_text match ? group by c.book_id order by chapters desc limit ?`).all(phrase, limit) as { id: string; name: string; chapters: number }[],

@@ -540,16 +540,6 @@ nav {
         &:not(:empty)::after {
           content: '.';
         }
-        /* a part listed by its number alone: the number is all it says, and its highlight
-           ends with it */
-        &:has(+ .name:empty) {
-          margin-right: 0;
-          opacity: 0.85;
-        }
-      }
-      /* a name, even none, keeps the row a line tall */
-      .name:empty::before {
-        content: '\200b';
       }
       .name {
         min-width: 0;
@@ -572,17 +562,12 @@ nav {
       &:first-child a {
         font-weight: bold;
       }
-      /* one part of the chapter named above it, under the chapters' names: the chapter it is
-         (`9.`), or the part as it is written (`(thượng)`), with a guide down its side under
-         the dots after the chapters' numbers */
+      /* one part of the chapter named above it, as it is written, under the chapters' names,
+         with a guide down its side under the dots after their numbers */
       &.part {
         position: relative;
         .entry {
           margin-left: calc(var(--number-column) + var(--number-gap));
-        }
-        .number {
-          min-width: 0;
-          text-align: left;
         }
         .name {
           font-variant-numeric: lining-nums tabular-nums;

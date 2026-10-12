@@ -45,13 +45,7 @@ export function normalizeFileContent(source: string) {
 //           `(thượng)`), { text: 'tiết 2', leading: true } before it
 //   title   what the heading says besides, as written
 //   text    the heading as it stands in the book
-//
-// part: { of, text, chapter }
-//   of       the title of the whole the part is of (`Chương 9-10: Yoga`)
-//   text     the part as it is listed: `(thượng)`, `(2/5)`
-//   chapter  for a part that is one of the chapters the whole runs over, its number (and
-//            `text` is then only what is written beside it, a tag, if anything)
-export type Part = { of: string; text: string; chapter?: number };
+export type Part = { of: string; text: string };
 export type Listed = { id: string; title: string; offset: number; group?: string; part?: Part };
 export type Chapter = Listed & { content: string };
 export type Heading = {
@@ -106,17 +100,17 @@ function partMark({ title = '', part }: Heading): Mark | null {
 
 // A chapter written in parts: the parts follow one another, in one book, with the one title
 // and a part after it (`Yoga (thượng)`, `Yoga (hạ)`), under the one number or numbers that
-// follow on. Each part is given `{ of, text }`: the title of the whole (`Chương 9-10: Yoga`),
-// and the part, as written or, when the parts are numbers, as `2/5`, in the brackets it was
-// written in: `(thượng)`, `(2/5)`. Parts that are as many as the chapters the whole runs over
-// are those chapters, and are given their numbers as `chapter`, however they were written: the
-// four parts of `Chương 24-27` are chapters 24, 25, 26 and 27, the three `thượng`, `trung`,
-// `hạ` of `Chương 43-45` chapters 43, 44 and 45. A chapter just before the parts with their title and no
-// part of its own is their first part when the next is the second (`Na Trát`, then `Na Trát
-// (2)`), and their heading when the next is the first and it holds nothing but its heading
-// (`Thứ 13 chương tam đối`): it is given `{ of, head: true }`, and parts that left the title
-// out are given the one it says as `title`. One with a text of its own stays a chapter
-type PartOf = { of: string; head: true } | { of: string; head?: false; text: string; chapter?: number; title?: string };
+// follow on. Each part is given `{ of, text }`: the title of the whole (`Chương 13: Yoga`,
+// `Chương 9-11: Yoga`), and the part, as written or, when the parts are numbers, as `2/5`, in
+// the brackets it was written in: `(thượng)`, `(2/5)`. Parts that are as many as the chapters
+// the whole runs over are those chapters, and stay chapters, whatever their titles say: the
+// three parts of `Chương 9-11` are chapters 9, 10 and 11. A chapter just before the parts with
+// their title and no part of its own is their first part when the next is the second (`Na
+// Trát`, then `Na Trát (2)`), and their heading when the next is the first and it holds
+// nothing but its heading (`Thứ 13 chương tam đối`): it is given `{ head: true }`, and parts
+// that left the title out are given the one it says as `title`. One with a text of its own
+// stays a chapter, and parts that are all the one part (a heading the book repeats) are none
+type PartOf = { head: true } | { head?: false; of?: string; text?: string; title?: string };
 function partsOf(drafts: Draft[], text: string) {
   let headingOnly = (i: number) => text.slice(drafts[i].offset, drafts[i + 1]?.offset ?? text.length)
     .split('\n').filter(line => line.trim()).length <= TUNING.drafts.headingLines;
@@ -158,28 +152,23 @@ function partsOf(drafts: Draft[], text: string) {
   for(let start = 0, end = 0; start < drafts.length; start = end) {
     for(end = start + 1; end < drafts.length && follows(end - 1, end); end++);
     if(end - start < 2) continue;
-    let [first, last] = [drafts[start].heading, drafts[end - 1].heading];
-    let number = first.number === last.number ? first.number : `${numbers(start)[0]}-${numbers(end - 1).at(-1)}`;
     // a run is of marks that follow one another, none of them missing
     let run = marks.slice(start, end) as Mark[];
-    let of = chapterTitle({ ...first, number, part: undefined, title: run[0].stem }, start);
     let shown = run.filter(m => !m.head);
+    if(new Set(shown.map(m => m.order)).size < 2) continue;
+    let [first, last] = [drafts[start].heading, drafts[end - 1].heading];
+    let number = first.number === last.number ? first.number : `${numbers(start)[0]}-${numbers(end - 1).at(-1)}`;
+    let [from, to = from] = String(number ?? '').split('-').map(Number);
+    if(to - from + 1 === shown.length) {
+      run.forEach((m, k) => { parts[start + k] = m.head ? { head: true } : { title: m.given }; });
+      continue;
+    }
+    let of = chapterTitle({ ...first, number, part: undefined, title: run[0].stem }, start);
     let numbered = shown.every(m => m.number != null);
     let total = Math.max(new Set(shown.map(m => m.order)).size, ...shown.map(m => m.number ?? 0));
-    let [from, to = from] = String(number ?? '').split('-').map(Number);
-    let chapters = to - from + 1 === shown.length;
-    let place = 0;
     run.forEach((m, k) => {
-      if(m.head) {
-        parts[start + k] = { of, head: true };
-        return;
-      }
-      if(chapters) {
-        parts[start + k] = { of, text: m.tag ?? '', chapter: from + place++, title: m.given };
-        return;
-      }
       let said = numbered ? `${m.number}/${total}` : m.word;
-      parts[start + k] = { of, text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(' '), title: m.given };
+      parts[start + k] = m.head ? { head: true } : { of, text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(' '), title: m.given };
     });
   }
   return parts;
@@ -198,7 +187,7 @@ export function finishChapters(drafts: Draft[], text: string): Chapter[] {
       ...draft,
       offset: parts[i - 1]?.head ? drafts[i - 1].offset : draft.offset,
       heading: part?.title ? { ...draft.heading, title: part.title } : draft.heading,
-      part: part && { of: part.of, text: part.text, ...(part.chapter != null && { chapter: part.chapter }) },
+      part: part?.of != null ? { of: part.of, text: part.text ?? '' } : undefined,
     });
   });
   return kept.map(({ offset, group, heading, part }, i) => {

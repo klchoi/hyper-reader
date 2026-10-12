@@ -10,6 +10,11 @@ import { normalizeFileContent } from '../src/parser.ts';
 
 const bookText = (who: string) => ['Sách thử', ...[1, 2, 3].map(n => `Chương ${n}: Tiêu đề ${n}\n\n${who} đi qua núi rừng và gặp người quen bên bờ suối.`)].join('\n\n');
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// until `done`, or a deadline: how soon a process ends depends on the machine
+const until = async (done: () => boolean) => {
+  for(let tries = 0; tries < 100 && !done(); tries++) await wait(25);
+  assert.ok(done());
+};
 
 describe('the readers', () => {
   let shelf: string;
@@ -27,15 +32,17 @@ describe('the readers', () => {
   it('starts as many readers as it may for the books to read, and ends them once idle', async () => {
     let readers = createReaders({ count: 2, idle: 100 });
     try {
-      let read = await Promise.all(files.map(file => readers.read(file)));
-      assert.deepEqual(read.map(book => book.chapters.at(-1)!.title), ['Chương 3: Tiêu đề 3', 'Chương 3: Tiêu đề 3', 'Chương 3: Tiêu đề 3']);
+      let reads = files.map(file => readers.read(file));
+      // as many as it may, started as the jobs come
       assert.equal(readers.running(), 2);
-      await wait(400);
-      assert.equal(readers.running(), 0);
+      let read = await Promise.all(reads);
+      assert.deepEqual(read.map(book => book.chapters.at(-1)!.title), ['Chương 3: Tiêu đề 3', 'Chương 3: Tiêu đề 3', 'Chương 3: Tiêu đề 3']);
+      await until(() => readers.running() === 0);
       // and one again for the next
-      let { text } = await readers.text(files[1]);
-      assert.equal(text, normalizeFileContent(bookText('Quách Tĩnh')));
+      let asked = readers.text(files[1]);
       assert.equal(readers.running(), 1);
+      let { text } = await asked;
+      assert.equal(text, normalizeFileContent(bookText('Quách Tĩnh')));
     } finally {
       await readers.close();
     }

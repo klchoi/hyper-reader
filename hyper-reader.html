@@ -2067,6 +2067,87 @@ function own_anchor(node, anchor) {
 	});
 }
 /**
+* Wire up a `ref={expr}` attribute. `expr` may be:
+*   - a callback function — invoked with the element on mount; if it returns
+*     a function, that function runs as the cleanup on unmount.
+*   - a `Tracked` (e.g. from `track()`) — `tracked.value` is set to the
+*     element on mount and reset to `null` on unmount.
+*   - a plain mutable var (`let foo;`) — the element is assigned to the
+*     variable on mount and reset to `null` on unmount.
+*   - an array of any of the above.
+*
+* `get_fn` is invoked through `untrack` so the surrounding render block
+* doesn't subscribe to whatever the thunk happens to read. The supported
+* shape is to pass the ref slot itself (`ref={tracker}`); a foot-gun like
+* `ref={tracker.value}` would otherwise read the cell reactively and cause
+* spurious re-runs. Read untracked, the value is fixed for the life of the
+* enclosing block, so each ref is a single effect block keyed on its state
+* rather than a render block re-evaluating the thunk.
+*
+* @param {Element} element
+* @param {() => any} get_fn
+* @param {(value: any) => void} [set_fn]
+* @returns {void}
+*/
+function ref(element, get_fn, set_fn) {
+	apply_ref(element, untrack(get_fn), set_fn);
+}
+/**
+* @param {Element} element
+* @param {any} ref_value
+* @param {((value: any) => void) | undefined} set_fn
+* @returns {void}
+*/
+function apply_ref(element, ref_value, set_fn) {
+	if (is_array(ref_value)) for (var i = 0; i < ref_value.length; i++) apply_ref(element, ref_value[i], void 0);
+	else if (typeof ref_value === "function") block(8, run_function_ref, {
+		e: element,
+		f: ref_value
+	});
+	else if (is_ripple_object(ref_value)) block(8, run_tracked_ref, {
+		e: element,
+		t: ref_value
+	});
+	else if (set_fn !== void 0) block(8, run_set_ref, {
+		e: element,
+		f: set_fn
+	});
+}
+/**
+* The callback's return value is the effect's teardown.
+* @param {{ e: Element, f: (element: Element) => any }} s
+*/
+function run_function_ref(s) {
+	return s.f(s.e);
+}
+/**
+* @param {{ e: Element, t: { value: any } }} s
+*/
+function run_tracked_ref(s) {
+	s.t.value = s.e;
+	return clear_tracked_ref;
+}
+/**
+* Teardowns keyed on block state receive it (see `run_teardown`).
+* @param {{ e: Element, t: { value: any } }} s
+*/
+function clear_tracked_ref(s) {
+	s.t.value = null;
+}
+/**
+* @param {{ e: Element, f: (value: any) => void }} s
+*/
+function run_set_ref(s) {
+	s.f(s.e);
+	return clear_set_ref;
+}
+/**
+* @param {{ e: Element, f: (value: any) => void }} s
+*/
+function clear_set_ref(s) {
+	s.f(null);
+}
+/**
 * @param {() => (void | (() => void))} fn
 * @returns {Block}
 */
@@ -9724,6 +9805,7 @@ function detectedNameAt(x, y) {
 }
 //#endregion
 //#region src/store.ts
+var LISTED = 200;
 var cssFontFamily = (family) => `"${family.replace(/["\\]/g, "")}"`;
 var fontSettings = {
 	reading: {
@@ -9839,7 +9921,9 @@ function createStore({ reader }) {
 			mention: m
 		}));
 	});
-	const commands = track(() => [...(book.value ? chapterCommands.value : bookCommands.value).filter((c) => c.term.includes(palette.value.q)), ...mentionCommands.value]);
+	const named = track(() => (book.value ? chapterCommands.value : bookCommands.value).filter((c) => c.term.includes(palette.value.q)));
+	const commands = track(() => [...named.value.slice(0, LISTED), ...mentionCommands.value]);
+	const unlisted = track(() => Math.max(0, named.value.length - LISTED));
 	const selectedCommand = track(() => {
 		let found = commands.value;
 		return found[(palette.value.selectedIndex + found.length) % found.length];
@@ -9903,7 +9987,8 @@ function createStore({ reader }) {
 	const chooseFont = (font) => saveSettings({ [fontSettings[fontPicker.value.target].family]: font });
 	async function loadBooks() {
 		let kept = await backend.books();
-		kept.sort((a, z) => a.name.localeCompare(z.name, "vi-VN", { sensitivity: "accent" }));
+		let byName = new Intl.Collator("vi-VN", { sensitivity: "accent" });
+		kept.sort((a, z) => byName.compare(a.name, z.name));
 		books.value = kept;
 	}
 	async function loadProgress() {
@@ -10310,6 +10395,7 @@ function createStore({ reader }) {
 		addName,
 		fixNames,
 		commands,
+		unlisted,
 		selectedCommand,
 		mentions,
 		searching,
@@ -10554,7 +10640,7 @@ var root_1$8 = template_el("ol", ["start", "0"]);
 function render_4$3(__prev) {
 	set_style(__prev._a, `--digits: ${__prev._b.value}`, void 0);
 }
-function consequent_2$3(__anchor, { a: rows, b: activeId, c: open, d: __block, e: digits }) {
+function consequent_2$4(__anchor, { a: rows, b: activeId, c: open, d: __block, e: digits }) {
 	var ol = root_1$8();
 	{
 		const selector$4 = selector(() => activeId.value);
@@ -10583,12 +10669,12 @@ function consequent_2$3(__anchor, { a: rows, b: activeId, c: open, d: __block, e
 	});
 	append(__anchor, ol);
 }
-function if_3$2({ a: rows, b: activeId, c: open, d: __block, e: digits }) {
-	if (rows.value.length > 0) return consequent_2$3;
+function if_3$3({ a: rows, b: activeId, c: open, d: __block, e: digits }) {
+	if (rows.value.length > 0) return consequent_2$4;
 }
 var root$8 = template_el("nav", null, [null]);
-function render_5$2(__prev) {
-	var __a = if_3$2({
+function render_5$3(__prev) {
+	var __a = if_3$3({
 		a: __prev._a,
 		b: __prev._b,
 		c: __prev._c,
@@ -10650,14 +10736,14 @@ function ChapterList_render(__anchor, __block) {
 		}));
 	};
 	var nav = root$8();
-	render$10(render_5$2, {
+	render$10(render_5$3, {
 		a: UNINITIALIZED,
 		_a: rows,
 		_b: activeId,
 		_c: open,
 		_d: __block,
 		_e: digits,
-		_f: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_3$2, 0, {
+		_f: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_3$3, 0, {
 			a: rows,
 			b: activeId,
 			c: open,
@@ -10722,7 +10808,7 @@ function consequent$6(__anchor, { a: store, b: __block, c: said }) {
 function if_1$6({ a: store, b: __block, c: said }) {
 	if (store.searching.value) return consequent$6;
 }
-var root_5$1 = template_el("li", null, [[
+var root_5$2 = template_el("li", null, [[
 	"a",
 	null,
 	" "
@@ -10763,7 +10849,7 @@ function consequent_1$3(__anchor, { a: store, b: __block }) {
 		expression(hydrating ? hydrate_first_child() : b.firstChild, () => get(pattern).name);
 		var small_1 = hydrating ? hydrate_next_sibling() : b.nextSibling;
 		for_block_keyed(hydrating ? hydrate_next_sibling() : small_1.nextSibling, () => get(pattern).books, (__anchor, pattern_1) => {
-			var li = root_5$1();
+			var li = root_5$2();
 			var a_1 = hydrating ? hydrate_first_child() : li.firstChild;
 			a_1.__click = (event) => {
 				with_scope(__block, () => event.preventDefault());
@@ -10821,7 +10907,7 @@ function render_4$2(__prev) {
 		__prev.b = __b;
 	}
 }
-function consequent_2$2(__anchor, { a: searched, b: store, c: __block }) {
+function consequent_2$3(__anchor, { a: searched, b: store, c: __block }) {
 	var div_2 = root_2$5();
 	var node_2 = hydrating ? hydrate_first_child() : div_2.firstChild;
 	var ifs_1 = if_static(node_2, if_2$3, 0, {
@@ -10858,53 +10944,121 @@ function consequent_2$2(__anchor, { a: searched, b: store, c: __block }) {
 	});
 	append(__anchor, div_2);
 }
-function if_3$1({ a: searched, b: store, c: __block }) {
-	if (searched.value) return consequent_2$2;
+function if_3$2({ a: searched, b: store, c: __block }) {
+	if (searched.value) return consequent_2$3;
 }
-var root_8 = template_el("small", ["class", "desc"], " ");
-function consequent_3$1(__anchor, pattern_3) {
-	var small_4 = root_8();
+var root_9 = template_el("small", ["class", "desc"], " ");
+function render_5$2(__prev) {
+	var __a = get(__prev._a).description;
+	if (__prev.a !== __a) set_property_value(__prev._b, "title", __prev.a = __a);
+}
+function consequent_3$2(__anchor, pattern_3) {
+	var small_4 = root_9();
 	expression(hydrating ? hydrate_first_child() : small_4.firstChild, () => get(pattern_3).description);
+	render$10(render_5$2, {
+		a: void 0,
+		_a: pattern_3,
+		_b: small_4
+	});
 	append(__anchor, small_4);
 }
-function if_4(pattern_3) {
-	if (get(pattern_3).description) return consequent_3$1;
+function if_4$1(pattern_3) {
+	if (get(pattern_3).description) return consequent_3$2;
 }
-var root_9 = template_el("a", ["class", "delete"], [[
+var root_10 = template_el("a", ["class", "delete"], [[
 	"small",
 	null,
 	"delete"
 ]]);
 function consequent_4(__anchor, { a: pattern_3, b: __block, c: store }) {
-	var a_8 = root_9();
+	var a_8 = root_10();
 	a_8.__click = () => with_scope(__block, () => store.deleteBook(get(pattern_3).id));
 	append(__anchor, a_8);
 }
 function if_5({ a: pattern_3, b: __block, c: store }) {
 	if (get(pattern_3).deletable) return consequent_4;
 }
-var root_7 = template(`<div class=td><a class=name> </a></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class=td><!>`, 1, 5);
-function render_5$1(__prev) {
-	var __a = get(__prev._a).href;
+var root_8 = template(`<div class=row><div class=td><a class=name> </a></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class="td text-right"><small> </small></div><div class=td><!>`);
+function render_6(__prev) {
+	var __pattern_3 = get(__prev._a);
+	var __a = __pattern_3.href;
 	if (__prev.a !== __a) set_attribute(__prev._b, "href", __prev.a = __a);
-	var __b = if_4(__prev._a);
-	if (__prev.b !== __b) if_update(__prev._c, __prev.b = __b);
-	var __c = if_5({
+	var __b = __pattern_3.name;
+	if (__prev.b !== __b) set_attribute(__prev._b, "title", __prev.b = __b);
+	var __c = if_4$1(__prev._a);
+	if (__prev.c !== __c) if_update(__prev._c, __prev.c = __c);
+	var __d = if_5({
 		a: __prev._a,
 		b: __prev._d,
 		c: __prev._e
 	});
-	if (__prev.c !== __c) if_update(__prev._f, __prev.c = __c);
+	if (__prev.d !== __d) if_update(__prev._f, __prev.d = __d);
+	set_style(__prev._g, `--at: ${__pattern_3.at}`, void 0);
 }
-var root$7 = template(`<div class=table><a href=# class="th text-left"><span>File</span></a><a href=# class="th text-right"><span>Size</span></a><a href=# class="th text-right"><span>Chapters</span></a><a href=# class="th text-right"><span>Date</span></a><span class=th><span>`);
-function render_6(__prev) {
+var root_7 = template_el("div", ["class", "rows"]);
+function render_7(__prev) {
+	set_style(__prev._a, `--rows: ${__prev._b.value.length}`, void 0);
+}
+function consequent_5(__anchor, { a: searched, b: list, c: rows, d: __block, e: store, f: books }) {
+	var div_5 = root_7();
+	ref(div_5, () => list.v, (v) => list.v = v);
+	for_block_keyed(div_5, () => rows.value, (__anchor, pattern_3) => {
+		var div_6 = root_8();
+		var div_7 = hydrating ? hydrate_first_child() : div_6.firstChild;
+		var a_7 = hydrating ? hydrate_first_child() : div_7.firstChild;
+		a_7.__click = (event) => {
+			with_scope(__block, () => event.preventDefault());
+			with_scope(__block, () => store.openBook(get(pattern_3).place));
+		};
+		expression(hydrating ? hydrate_first_child() : a_7.firstChild, () => get(pattern_3).name);
+		var ifs_3 = if_static(hydrating ? hydrate_next_sibling() : append_into(div_7, true), if_4$1, 2, pattern_3);
+		var div_8 = hydrating ? hydrate_next_sibling() : div_7.nextSibling;
+		var small_5 = hydrating ? hydrate_first_child() : div_8.firstChild;
+		expression(hydrating ? hydrate_first_child() : small_5.firstChild, () => get(pattern_3).size);
+		var div_9 = hydrating ? hydrate_next_sibling() : div_8.nextSibling;
+		var small_6 = hydrating ? hydrate_first_child() : div_9.firstChild;
+		expression(hydrating ? hydrate_first_child() : small_6.firstChild, () => get(pattern_3).chapters);
+		var div_10 = hydrating ? hydrate_next_sibling() : div_9.nextSibling;
+		var small_7 = hydrating ? hydrate_first_child() : div_10.firstChild;
+		expression(hydrating ? hydrate_first_child() : small_7.firstChild, () => get(pattern_3).date);
+		var div_11 = hydrating ? hydrate_next_sibling() : div_10.nextSibling;
+		item({
+			a: void 0,
+			b: void 0,
+			c: UNINITIALIZED,
+			d: UNINITIALIZED,
+			_a: pattern_3,
+			_b: a_7,
+			_c: ifs_3,
+			_d: __block,
+			_e: store,
+			_f: if_static(hydrating ? hydrate_first_child() : div_11.firstChild, if_5, 2, {
+				a: pattern_3,
+				b: __block,
+				c: store
+			}),
+			_g: div_6
+		});
+		append(__anchor, div_6);
+	}, 4, (pattern_3) => pattern_3.id, void 0, void 0, render_6);
+	render$10(render_7, {
+		_a: div_5,
+		_b: books
+	});
+	append(__anchor, div_5);
+}
+function if_6({ a: searched, b: list, c: rows, d: __block, e: store, f: books }) {
+	if (!searched.value) return consequent_5;
+}
+var root$7 = template(`<div class=table><div class="row head"><a href=# class="th text-left"><span>File</span></a><a href=# class="th text-right"><span>Size</span></a><a href=# class="th text-right"><span>Chapters</span></a><a href=# class="th text-right"><span>Date</span></a><span class=th><span>`);
+function render_8(__prev) {
 	var __a = if_1$6({
 		a: __prev._a,
 		b: __prev._b,
 		c: __prev._c
 	});
 	if (__prev.a !== __a) if_update(__prev._d, __prev.a = __a);
-	var __b = if_3$1({
+	var __b = if_3$2({
 		a: __prev._e,
 		b: __prev._a,
 		c: __prev._b
@@ -10918,24 +11072,71 @@ function render_6(__prev) {
 	if (__prev.e !== __e) set_attribute(__prev._j, "data-sort", __prev.e = __e);
 	var __f = __prev._g("updatedAt");
 	if (__prev.f !== __f) set_attribute(__prev._k, "data-sort", __prev.f = __f);
+	var __g = if_6({
+		a: __prev._e,
+		b: __prev._l,
+		c: __prev._m,
+		d: __prev._b,
+		e: __prev._a,
+		f: __prev._n
+	});
+	if (__prev.g !== __g) if_update(__prev._o, __prev.g = __g);
 }
 function Library_render(__anchor, __block) {
 	const store = with_scope(__block, () => StoreContext.get());
-	const rows = track(() => {
+	const books = track(() => {
 		let progress = store.progress.value;
 		let { field, direction } = store.settings.value.sort;
-		let books = with_scope(__block, () => store.books.value.map((book) => ({
-			book,
-			kept: progress[book.id] || {}
-		})));
+		let entries = with_scope(__block, () => store.books.value.map((book) => {
+			let kept = progress[book.id] || {};
+			return {
+				book,
+				kept,
+				updated: with_scope(__block, () => new Date(kept.updatedAt || 0).getTime())
+			};
+		}));
 		let compare = (a, z) => {
-			if (field === "name") return with_scope(__block, () => a.book.name.localeCompare(z.book.name, "vi-VN", { sensitivity: "accent" }));
+			if (field === "name") return with_scope(__block, () => byName.compare(a.book.name, z.book.name));
 			if (field === "size") return a.book.size - z.book.size;
-			if (field === "updatedAt") return with_scope(__block, () => new Date(a.kept.updatedAt || 0).getTime()) - with_scope(__block, () => new Date(z.kept.updatedAt || 0).getTime());
+			if (field === "updatedAt") return a.updated - z.updated;
 			if (field === "chapterCount") return (a.kept.chapterCount || 1) - (z.kept.chapterCount || 1);
 			return 0;
 		};
-		return with_scope(__block, () => books.sort((a, z) => direction === "desc" ? -compare(a, z) || 0 : compare(a, z)).map(({ book, kept }) => {
+		return with_scope(__block, () => entries.sort((a, z) => direction === "desc" ? -compare(a, z) || 0 : compare(a, z)));
+	}, __block, "s8sfv9");
+	const range = track({
+		first: 0,
+		last: with_scope(__block, () => Math.ceil(innerHeight / 40)) + AROUND
+	}, __block, "1ys3ov5");
+	let list = { v: void 0 };
+	let frame = 0;
+	const measure = () => {
+		frame = 0;
+		if (!list.v) return;
+		let above = -with_scope(__block, () => list.v.getBoundingClientRect()).top;
+		let height = with_scope(__block, () => list.v.firstElementChild?.getBoundingClientRect()).height || 60;
+		let first = with_scope(__block, () => Math.max(0, Math.floor(above / height) - AROUND));
+		let last = with_scope(__block, () => Math.max(first, Math.ceil((above + innerHeight) / height) + AROUND));
+		if (first !== range.value.first || last !== range.value.last) range.value = {
+			first,
+			last
+		};
+	};
+	const measureSoon = () => {
+		frame ||= with_scope(__block, () => requestAnimationFrame(measure));
+	};
+	user_effect(() => {
+		with_scope(__block, () => addEventListener("scroll", measureSoon, { passive: true }));
+		with_scope(__block, () => addEventListener("resize", measureSoon));
+		return () => {
+			with_scope(__block, () => removeEventListener("scroll", measureSoon));
+			with_scope(__block, () => removeEventListener("resize", measureSoon));
+			with_scope(__block, () => cancelAnimationFrame(frame));
+		};
+	});
+	const rows = track(() => {
+		let { first, last } = range.value;
+		return with_scope(__block, () => books.value.slice(first, last).map(({ book, kept }, k) => {
 			let place = {
 				bookId: book.id,
 				offset: kept.offset,
@@ -10943,6 +11144,7 @@ function Library_render(__anchor, __block) {
 			};
 			return {
 				id: book.id,
+				at: first + k,
 				name: book.name,
 				description: book.description,
 				place,
@@ -10953,7 +11155,7 @@ function Library_render(__anchor, __block) {
 				date: with_scope(__block, () => formatDate(kept.updatedAt)) || "-"
 			};
 		}));
-	}, __block, "s8sfv9");
+	}, __block, "10wjbmk");
 	const said = track(() => {
 		let now = store.status.value;
 		if (!now) return "";
@@ -10962,8 +11164,11 @@ function Library_render(__anchor, __block) {
 		if (scan.running) with_scope(__block, () => parts.push(scan.toRead ? `reading ${scan.read}/${scan.toRead}` : "looking for books"));
 		if (index.done < index.total) with_scope(__block, () => parts.push(`indexed ${index.done}/${index.total}`));
 		return with_scope(__block, () => parts.join(" · "));
-	}, __block, "1ys3ov5");
-	const searched = track(() => store.found.value.q !== "", __block, "10wjbmk");
+	}, __block, "1w4jtrn");
+	const searched = track(() => store.found.value.q !== "", __block, "s7ukh6");
+	user_effect(() => {
+		if (!searched.value && books.value.length > 0) measureSoon();
+	});
 	const sorted = (field) => store.settings.value.sort.field === field ? store.settings.value.sort.direction : void 0;
 	const sortBy = (event, field, first = "asc") => {
 		with_scope(__block, () => event.preventDefault());
@@ -10977,12 +11182,13 @@ function Library_render(__anchor, __block) {
 		c: said
 	});
 	var node_1 = hydrating ? hydrate_next_sibling() : node;
-	var ifs_2 = if_static(node_1, if_3$1, 0, {
+	var ifs_2 = if_static(node_1, if_3$2, 0, {
 		a: searched,
 		b: store,
 		c: __block
 	});
-	var a_3 = hydrating ? hydrate_next_sibling() : node_1;
+	var div_4 = hydrating ? hydrate_next_sibling() : node_1;
+	var a_3 = hydrating ? hydrate_first_child() : div_4.firstChild;
 	a_3.__click = (event) => sortBy(event, "name");
 	var a_4 = hydrating ? hydrate_next_sibling() : a_3.nextSibling;
 	a_4.__click = (event) => sortBy(event, "size");
@@ -10990,52 +11196,14 @@ function Library_render(__anchor, __block) {
 	a_5.__click = (event) => sortBy(event, "chapterCount");
 	var a_6 = hydrating ? hydrate_next_sibling() : a_5.nextSibling;
 	a_6.__click = (event) => sortBy(event, "updatedAt", "desc");
-	hydrating ? hydrate_next_sibling() : a_6.nextSibling;
-	for_block_keyed(hydrating ? hydrate_next_sibling() : append_into(div), () => searched.value ? [] : rows.value, (__anchor, pattern_3) => {
-		var fragment_1 = root_7();
-		var div_4 = first_child_frag(fragment_1);
-		var a_7 = hydrating ? hydrate_first_child() : div_4.firstChild;
-		a_7.__click = (event) => {
-			with_scope(__block, () => event.preventDefault());
-			with_scope(__block, () => store.openBook(get(pattern_3).place));
-		};
-		expression(hydrating ? hydrate_first_child() : a_7.firstChild, () => get(pattern_3).name);
-		var ifs_3 = if_static(hydrating ? hydrate_next_sibling() : append_into(div_4, true), if_4, 2, pattern_3);
-		var div_5 = hydrating ? hydrate_next_sibling() : div_4.nextSibling;
-		var small_5 = hydrating ? hydrate_first_child() : div_5.firstChild;
-		expression(hydrating ? hydrate_first_child() : small_5.firstChild, () => get(pattern_3).size);
-		var div_6 = hydrating ? hydrate_next_sibling() : div_5.nextSibling;
-		var small_6 = hydrating ? hydrate_first_child() : div_6.firstChild;
-		expression(hydrating ? hydrate_first_child() : small_6.firstChild, () => get(pattern_3).chapters);
-		var div_7 = hydrating ? hydrate_next_sibling() : div_6.nextSibling;
-		var small_7 = hydrating ? hydrate_first_child() : div_7.firstChild;
-		expression(hydrating ? hydrate_first_child() : small_7.firstChild, () => get(pattern_3).date);
-		var div_8 = hydrating ? hydrate_next_sibling() : div_7.nextSibling;
-		var ifs_4 = if_static(hydrating ? hydrate_first_child() : div_8.firstChild, if_5, 2, {
-			a: pattern_3,
-			b: __block,
-			c: store
-		});
-		item({
-			a: void 0,
-			b: UNINITIALIZED,
-			c: UNINITIALIZED,
-			_a: pattern_3,
-			_b: a_7,
-			_c: ifs_3,
-			_d: __block,
-			_e: store,
-			_f: ifs_4
-		});
-		append(__anchor, fragment_1);
-	}, 0, (pattern_3) => pattern_3.id, void 0, void 0, render_5$1);
-	render$10(render_6, {
+	render$10(render_8, {
 		a: UNINITIALIZED,
 		b: UNINITIALIZED,
 		c: void 0,
 		d: void 0,
 		e: void 0,
 		f: void 0,
+		g: UNINITIALIZED,
 		_a: store,
 		_b: __block,
 		_c: said,
@@ -11046,11 +11214,24 @@ function Library_render(__anchor, __block) {
 		_h: a_3,
 		_i: a_4,
 		_j: a_5,
-		_k: a_6
+		_k: a_6,
+		_l: list,
+		_m: rows,
+		_n: books,
+		_o: if_static(hydrating ? hydrate_next_sibling() : append_into(div, true), if_6, 0, {
+			a: searched,
+			b: list,
+			c: rows,
+			d: __block,
+			e: store,
+			f: books
+		})
 	});
 	append(__anchor, div);
 }
 Library[RENDER_ENTRY] = Library_render;
+var AROUND = 10;
+var byName = new Intl.Collator("vi-VN", { sensitivity: "accent" });
 function Library() {
 	return tsrx_element(Library_render);
 }
@@ -11072,14 +11253,14 @@ function render_2$4(__prev) {
 	var __a = get(__prev._a).offset;
 	if (__prev.a !== __a) set_attribute_value(__prev._b, "data-offset", __prev.a = __a);
 }
-var root_5 = template(` `, 1, 1);
+var root_5$1 = template(` `, 1, 1);
 var root_6 = template_el("a", ["target", "_blank"], " ");
 function render_3$2(__prev) {
 	var __a = __prev._a.href;
 	if (__prev.a !== __a) set_attribute(__prev._b, "href", __prev.a = __a);
 }
-function consequent_3(__anchor, piece) {
-	var fragment = root_5();
+function consequent_3$1(__anchor, piece) {
+	var fragment = root_5$1();
 	expression(first_child_frag(fragment), () => piece);
 	append(__anchor, fragment);
 }
@@ -11094,7 +11275,7 @@ function alternate$2(__anchor, piece) {
 	append(__anchor, a);
 }
 function if_1$5(piece) {
-	if (typeof piece === "string") return consequent_3;
+	if (typeof piece === "string") return consequent_3$1;
 	else return alternate$2;
 }
 var root_4$2 = template_el("p");
@@ -11121,7 +11302,7 @@ function consequent_1$2(__anchor, pattern) {
 	});
 	append(__anchor, p);
 }
-function consequent_2$1(__anchor, pattern) {
+function consequent_2$2(__anchor, pattern) {
 	var p_1 = root_3$2();
 	expression(hydrating ? hydrate_first_child() : p_1.firstChild, () => get(pattern).text);
 	render$10(render_2$4, {
@@ -11146,10 +11327,10 @@ function alternate_1(__anchor, pattern) {
 function if_2$2(pattern) {
 	if (get(pattern).kind === "rule") return consequent$5;
 	else if (get(pattern).kind === "marks") return consequent_1$2;
-	else if (get(pattern).pieces.length === 1 && typeof get(pattern).pieces[0] === "string") return consequent_2$1;
+	else if (get(pattern).pieces.length === 1 && typeof get(pattern).pieces[0] === "string") return consequent_2$2;
 	else return alternate_1;
 }
-function render_5(__prev) {
+function render_5$1(__prev) {
 	var __a = if_2$2(__prev._a);
 	if (__prev.a !== __a) if_update(__prev._b, __prev.a = __a);
 }
@@ -11172,7 +11353,7 @@ function ChapterText_render(__anchor, __block) {
 			_a: pattern,
 			_b: if_static(__anchor, if_2$2, 3, pattern)
 		});
-	}, 4, (pattern) => pattern.offset, void 0, void 0, render_5);
+	}, 4, (pattern) => pattern.offset, void 0, void 0, render_5$1);
 	append(__anchor, main);
 }
 ChapterText[RENDER_ENTRY] = ChapterText_render;
@@ -11682,7 +11863,7 @@ function render_3(__prev) {
 	if (__prev.a !== __a) if_update(__prev._f, __prev.a = __a);
 }
 var root_2$1 = template_el("ul");
-function consequent_2(__anchor, { a: store, b: choose, c: __block }) {
+function consequent_2$1(__anchor, { a: store, b: choose, c: __block }) {
 	var ul = root_2$1();
 	{
 		const selector$1 = selector(() => store.selectedCommand.value);
@@ -11707,8 +11888,28 @@ function consequent_2(__anchor, { a: store, b: choose, c: __block }) {
 	}
 	append(__anchor, ul);
 }
-function if_3({ a: store, b: choose, c: __block }) {
-	if (store.commands.value.length > 0) return consequent_2;
+function if_3$1({ a: store, b: choose, c: __block }) {
+	if (store.palette.value.open && store.commands.value.length > 0) return consequent_2$1;
+}
+var root_5 = template_el("small", ["class", "unlisted"]);
+function render_4(__prev) {
+	var __a = `${__prev._a.unlisted.value} more: type to narrow them down`;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+}
+function consequent_3(__anchor, store) {
+	var small_2 = root_5();
+	render$10(render_4, {
+		a: "",
+		_a: store,
+		_b: small_2
+	});
+	append(__anchor, small_2);
+}
+function if_4(store) {
+	if (store.palette.value.open && store.unlisted.value > 0) return consequent_3;
 }
 var root$2 = template_el("dialog", ["id", "command-palette"], [[
 	"form",
@@ -11720,18 +11921,20 @@ var root$2 = template_el("dialog", ["id", "command-palette"], [[
 		""
 	]]]
 ]], 1);
-function render_4(__prev) {
+function render_5(__prev) {
 	var __a = __prev._a.palette.value.text;
 	if (__prev.a !== __a) set_value(__prev._b, __prev.a = __a);
 	var __b = if_1$2(__prev._a);
 	if (__prev.b !== __b) if_update(__prev._c, __prev.b = __b);
-	var __c = if_3({
+	var __c = if_3$1({
 		a: __prev._a,
 		b: __prev._d,
 		c: __prev._e
 	});
 	if (__prev.c !== __c) if_update(__prev._f, __prev.c = __c);
-	__prev._g.open = __prev._a.palette.value.open;
+	var __d = if_4(__prev._a);
+	if (__prev.d !== __d) if_update(__prev._g, __prev.d = __d);
+	__prev._h.open = __prev._a.palette.value.open;
 }
 function CommandPalette_render(__anchor, __block) {
 	const store = with_scope(__block, () => StoreContext.get());
@@ -11748,21 +11951,23 @@ function CommandPalette_render(__anchor, __block) {
 	};
 	var input = hydrating ? hydrate_first_child() : form.firstChild;
 	input.__input = (event) => with_scope(__block, () => store.searchCommands(event.currentTarget.value));
-	render$10(render_4, {
+	render$10(render_5, {
 		a: void 0,
 		b: UNINITIALIZED,
 		c: UNINITIALIZED,
+		d: UNINITIALIZED,
 		_a: store,
 		_b: input,
 		_c: if_static(hydrating ? hydrate_next_sibling() : append_into(dialog), if_1$2, 0, store),
 		_d: choose,
 		_e: __block,
-		_f: if_static(hydrating ? hydrate_next_sibling() : append_into(dialog, true), if_3, 0, {
+		_f: if_static(hydrating ? hydrate_next_sibling() : append_into(dialog), if_3$1, 0, {
 			a: store,
 			b: choose,
 			c: __block
 		}),
-		_g: dialog
+		_g: if_static(hydrating ? hydrate_next_sibling() : append_into(dialog, true), if_4, 0, store),
+		_h: dialog
 	});
 	append(__anchor, dialog);
 }
@@ -11918,16 +12123,22 @@ delegate(["mousedown", "click"]);
 //#endregion
 //#region src/App.tsrx
 function consequent(__anchor, store) {
-	render_component(Library, __anchor, {});
+	render_component(ChapterList, __anchor, {});
 }
 function if_1(store) {
-	if (!store.book.value) return consequent;
+	if (store.book.value) return consequent;
 }
 function consequent_1(__anchor, store) {
-	render_component(ChapterText, __anchor, {});
+	render_component(Library, __anchor, {});
 }
 function if_2(store) {
-	if (store.chapter.value) return consequent_1;
+	if (!store.book.value) return consequent_1;
+}
+function consequent_2(__anchor, store) {
+	render_component(ChapterText, __anchor, {});
+}
+function if_3(store) {
+	if (store.chapter.value) return consequent_2;
 }
 var root_2 = template(`<!><!><!><!><!><!><!><!>`, 1, 8);
 function render(__prev) {
@@ -11935,6 +12146,8 @@ function render(__prev) {
 	if (__prev.a !== __a) if_update(__prev._b, __prev.a = __a);
 	var __b = if_2(__prev._a);
 	if (__prev.b !== __b) if_update(__prev._c, __prev.b = __b);
+	var __c = if_3(__prev._a);
+	if (__prev.c !== __c) if_update(__prev._d, __prev.c = __c);
 }
 var root_1 = template(`<!>`, 1, 1);
 function App_render(__anchor, __block, page) {
@@ -11959,11 +12172,11 @@ function App_render(__anchor, __block, page) {
 	expression(first_child_frag(fragment), () => tsrx_element((__anchor, __block) => {
 		var fragment_1 = root_2();
 		var node = first_child_frag(fragment_1);
-		render_component(ChapterList, node, {});
+		var ifs = if_static(node, if_1, 0, store);
 		var node_1 = hydrating ? hydrate_next_sibling() : node.nextSibling;
-		var ifs = if_static(node_1, if_1, 0, store);
+		var ifs_1 = if_static(node_1, if_2, 0, store);
 		var node_2 = hydrating ? hydrate_next_sibling() : node_1.nextSibling;
-		var ifs_1 = if_static(node_2, if_2, 0, store);
+		var ifs_2 = if_static(node_2, if_3, 0, store);
 		var node_3 = hydrating ? hydrate_next_sibling() : node_2.nextSibling;
 		render_component(Rail, node_3, {});
 		var node_4 = hydrating ? hydrate_next_sibling() : node_3.nextSibling;
@@ -11976,9 +12189,11 @@ function App_render(__anchor, __block, page) {
 		render$10(render, {
 			a: UNINITIALIZED,
 			b: UNINITIALIZED,
+			c: UNINITIALIZED,
 			_a: store,
 			_b: ifs,
-			_c: ifs_1
+			_c: ifs_1,
+			_d: ifs_2
 		});
 		append(__anchor, fragment_1);
 	}));
@@ -12735,18 +12950,51 @@ main {
 }
 
 /** table **/
+/* the library, where the chapter list and the paper stand when a book is open. Its rows are
+   made only as they come in sight (see Library.tsrx), so they cannot size their columns by
+   what is in them: every row, the header's too, has the same, and all are one height (a name
+   and a line under it), a name too long for its column cut short */
 .table {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto auto;
-  row-gap: var(--gap);
-  column-gap: calc(var(--gap) * 2);
+  --columns: minmax(0, 1fr) 7ch 7ch 14ch 5ch;
+  --row: calc(1.2em + 1.2em * 0.875 + var(--gap));
+  grid-column: 1 / 3;
   padding: 0 var(--gap) var(--gap);
   background: var(--paper-background-color);
   box-shadow: 0px 6px 12px 3px var(--paper-shadow-color);
   outline: 1px solid var(--paper-outline-color);
   line-height: 1.2;
   align-self: stretch;
-  align-content: start;
+}
+.table .row {
+  display: grid;
+  grid-template-columns: var(--columns);
+  column-gap: calc(var(--gap) * 2);
+}
+.table .head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--paper-background-color);
+}
+.table .rows {
+  position: relative;
+  height: calc(var(--row) * var(--rows, 0));
+  .row {
+    position: absolute;
+    inset: calc(var(--row) * var(--at)) 0 auto;
+    height: var(--row);
+    padding-top: calc(var(--gap) / 2);
+  }
+}
+.table .td {
+  min-width: 0;
+}
+.table .name,
+.table .desc {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .table .name {
   font-weight: bold;
@@ -12754,9 +13002,7 @@ main {
 .table .th {
   white-space: nowrap;
   padding: calc(var(--gap)/2) 0;
-  position: sticky;
-  top: 0;
-  background: var(--paper-background-color);
+  position: relative;
 }
 .table .th::before {
   content: '';
@@ -12781,7 +13027,6 @@ main {
 }
 .table .th[data-sort=asc] span::after { content: '↑'; }
 .table .th[data-sort=desc] span::after { content: '↓'; }
-.table .desc { display: block; }
 .table .delete { color: inherit; }
 .table .delete:hover { color: var(--link-color); }
 
@@ -12800,6 +13045,8 @@ main {
   width: var(--width);
   max-height: 70%;
   position: fixed;
+  /* over the library's header, which stays over its rows */
+  z-index: 10;
   top: 10%;
   left: calc((100% - var(--width)) / 2);
   border-radius: 1.5ex;
@@ -13141,7 +13388,6 @@ main {
 
 /** the library searched, and its libraries **/
 .table .bar {
-  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: var(--gap);
@@ -13176,7 +13422,6 @@ main {
   }
 }
 .table .found {
-  grid-column: 1 / -1;
   h3 {
     font-size: 0.8em;
     font-weight: normal;
@@ -13200,9 +13445,14 @@ main {
 
 /** the places a book says what was searched for **/
 #command-palette[open] {
-  .mentions {
+  .mentions,
+  .unlisted {
     padding: 0.7ex 1.3ex 0;
     opacity: 0.6;
+  }
+  .unlisted {
+    display: block;
+    padding-bottom: 0.7ex;
   }
   li.mention a {
     small {

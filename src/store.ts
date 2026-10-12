@@ -16,6 +16,9 @@ import type { Reader } from './reading.ts';
 // what the page is given to start with: the reader of books (see reading.ts)
 export type Page = { reader: Reader };
 
+// the most books or chapters the palette lists at once
+const LISTED = 200;
+
 export type Settings = Record<string, any>;
 // what the palette offers: a book, a chapter, or a place in the book that says what was typed
 export type Command = { key: string; label: string; term: string; open: { bookId: string; offset?: number; chapterId?: string }; mention?: Mention };
@@ -96,10 +99,11 @@ export function createStore({ reader }: Page) {
     if (!open || mentions.value.q !== palette.value.q) return [];
     return mentions.value.found.map(m => ({ key: `at:${m.offset}`, label: `${m.before}${m.match}${m.after}`, term: '', open: { bookId: open.id, offset: m.offset }, mention: m }));
   });
-  const commands = track<Command[]>(() => [
-    ...(book.value ? chapterCommands.value : bookCommands.value).filter(c => c.term.includes(palette.value.q)),
-    ...mentionCommands.value,
-  ]);
+  // the books or chapters named so, of which the palette lists the first LISTED (a library of
+  // thousands is narrowed by typing), and the places in the book that say it
+  const named = track(() => (book.value ? chapterCommands.value : bookCommands.value).filter(c => c.term.includes(palette.value.q)));
+  const commands = track<Command[]>(() => [...named.value.slice(0, LISTED), ...mentionCommands.value]);
+  const unlisted = track(() => Math.max(0, named.value.length - LISTED));
   const selectedCommand = track(() => {
     let found = commands.value;
     return found[(palette.value.selectedIndex + found.length) % found.length];
@@ -159,7 +163,8 @@ export function createStore({ reader }: Page) {
   // ---- the library
   async function loadBooks() {
     let kept = await backend.books();
-    kept.sort((a, z) => a.name.localeCompare(z.name, 'vi-VN', { sensitivity: 'accent' }));
+    let byName = new Intl.Collator('vi-VN', { sensitivity: 'accent' });
+    kept.sort((a, z) => byName.compare(a.name, z.name));
     books.value = kept;
   }
   async function loadProgress() {
@@ -521,7 +526,7 @@ export function createStore({ reader }: Page) {
   return {
     router,
     books, book, chapter, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
-    fixNames, commands, selectedCommand, mentions, searching, status, found,
+    fixNames, commands, unlisted, selectedCommand, mentions, searching, status, found,
     start, follow,
     applySettings, saveSettings, chooseColor, sortBy,
     loadFonts, toggleSettings, setFontTarget, setFontQuery, chooseFont,

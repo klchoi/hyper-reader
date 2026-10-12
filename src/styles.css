@@ -735,18 +735,51 @@ main {
 }
 
 /** table **/
+/* the library, where the chapter list and the paper stand when a book is open. Its rows are
+   made only as they come in sight (see Library.tsrx), so they cannot size their columns by
+   what is in them: every row, the header's too, has the same, and all are one height (a name
+   and a line under it), a name too long for its column cut short */
 .table {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto auto;
-  row-gap: var(--gap);
-  column-gap: calc(var(--gap) * 2);
+  --columns: minmax(0, 1fr) 7ch 7ch 14ch 5ch;
+  --row: calc(1.2em + 1.2em * 0.875 + var(--gap));
+  grid-column: 1 / 3;
   padding: 0 var(--gap) var(--gap);
   background: var(--paper-background-color);
   box-shadow: 0px 6px 12px 3px var(--paper-shadow-color);
   outline: 1px solid var(--paper-outline-color);
   line-height: 1.2;
   align-self: stretch;
-  align-content: start;
+}
+.table .row {
+  display: grid;
+  grid-template-columns: var(--columns);
+  column-gap: calc(var(--gap) * 2);
+}
+.table .head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--paper-background-color);
+}
+.table .rows {
+  position: relative;
+  height: calc(var(--row) * var(--rows, 0));
+  .row {
+    position: absolute;
+    inset: calc(var(--row) * var(--at)) 0 auto;
+    height: var(--row);
+    padding-top: calc(var(--gap) / 2);
+  }
+}
+.table .td {
+  min-width: 0;
+}
+.table .name,
+.table .desc {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .table .name {
   font-weight: bold;
@@ -754,9 +787,7 @@ main {
 .table .th {
   white-space: nowrap;
   padding: calc(var(--gap)/2) 0;
-  position: sticky;
-  top: 0;
-  background: var(--paper-background-color);
+  position: relative;
 }
 .table .th::before {
   content: '';
@@ -781,7 +812,6 @@ main {
 }
 .table .th[data-sort=asc] span::after { content: '↑'; }
 .table .th[data-sort=desc] span::after { content: '↓'; }
-.table .desc { display: block; }
 .table .delete { color: inherit; }
 .table .delete:hover { color: var(--link-color); }
 
@@ -800,6 +830,8 @@ main {
   width: var(--width);
   max-height: 70%;
   position: fixed;
+  /* over the library's header, which stays over its rows */
+  z-index: 10;
   top: 10%;
   left: calc((100% - var(--width)) / 2);
   border-radius: 1.5ex;
@@ -1141,7 +1173,6 @@ main {
 
 /** the library searched, and its libraries **/
 .table .bar {
-  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: var(--gap);
@@ -1176,7 +1207,6 @@ main {
   }
 }
 .table .found {
-  grid-column: 1 / -1;
   h3 {
     font-size: 0.8em;
     font-weight: normal;
@@ -1200,9 +1230,14 @@ main {
 
 /** the places a book says what was searched for **/
 #command-palette[open] {
-  .mentions {
+  .mentions,
+  .unlisted {
     padding: 0.7ex 1.3ex 0;
     opacity: 0.6;
+  }
+  .unlisted {
+    display: block;
+    padding-bottom: 0.7ex;
   }
   li.mention a {
     small {

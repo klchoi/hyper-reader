@@ -39,7 +39,10 @@ export function App(page: Page) @{
   effect(() => untrack(() => listen(store)));
 
   <>
-    <ChapterList />
+    // the library takes the chapter list's place: there is none with no book open
+    @if (store.book.value) {
+      <ChapterList />
+    }
     @if (!store.book.value) {
       <Library />
     }

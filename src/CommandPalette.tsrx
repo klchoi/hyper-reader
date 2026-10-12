@@ -24,7 +24,8 @@ export function CommandPalette() @{
         {store.mentions.value.indexed ? '' : ' (the book is being indexed: ask again in a moment for all of them)'}
       </small>
     }
-    @if (store.commands.value.length > 0) {
+    // made only while open: the palette of a library of thousands lists a few hundred of them
+    @if (store.palette.value.open && store.commands.value.length > 0) {
       <ul>
         @for (const command of store.commands.value; key command.key) {
           @if (command.mention) {
@@ -43,6 +44,9 @@ export function CommandPalette() @{
           }
         }
       </ul>
+    }
+    @if (store.palette.value.open && store.unlisted.value > 0) {
+      <small class="unlisted">{`${store.unlisted.value} more: type to narrow them down`}</small>
     }
   </dialog>
 }

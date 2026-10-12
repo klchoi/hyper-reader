@@ -6106,7 +6106,7 @@ function describeFile(path) {
 		title: title.replace(/^\p{Ll}/u, (c) => c.toUpperCase()),
 		tags: [...new Map(tags.map((tag) => [fold(tag), tag])).values()],
 		note: notes.join(" · ") || void 0,
-		folder
+		folder: folder && !fold(folder).startsWith(fold(title)) ? folder : void 0
 	};
 }
 function entryOf({ id, path, size, chapters, date, deletable }) {

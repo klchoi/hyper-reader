@@ -28,6 +28,7 @@ describe('what a file says of its book', () => {
   it('keeps a title made only of brackets, and says the folder a book is in', () => {
     assert.equal(describeFile('(1-3 chương).txt').title, '(1-3 chương)');
     assert.equal(describeFile('_Bộ sưu tập của lão Hề/con/Một truyện.txt').folder, 'Bộ sưu tập của lão Hề');
+    assert.equal(describeFile('Quan trường tình nhân (1-26)/Quan trường tình nhân (1-26 chương) (TQ).txt').folder, undefined);
   });
 });
 

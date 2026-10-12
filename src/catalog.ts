@@ -83,7 +83,8 @@ export function describeFile(path: string): Pick<Shelved, 'title' | 'tags' | 'no
     title: title.replace(/^\p{Ll}/u, c => c.toUpperCase()),
     tags: [...new Map(tags.map(tag => [fold(tag), tag])).values()],
     note: notes.join(' · ') || undefined,
-    folder,
+    // (a folder of the book's own, named as it is, says nothing more)
+    folder: folder && !fold(folder).startsWith(fold(title)) ? folder : undefined,
   };
 }
 

@@ -9507,18 +9507,19 @@ var commandPaletteNames = {
 	selector: "#command-palette a",
 	prefix: "cp"
 };
-function setHighlightStyle(styleId, css) {
-	let styleEl = document.head.querySelector(`style[name="${styleId}"]`);
+function setHighlightStyles(prefix, rules) {
+	let styleEl = document.head.querySelector(`style[name="${prefix}"]`);
 	if (!styleEl) {
 		styleEl = document.createElement("style");
-		styleEl.setAttribute("name", styleId);
+		styleEl.setAttribute("name", prefix);
 		document.head.appendChild(styleEl);
 	}
-	styleEl.textContent = `::highlight(${styleId}) { ${css} }`;
+	styleEl.textContent = rules.join("\n");
 }
 async function highlightNames(names, { selector, prefix } = articleNames) {
 	await nextTick();
 	for (let styleId of Array.from(CSS.highlights.keys())) if (styleId.startsWith(`${prefix}-`)) CSS.highlights.delete(styleId);
+	setHighlightStyles(prefix, []);
 	detectedNames[prefix] = /* @__PURE__ */ new Map();
 	let paper = paperColor();
 	let prose = proseColor(paper);
@@ -9607,6 +9608,7 @@ async function highlightNames(names, { selector, prefix } = articleNames) {
 		groups[groupId].ids.push(...aliases[nameId] || [nameId]);
 		groups[groupId].ranges.push(...ranges[nameId]);
 	}
+	let rules = [];
 	for (let groupId in groups) {
 		let { ids, ranges: groupRanges } = groups[groupId];
 		let shortIds = ids.map(shortNameId).filter((id) => !!id && !ids.includes(id) && (aliasOf.get(id) || groupId) === groupId);
@@ -9624,9 +9626,10 @@ async function highlightNames(names, { selector, prefix } = articleNames) {
 			let found = groupRanges.filter((f) => f.known === known);
 			if (!found.length) continue;
 			CSS.highlights.set(styleId + suffix, new Highlight(...found.map((f) => f.range)));
-			setHighlightStyle(styleId + suffix, [`color: ${color} !important;`, known ? "" : "text-decoration: underline 1px dashed !important; text-underline-offset: 0.3em; text-decoration-skip-ink: none;"].join(" "));
+			rules.push(`::highlight(${styleId + suffix}) { ${[`color: ${color} !important;`, known ? "" : "text-decoration: underline 1px dashed !important; text-underline-offset: 0.3em; text-decoration-skip-ink: none;"].join(" ")} }`);
 		}
 	}
+	setHighlightStyles(prefix, rules);
 }
 var isWordChar = (char) => char !== void 0 && /[\p{L}\p{N}]/u.test(char);
 function wholeWords(range) {

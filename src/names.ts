@@ -376,14 +376,18 @@ export type Scope = { selector: string; prefix: string };
 export const articleNames: Scope = { selector: 'article p, nav a', prefix: 'hl' };
 export const commandPaletteNames: Scope = { selector: '#command-palette a', prefix: 'cp' };
 
-function setHighlightStyle(styleId: string, css: string) {
-  let styleEl = document.head.querySelector(`style[name="${styleId}"]`);
+// the colors of a pass, one stylesheet to a scope, holding the rules of the names it colored
+// and no others. Every rule is checked on every style recalculation, whether or not its
+// highlight is still there: the rules of the chapters read before would pile up, and slow down
+// every chapter opened after them
+function setHighlightStyles(prefix: string, rules: string[]) {
+  let styleEl = document.head.querySelector(`style[name="${prefix}"]`);
   if (!styleEl) {
     styleEl = document.createElement('style');
-    styleEl.setAttribute('name', styleId);
+    styleEl.setAttribute('name', prefix);
     document.head.appendChild(styleEl);
   }
-  styleEl.textContent = `::highlight(${styleId}) { ${css} }`;
+  styleEl.textContent = rules.join('\n');
 }
 
 export async function highlightNames(names: string, { selector, prefix }: Scope = articleNames) {
@@ -393,6 +397,7 @@ export async function highlightNames(names: string, { selector, prefix }: Scope 
   for (let styleId of Array.from(CSS.highlights.keys())) {
     if (styleId.startsWith(`${prefix}-`)) CSS.highlights.delete(styleId);
   }
+  setHighlightStyles(prefix, []);
   detectedNames[prefix] = new Map();
   let paper = paperColor();
   let prose = proseColor(paper);
@@ -500,6 +505,7 @@ export async function highlightNames(names: string, { selector, prefix }: Scope 
     groups[groupId].ranges.push(...ranges[nameId]);
   }
 
+  let rules: string[] = [];
   for (let groupId in groups) {
     // reuse the hue of any id this character is already known by, including the
     // short name derived from a full one, so it stays the same across chapters
@@ -522,12 +528,13 @@ export async function highlightNames(names: string, { selector, prefix }: Scope 
       let found = groupRanges.filter(f => f.known === known);
       if (!found.length) continue;
       CSS.highlights.set(styleId + suffix, new Highlight(...found.map(f => f.range)));
-      setHighlightStyle(styleId + suffix, [
+      rules.push(`::highlight(${styleId + suffix}) { ${[
         `color: ${color} !important;`,
         known ? '' : 'text-decoration: underline 1px dashed !important; text-underline-offset: 0.3em; text-decoration-skip-ink: none;',
-      ].join(' '));
+      ].join(' ')} }`);
     }
   }
+  setHighlightStyles(prefix, rules);
 }
 
 // ---- adding a name from the page ----------------------------------------------------------

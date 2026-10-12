@@ -10418,11 +10418,12 @@ function render_1$7(__prev) {
 	if (__prev.c !== __c) set_attribute(__prev._b, "title", __prev.c = __c);
 	var __d = {
 		active: __pattern.id !== void 0 && selector_match(__prev._c, __pattern.id),
-		part: __pattern.part
+		part: __pattern.part,
+		reading: !!__prev._d.value && !!with_scope(__prev._e, () => get(__prev._a).parts?.includes(__prev._d.value))
 	};
-	if (__prev.d !== __d) set_class_value(__prev._d, __prev.d = __d);
+	if (__prev.d !== __d) set_class_value(__prev._f, __prev.d = __d);
 }
-function consequent$7(__anchor, { a: pattern, b: open, c: selector }) {
+function consequent$7(__anchor, { a: pattern, b: open, c: selector, d: activeId, e: __block }) {
 	var li = root_2$6();
 	render$10(render$9, {
 		a: "",
@@ -10431,7 +10432,7 @@ function consequent$7(__anchor, { a: pattern, b: open, c: selector }) {
 	});
 	append(__anchor, li);
 }
-function alternate$3(__anchor, { a: pattern, b: open, c: selector }) {
+function alternate$3(__anchor, { a: pattern, b: open, c: selector, d: activeId, e: __block }) {
 	var li_1 = root_3$4();
 	var a = hydrating ? hydrate_first_child() : li_1.firstChild;
 	a.__click = (event) => open(event, get(pattern).offset);
@@ -10443,11 +10444,13 @@ function alternate$3(__anchor, { a: pattern, b: open, c: selector }) {
 		_a: pattern,
 		_b: a,
 		_c: selector,
-		_d: li_1
+		_d: activeId,
+		_e: __block,
+		_f: li_1
 	});
 	append(__anchor, li_1);
 }
-function if_1$7({ a: pattern, b: open, c: selector }) {
+function if_1$7({ a: pattern, b: open, c: selector, d: activeId, e: __block }) {
 	if (get(pattern).book) return consequent$7;
 	else return alternate$3;
 }
@@ -10455,12 +10458,14 @@ function render_2$6(__prev) {
 	var __a = if_1$7({
 		a: __prev._a,
 		b: __prev._b,
-		c: __prev._c
+		c: __prev._c,
+		d: __prev._d,
+		e: __prev._e
 	});
-	if (__prev.a !== __a) if_update(__prev._d, __prev.a = __a);
+	if (__prev.a !== __a) if_update(__prev._f, __prev.a = __a);
 }
 var root_1$8 = template_el("ol", ["start", "0"]);
-function consequent_1$4(__anchor, { a: rows, b: activeId, c: open }) {
+function consequent_1$4(__anchor, { a: rows, b: activeId, c: open, d: __block }) {
 	var ol = root_1$8();
 	{
 		const selector$4 = selector(() => activeId.value);
@@ -10468,20 +10473,24 @@ function consequent_1$4(__anchor, { a: rows, b: activeId, c: open }) {
 			var ifs = if_static(__anchor, if_1$7, 3, {
 				a: pattern,
 				b: open,
-				c: selector$4
+				c: selector$4,
+				d: activeId,
+				e: __block
 			});
 			item({
 				a: UNINITIALIZED,
 				_a: pattern,
 				_b: open,
 				_c: selector$4,
-				_d: ifs
+				_d: activeId,
+				_e: __block,
+				_f: ifs
 			});
 		}, 4, (pattern) => pattern.key, void 0, void 0, render_2$6);
 	}
 	append(__anchor, ol);
 }
-function if_2$4({ a: rows, b: activeId, c: open }) {
+function if_2$4({ a: rows, b: activeId, c: open, d: __block }) {
 	if (rows.value.length > 0) return consequent_1$4;
 }
 var root$8 = template_el("nav", null, [null]);
@@ -10489,9 +10498,10 @@ function render_3$4(__prev) {
 	var __a = if_2$4({
 		a: __prev._a,
 		b: __prev._b,
-		c: __prev._c
+		c: __prev._c,
+		d: __prev._d
 	});
-	if (__prev.a !== __a) if_update(__prev._d, __prev.a = __a);
+	if (__prev.a !== __a) if_update(__prev._e, __prev.a = __a);
 }
 function ChapterList_render(__anchor, __block) {
 	const store = with_scope(__block, () => StoreContext.get());
@@ -10501,6 +10511,7 @@ function ChapterList_render(__anchor, __block) {
 		let fix = store.fixNames.value;
 		let rows = [];
 		let group;
+		let whole;
 		let row = (key, offset, fields) => ({
 			key,
 			offset,
@@ -10515,10 +10526,12 @@ function ChapterList_render(__anchor, __block) {
 		});
 		with_scope(__block, () => open.chapters.forEach((c, i) => {
 			if (c.group && c.group !== group) with_scope(__block, () => rows.push(row(`book:${i}`, c.offset, { book: group = c.group })));
-			if (c.part && c.part.of !== open.chapters[i - 1]?.part?.of) with_scope(__block, () => rows.push(row(`whole:${i}`, c.offset, {
+			if (c.part && c.part.of !== open.chapters[i - 1]?.part?.of) with_scope(__block, () => rows.push(whole = row(`whole:${i}`, c.offset, {
 				label: fix(c.part.of),
-				tip: fix(c.part.of)
+				tip: fix(c.part.of),
+				parts: []
 			})));
+			if (c.part) with_scope(__block, () => whole?.parts?.push(c.id));
 			with_scope(__block, () => rows.push(row(c.id, c.offset, {
 				id: c.id,
 				label: fix(c.part ? c.part.text : c.title),
@@ -10542,10 +10555,12 @@ function ChapterList_render(__anchor, __block) {
 		_a: rows,
 		_b: activeId,
 		_c: open,
-		_d: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_2$4, 0, {
+		_d: __block,
+		_e: if_static(hydrating ? hydrate_first_child() : nav.firstChild, if_2$4, 0, {
 			a: rows,
 			b: activeId,
-			c: open
+			c: open,
+			d: __block
 		})
 	});
 	append(__anchor, nav);
@@ -12351,7 +12366,8 @@ nav {
     align-items: start;
     li {
       max-width: 100%;
-      &:not(.active) {
+      /* the chapter read, and the name of the one whose part is read, are written out whole */
+      &:not(.active, .reading) {
         white-space: nowrap;
       }
       padding-top: 0.1ex;

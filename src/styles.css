@@ -478,7 +478,8 @@ nav {
     align-items: start;
     li {
       max-width: 100%;
-      &:not(.active) {
+      /* the chapter read, and the name of the one whose part is read, are written out whole */
+      &:not(.active, .reading) {
         white-space: nowrap;
       }
       padding-top: 0.1ex;

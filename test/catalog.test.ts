@@ -81,6 +81,23 @@ describe('the books asked for', () => {
     assert.deepEqual([...ids({ sort: 'random', seed: 7, limit: 2 }), ...ids({ sort: 'random', seed: 7, offset: 2, limit: 2 })], order(7));
     assert.ok([1, 2, 3, 4, 5, 6].some(seed => order(seed).join() !== order(7).join()));
   });
+  it('shows a book kept file after file as it grew once, its newest file, with how many there are', () => {
+    let grown = [
+      { id: 'v1', path: 'Xanh biếc (1-30 chương).txt', size: 1.5e6, chapters: 30, date: day('2026-05-11') },
+      { id: 'v3', path: 'Xanh biếc (1-66 chương).txt', size: 2.5e6, chapters: 66, date: day('2026-07-20') },
+      { id: 'v2', path: 'Xanh biếc (1-41 chương).txt', size: 1.9e6, chapters: 41, date: day('2026-06-01') },
+    ].map(book => entryOf({ ...book, deletable: false }));
+    let all = [...entries, ...grown];
+    let found = findBooks(all, {}, { q: 'xanh biec' });
+    assert.deepEqual([found.total, found.books[0].id, found.books[0].versions], [1, 'v3', 3]);
+    assert.equal(findBooks(all, {}, {}).total, 5);
+    assert.equal(findBooks(all, {}, { every: true }).total, 7);
+    // every file of the book, the newest first, and the one being read among the books being read
+    assert.deepEqual(findBooks(all, {}, { title: 'xanh biếc' }).books.map(book => book.id), ['v3', 'v2', 'v1']);
+    let reading = { ...progress, v1: { updatedAt: '2026-10-11T00:00:00Z' } };
+    assert.deepEqual(findBooks(all, reading, { sort: 'read' }).books.map(book => book.id), ['v1', 'd', 'c']);
+    assert.equal(findBooks(all, reading, {}).books.find(book => book.title === 'Xanh biếc')?.id, 'v3');
+  });
   it('counts the tags, each as most books write it', () => {
     assert.deepEqual(topTags(entries, 3), [{ tag: 'hậu cung', count: 2 }, { tag: 'NTL', count: 2 }, { tag: 'kết thúc', count: 1 }]);
     assert.deepEqual(topTags(entries, 1), [{ tag: 'hậu cung', count: 2 }]);
@@ -89,8 +106,8 @@ describe('the books asked for', () => {
 
 describe('a query in a url', () => {
   it('comes back as it was asked', () => {
-    let query: Query = { q: 'hoàng dung', tags: ['hậu cung', 'NTL'], size: [1000000, null], chapters: [null, 200], sort: 'random', order: 'asc', seed: 42, offset: 30, limit: 30 };
+    let query: Query = { q: 'hoàng dung', tags: ['hậu cung', 'NTL'], size: [1000000, null], chapters: [null, 200], title: 'Ma nữ', every: true, sort: 'random', order: 'asc', seed: 42, offset: 30, limit: 30 };
     assert.deepEqual(queryOf(new URLSearchParams(queryString(query))), query);
-    assert.deepEqual(queryOf(new URLSearchParams('sort=nonsense&size=abc&limit=x')), { q: undefined, tags: [], size: undefined, chapters: undefined, sort: undefined, order: undefined, seed: undefined, offset: undefined, limit: undefined });
+    assert.deepEqual(queryOf(new URLSearchParams('sort=nonsense&size=abc&limit=x')), { q: undefined, tags: [], size: undefined, chapters: undefined, title: undefined, every: undefined, sort: undefined, order: undefined, seed: undefined, offset: undefined, limit: undefined });
   });
 });

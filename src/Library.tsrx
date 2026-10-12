@@ -47,7 +47,9 @@ export function Library() @{
   const ask = (change: Query, wait = 0) => {
     let query = { ...asked.value, ...change };
     if ('q' in change) store.searchLibrary('');
-    let something = query.q?.trim() || query.tags?.length || query.size || query.chapters || query.sort;
+    // the files of one book are left for anything else asked
+    if (!('title' in change)) delete query.title;
+    let something = query.q?.trim() || query.tags?.length || query.size || query.chapters || query.sort || query.title != null;
     store.find(something ? query : null, wait);
   };
   const withTag = (tag: string) => ask({ tags: [...new Set([...(asked.value.tags ?? []), tag])] });
@@ -55,7 +57,8 @@ export function Library() @{
   const sections = track<Section[]>(() => {
     let now = store.finding.value;
     if (now) {
-      let title = now.busy && !now.books.length ? 'Looking…' : `${now.total.toLocaleString()} ${now.total === 1 ? 'book' : 'books'}`;
+      let what = now.query.title != null ? (now.total === 1 ? 'file' : 'files') : now.total === 1 ? 'book' : 'books';
+      let title = now.busy && !now.books.length ? 'Looking…' : `${now.total.toLocaleString()} ${what}`;
       return [{ key: 'found', title, books: now.books, more: now.books.length < now.total }];
     }
     let front = store.shelves.value;
@@ -69,7 +72,11 @@ export function Library() @{
   });
   // a book as a row shows it
   const placeOf = (book: Shelved) => ({ bookId: book.id, offset: book.read?.offset, chapterId: book.read?.chapterId });
-  const factsOf = (book: Shelved) => [formatSize(book.size), `${book.chapters.toLocaleString()} ${book.chapters === 1 ? 'chapter' : 'chapters'}`, dayOf(book.date), book.folder].filter(Boolean).join(' · ');
+  // (the files of one book are told apart by what their names say of them: `1-66 chương`)
+  const factsOf = (book: Shelved) => [
+    formatSize(book.size), `${book.chapters.toLocaleString()} ${book.chapters === 1 ? 'chapter' : 'chapters'}`, dayOf(book.date), book.folder,
+    store.finding.value?.query.title != null && book.note,
+  ].filter(Boolean).join(' · ');
   const readOf = (book: Shelved) => (book.read?.chapterCount ? `Chapter ${book.read.chapterIndex} of ${book.read.chapterCount}, ${formatDate(book.read.updatedAt) ?? ''}` : '');
   const open = (event: MouseEvent, book: Shelved) => {
     event.preventDefault();
@@ -176,7 +183,15 @@ export function Library() @{
               @for (const book of section.books; key book.id) {
                 <li>
                   <a class="title" href={store.router.route(bookRoute(placeOf(book)))} onClick={(event: MouseEvent) => open(event, book)}>{book.title}</a>
-                  <small class="facts">{factsOf(book)}</small>
+                  <small class="facts">
+                    {factsOf(book)}
+                    @if (book.versions && store.finding.value?.query.title == null) {
+                      <>
+                        {' · '}
+                        <button class="link" title="Every file of this book, the older ones too" onClick={() => ask({ title: book.title, q: '', tags: [], size: undefined, chapters: undefined, sort: undefined })}>{`${book.versions} files`}</button>
+                      </>
+                    }
+                  </small>
                   @if (book.read?.chapterCount) {
                     <small class="read">{readOf(book)}</small>
                   }

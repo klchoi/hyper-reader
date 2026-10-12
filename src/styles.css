@@ -863,6 +863,9 @@ main {
   .facts {
     font-size: 0.75em;
     opacity: 0.7;
+    .link {
+      font-size: inherit;
+    }
   }
   .read {
     font-size: 0.75em;

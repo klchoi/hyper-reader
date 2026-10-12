@@ -4276,7 +4276,7 @@ function mount(component, options) {
 }
 //#endregion
 //#region src/parser-worker.ts?worker&inline
-var jsContent = "(function() {\n	//#region src/parser.ts\n	function normalizeFileContent(source) {\n		let text = source.normalize();\n		text = text.replace(/[\\r\\n]+/g, \"\\n\");\n		text = text.replace(/\\t+/g, \"\\n\");\n		text = text.replace(/(?<=\\S) {2,}(?=\\p{Lu})/gu, \"\\n\");\n		text = text.replace(/(.+)/g, (s) => s.trim());\n		text = text.replace(/^'([^']+)'$/gm, \"\\\"$1\\\"\");\n		text = text.replace(/(\\d)\\s*(\\.)\\s*(\\d)/gm, \"$1$2$3\");\n		text = text.replace(/\\s+([.,;:?!\\]】)])/gm, \"$1\");\n		text = text.replace(/([([【])\\s+/gm, \"$1\");\n		text = text.replace(/([:—]{2,})/gm, (c) => c.slice(0, 1));\n		text = text.replace(/(:)[^\\s\\w]+\\s*/gm, \"$1 \");\n		text = text.replace(/^\\s*\"\\s+|\\s+\"\\s*$/gm, \"\\\"\");\n		text = text.replace(/\\s?\"?QQ Group \\d+\"?/gu, \"\");\n		text = text.replaceAll(\"  tìm sách a \\\"Cuộc đời này không phụ diên đuôi tình\\\" cá nhân cải biên\", \"\");\n		text = text.replace(/\\b(?<protocol>https?:)(?:\\/\\/)? (?<path>(?:\\w+)(?:\\. \\w+)+(?:\\/(?:(?:\\. )?[\\w/])+)?)/gm, (...args) => {\n			let { protocol, path } = args.pop();\n			path = path.replace(/\\s/g, \"\");\n			if (protocol) return `${protocol}//${path}`;\n			return path;\n		});\n		text = text.replaceAll(\"cha mẹ vợ\", \"mẹ vợ\");\n		return text;\n	}\n	function chapterTitle({ type = \"Chương\", number, part, title, text }, ordinal) {\n		title = title?.replace(/^[\\s/|\\\\]+/, \"\") ?? \"\";\n		let isExtra = (s) => /phiên ngoại/iu.test(s ?? \"\");\n		let named = [[isExtra(text) && !isExtra(title) && !isExtra(type) ? \"Phiên ngoại\" : void 0, number != null && `${type} ${number}`].filter(Boolean).join(\" \"), title.replace(/./, (c) => c.toUpperCase())].filter(Boolean).join(\": \");\n		let shown = part && !title.includes(`(${part.text})`) ? part : null;\n		return [\n			shown?.leading && `${shown.text}:`,\n			named,\n			shown && !shown.leading && `(${shown.text})`\n		].filter(Boolean).join(\" \") || `${type} ${ordinal + 1}`;\n	}\n	const PART_MARK = /\\s*[(（]\\s*([^()（）]{1,16}?)\\s*[)）]\\s*(【[^】]*】)?\\s*$/u;\n	function partMark({ title = \"\", part }) {\n		let marked = PART_MARK.exec(title);\n		let bare = (written) => written?.toLowerCase().replace(/^[\\s\\p{P}]+|[\\s\\p{P}]+$/gu, \"\");\n		let word = bare(part?.text ?? marked?.[1]);\n		if (!word) return null;\n		let number = part?.leading ? Number(/\\d+$/.exec(word)?.[0] ?? NaN) : /^\\d+$/.test(word) ? Number(word) : word in HALF_WORDS ? null : valueOfPart(word);\n		if (Number.isNaN(number)) number = null;\n		let half = /^(thượng|trung|hạ)(?:\\s+(\\d+))?$/u.exec(word);\n		if (number == null && !half) return null;\n		let order = number ?? HALF_WORDS[half[1]] + Number(half[2] ?? 0) / 1e3;\n		let ours = marked && bare(marked[1]) === word ? marked : null;\n		return {\n			stem: (ours ? title.slice(0, ours.index) : title).trim(),\n			word,\n			number,\n			order,\n			bracketed: !!ours || !!part?.bracketed,\n			tag: ours?.[2]\n		};\n	}\n	function partsOf(drafts, text) {\n		let headingOnly = (i) => text.slice(drafts[i].offset, drafts[i + 1]?.offset ?? text.length).split(\"\\n\").filter((line) => line.trim()).length <= TUNING.drafts.headingLines;\n		let marks = drafts.map(({ heading }) => heading && partMark(heading));\n		let together = (a, b) => drafts[a].group === drafts[b].group && (drafts[a].heading.type ?? \"Chương\") === (drafts[b].heading.type ?? \"Chương\");\n		let numbers = (i) => String(drafts[i].heading.number ?? \"\").split(\"-\").map(Number);\n		let step = (a, b) => drafts[a].heading.number === drafts[b].heading.number ? 0 : numbers(b)[0] - numbers(a).at(-1);\n		marks.forEach((mark, i) => {\n			let next = marks[i + 1];\n			let title = drafts[i].heading?.title?.trim();\n			if (mark || !next || !title || !together(i, i + 1) || step(i, i + 1) > 1) return;\n			let untitled = next.stem === \"\" && step(i, i + 1) === 0;\n			if (title.toLowerCase() !== next.stem.toLowerCase() && !untitled) return;\n			let second = next.number != null ? next.number === 2 : next.order > 1;\n			let first = next.number != null ? next.number === 1 : next.order === 1;\n			if (second) marks[i] = {\n				stem: title,\n				word: next.number != null ? \"1\" : \"thượng\",\n				number: next.number != null ? 1 : null,\n				order: 1,\n				bracketed: next.bracketed\n			};\n			else if (first && headingOnly(i)) marks[i] = {\n				stem: title,\n				head: true,\n				order: 0\n			};\n			else return;\n			for (let j = i + 1; untitled && marks[j]?.stem === \"\" && step(i, j) === 0; j++) marks[j] = {\n				...marks[j],\n				stem: title,\n				given: title\n			};\n		});\n		let follows = (a, b) => {\n			let [from, to] = [marks[a], marks[b]];\n			if (!from || !to || to.head || !together(a, b)) return false;\n			if (from.stem.toLowerCase() !== to.stem.toLowerCase()) return false;\n			let named = from.stem !== \"\";\n			let s = step(a, b);\n			if (!(s === 0 || s === 1 || named && s === 2)) return false;\n			return to.order > from.order || to.order === from.order && (s === 0 || named);\n		};\n		let parts = new Array(drafts.length);\n		for (let start = 0, end = 0; start < drafts.length; start = end) {\n			for (end = start + 1; end < drafts.length && follows(end - 1, end); end++);\n			if (end - start < 2) continue;\n			let run = marks.slice(start, end);\n			let shown = run.filter((m) => !m.head);\n			if (new Set(shown.map((m) => m.order)).size < 2) continue;\n			let [first, last] = [drafts[start].heading, drafts[end - 1].heading];\n			let number = first.number === last.number ? first.number : `${numbers(start)[0]}-${numbers(end - 1).at(-1)}`;\n			let [from, to = from] = String(number ?? \"\").split(\"-\").map(Number);\n			if (to - from + 1 === shown.length) {\n				run.forEach((m, k) => {\n					parts[start + k] = m.head ? { head: true } : { title: m.given };\n				});\n				continue;\n			}\n			let of = chapterTitle({\n				...first,\n				number,\n				part: void 0,\n				title: run[0].stem\n			}, start);\n			let numbered = shown.every((m) => m.number != null);\n			let total = Math.max(new Set(shown.map((m) => m.order)).size, ...shown.map((m) => m.number ?? 0));\n			run.forEach((m, k) => {\n				let said = numbered ? `${m.number}/${total}` : m.word;\n				parts[start + k] = m.head ? { head: true } : {\n					of,\n					text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(\" \"),\n					title: m.given\n				};\n			});\n		}\n		return parts;\n	}\n	function finishChapters(drafts, text) {\n		let parts = partsOf(drafts, text);\n		let kept = [];\n		drafts.forEach((draft, i) => {\n			let part = parts[i];\n			if (part?.head) return;\n			kept.push({\n				...draft,\n				offset: parts[i - 1]?.head ? drafts[i - 1].offset : draft.offset,\n				heading: part?.title ? {\n					...draft.heading,\n					title: part.title\n				} : draft.heading,\n				part: part?.of != null ? {\n					of: part.of,\n					text: part.text ?? \"\"\n				} : void 0\n			});\n		});\n		return kept.map(({ offset, group, heading, part }, i) => {\n			let title = chapterTitle(heading, i);\n			let end = kept[i + 1]?.offset ?? text.length;\n			return {\n				id: `${slug(title)}-${i}`,\n				title,\n				offset,\n				group,\n				part,\n				content: text.slice(offset, end).trim()\n			};\n		});\n	}\n	const TUNING = {\n		base: {\n			decimal: 2,\n			digits: 1.5,\n			thien: -4,\n			phraseAlone: 1,\n			bookAlone: 3,\n			bookTitle: 8,\n			bookTitleMax: 40,\n			bookProse: -10,\n			markerProseMax: 2,\n			titlePage: -6,\n			roman: -2,\n			inline: 3,\n			inlineTitleMax: 80\n		},\n		prose: {\n			longerThan: 100,\n			long: 3,\n			commas: 2,\n			manyCommas: 2,\n			oneCommaOver: 40,\n			oneComma: 1,\n			sentenceOver: 50,\n			sentence: 2\n		},\n		reward: {\n			next: 8,\n			gap: 3,\n			repeat: 3,\n			boundary: 7,\n			carryOn: 4,\n			restart: -6,\n			half: 4,\n			end: 6,\n			interlude: 1\n		},\n		path: {\n			threshold: 4.5,\n			closeLines: 3,\n			gapMax: 4,\n			smallNumber: 3,\n			startAlone: 3,\n			startFar: -6,\n			lateStartCost: 4,\n			lateStartCap: 10,\n			opensExtraLines: 4,\n			breakMinBase: 6,\n			unnamedFrom: 6,\n			unnamedUpTo: 2,\n			endLookback: 40,\n			endMin: 2,\n			skippedBooksMax: 3\n		},\n		trust: { scale: 6 },\n		tiny: {\n			typicalAtLeast: 30,\n			lines: 2\n		},\n		contents: {\n			minEntries: 3,\n			maxEntries: 60\n		},\n		fill: { firstMax: 4 },\n		drafts: {\n			titleMax: 100,\n			seriesMin: 8,\n			seriesOver: 1.2,\n			pageParagraphs: 60,\n			headingLines: 2\n		}\n	};\n	const WORD_DIGITS = {\n		một: 1,\n		mốt: 1,\n		hai: 2,\n		ba: 3,\n		bốn: 4,\n		tư: 4,\n		năm: 5,\n		lăm: 5,\n		sáu: 6,\n		bảy: 7,\n		tám: 8,\n		chín: 9\n	};\n	const SINO_DIGITS = {\n		nhất: 1,\n		nhị: 2,\n		tam: 3,\n		tứ: 4,\n		ngũ: 5,\n		lục: 6,\n		thất: 7,\n		bát: 8,\n		cửu: 9\n	};\n	const TENS_UNITS = [\n		\"mốt\",\n		\"hai\",\n		\"ba\",\n		\"bốn\",\n		\"tư\",\n		\"lăm\",\n		\"sáu\",\n		\"bảy\",\n		\"tám\",\n		\"chín\"\n	];\n	const NUMBER_STARTS = /* @__PURE__ */ new Set([\n		\"mười\",\n		\"thập\",\n		...Object.keys(WORD_DIGITS),\n		...Object.keys(SINO_DIGITS)\n	]);\n	function readNumberWords(words, i) {\n		if (!NUMBER_STARTS.has(words[i])) return null;\n		let w = (k) => words[i + k];\n		let best = null;\n		let take = (value, length) => {\n			if (!best || length > best.length) best = {\n				value,\n				length\n			};\n		};\n		if (w(0) === \"nhất\") {\n			let digit = (x) => x === \"lẻ\" || x === \"linh\" ? 0 : SINO_DIGITS[x] ?? WORD_DIGITS[x];\n			if (w(1) === \"lẻ\" && w(2) === \"loi\") take(100, 3);\n			if ([\n				\"lẻ\",\n				\"linh\",\n				...Object.keys(SINO_DIGITS)\n			].includes(w(1)) && digit(w(2)) != null) take(100 + 10 * digit(w(1)) + digit(w(2)), 3);\n		}\n		if (w(0) === \"mười\") {\n			take(10, 1);\n			if (w(1) in WORD_DIGITS && w(1) !== \"tư\") take(10 + WORD_DIGITS[w(1)], 2);\n		}\n		if (w(0) in WORD_DIGITS) {\n			take(WORD_DIGITS[w(0)], 1);\n			if (w(1) === \"mươi\") {\n				let tens = 10 * WORD_DIGITS[w(0)];\n				take(tens, 2);\n				if (TENS_UNITS.includes(w(2))) take(tens + WORD_DIGITS[w(2)], 3);\n			}\n		}\n		let sino = (k) => SINO_DIGITS[w(k)];\n		if (w(0) === \"thập\") {\n			take(10, 1);\n			if (sino(1)) take(10 + sino(1), 2);\n		}\n		if (sino(0)) {\n			take(sino(0), 1);\n			if (w(1) === \"thập\") {\n				take(sino(0) * 10, 2);\n				if (sino(2)) take(sino(0) * 10 + sino(2), 3);\n			}\n		}\n		return best;\n	}\n	const ROMAN_VALUES = {\n		I: 1,\n		V: 5,\n		X: 10,\n		L: 50,\n		C: 100,\n		D: 500,\n		M: 1e3\n	};\n	function readRoman(word) {\n		if (!/^[IVXLCDM]+$/.test(word)) return null;\n		let total = 0;\n		for (let k = 0; k < word.length; k++) {\n			let [a, b] = [ROMAN_VALUES[word[k]], ROMAN_VALUES[word[k + 1]] ?? 0];\n			total += a < b ? -a : a;\n		}\n		return total > 0 && total < 4e3 ? total : null;\n	}\n	const CHAPTER_WORDS = {\n		chương: \"Chương\",\n		hồi: \"Hồi\",\n		thiên: \"Thiên\"\n	};\n	const BOOK_WORDS = {\n		quyển: \"Quyển\",\n		tập: \"Tập\",\n		bộ: \"Bộ\",\n		cuốn: \"Cuốn\",\n		quý: \"Quý\"\n	};\n	const HALF_WORDS = {\n		thượng: 1,\n		trung: 2,\n		hạ: 3\n	};\n	const KNOWN_WORDS = new Map([\n		...Object.entries(CHAPTER_WORDS).map(([word, shown]) => [word, [\"c\", { word: shown }]]),\n		...Object.entries(BOOK_WORDS).map(([word, shown]) => [word, [\"b\", { word: shown }]]),\n		...Object.entries(HALF_WORDS).map(([word, value]) => [word, [\"h\", {\n			value,\n			word\n		}]]),\n		[\"thứ\", [\"t\", {}]],\n		[\"đệ\", [\"t\", {}]],\n		[\"tiết\", [\"f\", {}]]\n	]);\n	const KNOWN_PHRASES = [\n		[\n			\"phiên ngoại\",\n			\"p\",\n			\"Phiên ngoại\"\n		],\n		[\n			\"ngoại truyện\",\n			\"p\",\n			\"Ngoại truyện\"\n		],\n		[\n			\"giai đoạn\",\n			\"b\",\n			\"Giai đoạn\"\n		]\n	];\n	function readKnownWord(word, lower, pos) {\n		for (let [phrase, cls, shown] of KNOWN_PHRASES) if (lower.startsWith(phrase, pos)) return [\n			cls,\n			{ word: shown },\n			phrase.length\n		];\n		let known = KNOWN_WORDS.get(word);\n		return known && [...known, word.length];\n	}\n	const OPENERS = \"【[(（《“\\\"«\";\n	const CLOSERS = \"】])）》”\\\"»\";\n	const DIGITS = /\\d+(?:\\.\\d+)?/y;\n	const LETTERS = /\\p{L}+/uy;\n	const NEXT_WORD = / \\p{L}+/uy;\n	const NEXT_MARK = /\\s*(\\S)/y;\n	const readAt = (re, line, pos) => {\n		re.lastIndex = pos;\n		return re.exec(line);\n	};\n	function lexLine(line, lower, names) {\n		let tokens = [];\n		let pos = 0;\n		while (pos < line.length && tokens.length < 18) {\n			let ch = line[pos];\n			if (/\\s/.test(ch)) {\n				pos++;\n				continue;\n			}\n			let add = (cls, end, extra = {}) => {\n				tokens.push({\n					cls,\n					s: pos,\n					e: end,\n					text: line.slice(pos, end),\n					...extra\n				});\n				pos = end;\n			};\n			let name = names.find((n) => lower.startsWith(n, pos) && !/\\p{L}/u.test(lower[pos + n.length] ?? \"\"));\n			if (name) {\n				add(\"n\", pos + name.length);\n				continue;\n			}\n			if (OPENERS.includes(ch)) {\n				add(\"L\", pos + 1);\n				continue;\n			}\n			if (CLOSERS.includes(ch)) {\n				add(\"R\", pos + 1);\n				continue;\n			}\n			if (/\\d/.test(ch)) {\n				let m = readAt(DIGITS, line, pos);\n				let [major, minor] = m[0].split(\".\");\n				if (minor != null && Number(major) === 0) {\n					add(\"x\", pos + m[0].length);\n					continue;\n				}\n				add(\"N\", pos + m[0].length, {\n					value: Number(minor ?? major),\n					book: minor == null ? null : Number(major),\n					digits: true\n				});\n				continue;\n			}\n			let letters = readAt(LETTERS, line, pos);\n			if (!letters) {\n				add(\"S\", pos + 1);\n				continue;\n			}\n			let word = letters[0];\n			let lowered = lower.slice(pos, pos + word.length);\n			let words = [lowered];\n			let ahead = pos + word.length;\n			for (let k = 0; k < 4 && NUMBER_STARTS.has(lowered); k++) {\n				let next = readAt(NEXT_WORD, line, ahead);\n				if (!next) break;\n				words.push(lower.slice(ahead + 1, ahead + next[0].length));\n				ahead += next[0].length;\n			}\n			let number = readNumberWords(words, 0);\n			if (number) {\n				let end = pos;\n				for (let k = 0; k < number.length; k++) end += (k ? 1 : 0) + words[k].length;\n				add(\"N\", end, {\n					value: number.value,\n					sino: words[0] in SINO_DIGITS || words[0] === \"thập\"\n				});\n				continue;\n			}\n			let roman = readRoman(word);\n			let end = pos + word.length;\n			let known = readKnownWord(lowered, lower, pos);\n			if (roman != null && word.length <= 7) add(\"N\", end, {\n				value: roman,\n				roman: true\n			});\n			else if (known) add(known[0], pos + known[2], known[1]);\n			else if (lowered === \"kết\" || lowered === \"cuối\") {\n				let after = readAt(NEXT_MARK, line, end);\n				add(!after || /[^\\p{L}\\p{N}]/u.test(after[1]) ? \"E\" : \"x\", end, { word: lowered });\n			} else add(\"x\", end);\n		}\n		return tokens;\n	}\n	const HEADING_DEFAULTS = {\n		kind: \"chap\",\n		base: 0,\n		index: 0,\n		start: 0,\n		ord: 0,\n		text: \"\",\n		title: \"\",\n		rest: \"\",\n		whole: false,\n		shape: \"\",\n		n: null,\n		span: null,\n		end: false,\n		endWord: null,\n		chapType: null,\n		extra: false,\n		half: null,\n		halfText: null,\n		halfBracketed: false,\n		halfNum: null,\n		halfType: null,\n		bookNum: null,\n		bookType: null,\n		bookName: null,\n		outer: null,\n		inline: false\n	};\n	function heading(fields) {\n		return {\n			...HEADING_DEFAULTS,\n			...fields\n		};\n	}\n	const DECOR = \"[LS]*\";\n	const NAME_PART = \"(?:nR?S?)?\";\n	const BOOK_PART = \"(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?\";\n	const HEADING_RULES = [\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))(?:L(?<bm4>b)t?(?<bn4>N)R)?`\n		},\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?`\n		},\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}(?<tt>t)?(?<cn>N)S(?<cn3>N)(?<cm2>c)`\n		},\n		{\n			kind: \"chap\",\n			base: 7,\n			re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?`\n		},\n		{\n			kind: \"chap\",\n			base: 7,\n			re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}${DECOR}(?<cn>N)`\n		},\n		{\n			kind: \"book\",\n			base: 6,\n			re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}`\n		},\n		{\n			kind: \"extrahead\",\n			base: 5,\n			re: \"^[LS]*x{1,8}(?<pm>p)$\"\n		},\n		{\n			kind: \"half\",\n			base: 5,\n			re: \"^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)\"\n		},\n		{\n			kind: \"chap\",\n			base: 5,\n			weakTitled: 4.5,\n			sino: true,\n			re: \"^(?<cn>N)(?<sep>S)\"\n		},\n		{\n			kind: \"chap\",\n			base: 5,\n			weakTitled: 3,\n			re: \"^L?(?<cn>N)R?\"\n		},\n		{\n			kind: \"chap\",\n			base: 6,\n			re: \"^[LS]*(?<pre>[xc]{1,6})(?<cm>c)(?<cn>N)(?![xNE])\"\n		},\n		{\n			kind: \"chap\",\n			base: 4,\n			re: \"^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R\"\n		},\n		{\n			kind: \"half\",\n			base: 5,\n			re: \"^(?<hl>L)?(?<hm>h)R?$\"\n		}\n	].map((rule) => ({\n		...rule,\n		re: new RegExp(rule.re, \"d\")\n	}));\n	const spanOf = (m, group) => m.indices?.groups?.[group];\n	function cleanTitle(rest) {\n		let title = rest.replace(/^[\\s:：.,\\-—–/|)\\]】”\"»*#!]+/u, \"\").trimEnd();\n		while (/[】\\]”\"»]$/u.test(title) && (title.match(/[】\\]”\"»]/gu) || []).length > (title.match(/[【[“«]/gu) || []).length) title = title.slice(0, -1).trimEnd();\n		return title;\n	}\n	function proseCost(rest) {\n		let t = TUNING.prose;\n		let cost = 0;\n		let commas = (rest.match(/[,;]/g) || []).length;\n		if (rest.length > t.longerThan) cost += t.long;\n		if (commas >= t.commas) cost += t.manyCommas;\n		else if (commas === 1 && rest.length > t.oneCommaOver) cost += t.oneComma;\n		if (rest.length > t.sentenceOver && /[.!?…\"”]$/.test(rest)) cost += t.sentence;\n		return cost;\n	}\n	function leadingTitle(m, tokens, line, rest) {\n		let span = spanOf(m, \"pre\") ?? spanOf(m, \"ph\");\n		if (!span) return null;\n		let words = tokens.slice(span[0], span[1]);\n		let from = words[(spanOf(m, \"ph\") ? words.findLastIndex((t) => t.cls === \"S\") : -1) + 1] ?? words[0];\n		return cleanTitle([line.slice(from.s, words.at(-1).e), cleanTitle(rest)].filter(Boolean).join(\" \"));\n	}\n	function readRoles(rule, at) {\n		let roles = {};\n		let number = at(\"cn\") ?? at(\"cn2\");\n		let marker = at(\"cm\") ?? at(\"cm2\");\n		if (rule.kind === \"chap\" && number) {\n			if (number.cls === \"E\") Object.assign(roles, {\n				end: true,\n				endWord: number.word\n			});\n			else {\n				roles.n = number.value;\n				if (number.book != null) roles.bookNum = number.book;\n			}\n			if (marker) {\n				roles.chapType = marker.word ?? marker.text;\n				if (marker.cls === \"p\" || at(\"pm0\")) {\n					roles.extra = true;\n					roles.chapType = (at(\"pm0\") ?? marker).word;\n				}\n			}\n		}\n		let span = at(\"cn3\");\n		if (span) roles.span = span.value;\n		let bookNumber = at(\"bn\") ?? at(\"bn2\") ?? at(\"bn3\") ?? at(\"bn4\");\n		if (bookNumber) {\n			roles.bookNum = bookNumber.value;\n			roles.bookType = (at(\"bm\") ?? at(\"bm2\") ?? at(\"bm3\") ?? at(\"bm4\"))?.word;\n		}\n		if (rule.kind === \"extrahead\") roles.extra = true;\n		if (rule.kind === \"half\") {\n			let numbered = at(\"hn\") ?? at(\"hn2\");\n			if (numbered) Object.assign(roles, {\n				halfNum: numbered.value,\n				halfType: \"tiết\",\n				half: numbered.value\n			});\n			else Object.assign(roles, {\n				half: at(\"hm\")?.value,\n				halfText: at(\"hm\")?.word,\n				halfBracketed: !!at(\"hl\")\n			});\n		}\n		return {\n			roles,\n			number,\n			marker\n		};\n	}\n	function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase, titled }) {\n		let base = rule.base;\n		if (rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? TUNING.base.decimal : 0) + (number?.digits ? TUNING.base.digits : 0);\n		else if (number?.book != null) base += TUNING.base.decimal;\n		if (marker?.cls === \"c\" && marker.word === \"Thiên\") base += TUNING.base.thien;\n		if (hasPhrase && whole) base += TUNING.base.phraseAlone;\n		let ending = /(?:^|\\s)(?:hoàn|xong|kết thúc)(?:$|[\\s.!)])/iu.test(title);\n		let bookMax = TUNING.base.bookTitleMax;\n		if (rule.kind === \"book\") base += whole || titled && title.length <= bookMax && !ending ? TUNING.base.bookAlone : title.length > bookMax || ending || roles.bookType === \"Giai đoạn\" ? TUNING.base.bookProse : 0;\n		base -= marker ? Math.min(proseCost(title), TUNING.base.markerProseMax) : proseCost(title);\n		if (/tác giả/.test(rest) || /^\\s*[-–~]\\s*\\d/.test(rest)) base += TUNING.base.titlePage;\n		if (hasRoman) base += TUNING.base.roman;\n		return base;\n	}\n	function shapeOf(tokens, length, whole) {\n		return tokens.slice(0, length).map((t) => t.cls !== \"N\" ? t.cls : t.book != null ? \"D\" : t.digits ? \"#\" : \"N\").join(\"\").replace(/x+/g, \"X\") + (whole ? \"\" : \"T\");\n	}\n	const SECTION_LABEL = /^\\s*chính văn\\s+(?=\\S)/iu;\n	function partOf(title) {\n		let alone = /^\\(\\s*(\\p{L}+(?: \\p{L}+)*)\\s*\\)$/u.exec(title);\n		if (alone) {\n			let value = valueOfPart(alone[1].toLowerCase());\n			if (value != null) return {\n				half: value,\n				halfText: alone[1].toLowerCase(),\n				title: \"\"\n			};\n		}\n		let ending = /\\s*\\((thượng|trung|hạ)\\)$/iu.exec(title);\n		if (ending) return {\n			half: HALF_WORDS[ending[1].toLowerCase()],\n			halfText: ending[1].toLowerCase(),\n			title\n		};\n		return null;\n	}\n	function valueOfPart(word) {\n		if (word in HALF_WORDS) return HALF_WORDS[word];\n		let words = word.split(\" \");\n		let number = readNumberWords(words, 0);\n		return number?.length === words.length ? number.value : null;\n	}\n	const BOOK_TITLE = /^\\s*tên sách\\s*[:：]\\s*(\\S.*?)\\s*$/iu;\n	function readHeading(line, lower, names) {\n		if (line.length > 400) return null;\n		let named = BOOK_TITLE.exec(line);\n		if (named) return heading({\n			kind: \"book\",\n			base: TUNING.base.bookTitle,\n			bookName: named[1],\n			title: named[1],\n			text: line.trim(),\n			start: line.search(/\\S/),\n			shape: \"named\"\n		});\n		let label = SECTION_LABEL.exec(line);\n		if (label) {\n			let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names);\n			return node && {\n				...node,\n				start: label[0].search(/\\S/)\n			};\n		}\n		let tokens = lexLine(line, lower, names);\n		if (!tokens.some((t) => \"NEhbp\".includes(t.cls))) return null;\n		let classes = tokens.map((t) => t.cls).join(\"\");\n		for (let rule of HEADING_RULES) {\n			let m = rule.re.exec(classes);\n			if (!m) continue;\n			let at = (group) => {\n				let span = spanOf(m, group);\n				return span ? tokens[span[0]] : null;\n			};\n			if (at(\"cm2\") && at(\"cm2\")?.word !== \"Chương\" && !at(\"tt\")) continue;\n			if (rule.sino && (!at(\"cn\")?.sino || at(\"sep\")?.text !== \",\")) continue;\n			let last = tokens[m[0].length - 1];\n			let rest = line.slice(last.e);\n			let whole = !/\\S/.test(rest);\n			let read = readRoles(rule, at);\n			let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);\n			if (at(\"bn4\")) title = title.replace(/^chi\\s+/iu, \"\");\n			if (read.roles.n != null) title = title.replace(new RegExp(`^(?:\\\\S+\\\\s+){0,3}?(?:chương|hồi)\\\\s+${read.roles.n}\\\\s*[:：.]*\\\\s*`, \"iu\"), \"\");\n			let part = read.roles.n != null && partOf(title);\n			let hasRoman = tokens.some((t) => t.roman);\n			let base = baseOf(rule, read, {\n				title,\n				rest,\n				whole,\n				hasRoman,\n				hasPhrase: !!at(\"ph\"),\n				titled: /^[:：]$/.test(last.text)\n			});\n			if (read.roles.n === 0 && !read.marker) continue;\n			if (part) title = part.title;\n			let kind = rule.kind === \"chap\" && read.roles.n === 0 ? \"interlude\" : rule.kind;\n			let inner = rule.kind === \"chap\" && read.roles.n != null && (/^(.*?)\\s*[|｜]\\s*(\\S.*)$/u.exec(rest) ?? /^(.*?)\\s*[【[]?\\s*(thứ\\s+\\S+\\s+hồi\\b.*)$/iu.exec(rest));\n			if (inner) {\n				let held = readHeading(inner[2].replace(/^[【[]\\s*/, \"\"), inner[2].replace(/^[【[]\\s*/, \"\").toLowerCase(), names);\n				if (held && held.kind === \"chap\" && held.n != null && !held.outer) {\n					let outer = `${read.marker?.word ?? \"Chương\"} ${read.roles.n}`;\n					return heading({\n						...held,\n						outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(\": \"),\n						start: tokens[0].s,\n						text: line.slice(tokens[0].s)\n					});\n				}\n			}\n			return heading({\n				...read.roles,\n				...part && {\n					half: part.half,\n					halfText: part.halfText,\n					halfBracketed: true\n				},\n				kind,\n				base,\n				rest,\n				title,\n				whole,\n				shape: shapeOf(tokens, m[0].length, whole),\n				text: line.slice(tokens[0].s, last.e),\n				start: tokens[0].s\n			});\n		}\n		return null;\n	}\n	const INLINE_HEADING = /(?<![\\p{L}\\p{N}])(?<word>chương|hồi)\\s+(?<n>\\d{1,4})(?![\\p{L}\\p{N}.])/giu;\n	function inlineHeadings(line, lineStart, ord) {\n		let found = [];\n		for (let m of line.matchAll(INLINE_HEADING)) {\n			if (!/\\S/.test(line.slice(0, m.index))) continue;\n			let rest = line.slice(m.index + m[0].length);\n			let { n, word } = m.groups;\n			found.push(heading({\n				kind: \"chap\",\n				n: Number(n),\n				chapType: CHAPTER_WORDS[word.toLowerCase()],\n				base: TUNING.base.inline,\n				inline: true,\n				text: m[0],\n				rest,\n				title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),\n				shape: \"inline\",\n				index: lineStart + m.index,\n				ord\n			}));\n		}\n		return found;\n	}\n	function findCandidates(text, name) {\n		let lowerName = name.toLowerCase().normalize();\n		let names = [.../* @__PURE__ */ new Set([lowerName, lowerName.replace(\"hệ liệt\", \"\").trim()])].filter(Boolean).sort((a, z) => z.length - a.length);\n		let nodes = [];\n		let ord = 0;\n		let lineStart = 0;\n		while (lineStart <= text.length) {\n			let lineEnd = text.indexOf(\"\\n\", lineStart);\n			if (lineEnd === -1) lineEnd = text.length;\n			let line = text.slice(lineStart, lineEnd);\n			if (/\\S/.test(line)) {\n				ord++;\n				let lower = line.toLowerCase();\n				let node = lower.length === line.length ? readHeading(line, lower, names) : null;\n				if (node) nodes.push(heading({\n					...node,\n					index: lineStart + node.start,\n					ord\n				}));\n				if (!(node && node.base >= TUNING.path.breakMinBase) && line.length < 4e3) nodes.push(...inlineHeadings(line, lineStart, ord));\n			}\n			lineStart = lineEnd + 1;\n		}\n		if (nodes.filter((node) => node.bookName).length < 2) nodes = nodes.filter((node) => !node.bookName);\n		return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);\n	}\n	const reached = (node, fields = {}) => ({\n		book: node.bookNum ?? 0,\n		word: node.bookType,\n		kind: null,\n		name: node.bookName,\n		extra: !!node.extra,\n		n: node.span ?? node.n ?? null,\n		half: null,\n		ended: false,\n		carry: 0,\n		...fields\n	});\n	function chooseHeadings(nodes, credit = {}, strongOnly = false, excluded = /* @__PURE__ */ new Set()) {\n		let score = new Array(nodes.length).fill(-Infinity);\n		let prev = new Array(nodes.length).fill(-1);\n		let joined = new Array(nodes.length).fill(false);\n		let state = new Array(nodes.length);\n		let byNumber = /* @__PURE__ */ new Map();\n		let bestByKey = /* @__PURE__ */ new Map();\n		let books = [];\n		let top = -1;\n		let remember = (i) => {\n			let { n, book, extra } = state[i];\n			if (n != null) {\n				if (!byNumber.has(n)) byNumber.set(n, []);\n				byNumber.get(n).push(i);\n			}\n			let key = `${book}/${extra ? 1 : 0}`;\n			if (!bestByKey.has(key) || score[i] > score[bestByKey.get(key)]) bestByKey.set(key, i);\n		};\n		let apart = (i, j) => nodes[i].ord - nodes[j].ord;\n		let goingOn = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			for (let d = 0; d <= TUNING.path.gapMax; d++) for (let j of byNumber.get(n - d) ?? []) {\n				let s = state[j];\n				if (s.ended || node.extra && !s.extra) continue;\n				if (book != null && s.book !== 0 && book !== s.book) continue;\n				if (d === 0) {\n					if (node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, {\n						...s,\n						half: node.half\n					});\n					else if (apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);\n				} else go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), {\n					...s,\n					n: node.span ?? n,\n					book: book ?? s.book,\n					word: node.bookType ?? s.word,\n					name: book != null ? null : s.name,\n					extra: s.extra || !!node.extra,\n					half: node.half ?? null\n				});\n			}\n		};\n		let afterBookHeading = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			for (let j of books) {\n				let s = state[j];\n				let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;\n				if (s.extra !== !!node.extra && !opensExtra) continue;\n				if (book != null && book !== s.book && !s.name) continue;\n				let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap);\n				let numbered = book != null && {\n					book,\n					word: node.bookType ?? s.word,\n					name: null\n				};\n				go(j, value, {\n					...s,\n					n: node.span ?? n,\n					half: node.half ?? null,\n					...numbered\n				});\n			}\n		};\n		let intoNewBook = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			if (n > TUNING.path.smallNumber || book == null && !node.extra) return;\n			for (let j of bestByKey.values()) {\n				let s = state[j];\n				if (s.extra === !!node.extra && (book == null || book === s.book)) continue;\n				go(j, TUNING.reward.boundary - 1, reached(node, {\n					book: book ?? s.book,\n					word: node.bookType ?? s.word,\n					kind: s.kind,\n					name: book == null ? s.name : null,\n					carry: s.n ?? 0\n				}));\n			}\n		};\n		let breakingOff = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			if (top < 0 || state[top].ended || node.base < TUNING.path.breakMinBase) return;\n			let s = state[top];\n			let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && (s.n ?? 0) >= TUNING.path.unnamedFrom;\n			go(top, TUNING.reward.restart, {\n				...s,\n				n: node.span ?? n,\n				book: book ?? (unnamed ? s.book + 1 : s.book),\n				word: node.bookType ?? s.word,\n				name: book != null ? null : s.name,\n				extra: !!node.extra,\n				half: node.half ?? null,\n				carry: s.n ?? 0\n			});\n		};\n		let startingHere = (i, n, { begin }) => {\n			let node = nodes[i];\n			let start = n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;\n			if (start > 0) begin(start, reached(node));\n			else begin(start, reached(node), true);\n		};\n		let into = {\n			chap(i, ways) {\n				let n = nodes[i].n;\n				if (n == null) return;\n				goingOn(i, n, ways);\n				afterBookHeading(i, n, ways);\n				intoNewBook(i, n, ways);\n				breakingOff(i, n, ways);\n				startingHere(i, n, ways);\n			},\n			end(i, { go }) {\n				let node = nodes[i];\n				let recent = [];\n				for (let j = i - 1; j >= 0 && recent.length < TUNING.path.endLookback; j--) if (score[j] > -Infinity) recent.push(j);\n				for (let j of recent) {\n					let s = state[j];\n					if (s.ended || s.n == null || s.extra !== !!node.extra) continue;\n					if (apart(i, j) <= TUNING.path.closeLines) go(j, TUNING.reward.repeat + 1, {\n						...s,\n						ended: true\n					}, true);\n					else if (s.n >= TUNING.path.endMin) go(j, TUNING.reward.end, {\n						...s,\n						n: s.n + 1,\n						ended: true\n					});\n				}\n			},\n			book(i, { go, begin }) {\n				let node = nodes[i];\n				let b = node.bookNum ?? 0;\n				let extra = node.kind === \"extrahead\" || !!node.extra;\n				if (node.bookName && node.bookNum == null) {\n					for (let j of bestByKey.values()) go(j, 0, reached(node, {\n						book: state[j].book + 1,\n						carry: state[j].n ?? 0,\n						n: null\n					}));\n					begin(TUNING.path.startAlone, reached(node, {\n						book: 1,\n						n: null\n					}), books.length > 0);\n					return;\n				}\n				for (let j of bestByKey.values()) {\n					let s = state[j];\n					let next = b > s.book || b <= 2 && s.book === 0;\n					let ofAnotherKind = !extra && !next && s.word != null && node.bookType != null && s.word !== node.bookType;\n					let follows = extra ? !s.extra : !s.extra && (next || ofAnotherKind);\n					let skipped = extra || ofAnotherKind ? 0 : Math.max(0, b - s.book - 1);\n					let kind = ofAnotherKind || !extra && node.bookType != null && node.bookType === s.kind ? node.bookType : null;\n					if (follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, {\n						book: extra ? s.book : b,\n						kind,\n						extra,\n						carry: s.n ?? 0,\n						n: null\n					}));\n				}\n				begin(TUNING.path.startAlone, reached(node, {\n					book: extra ? 0 : b,\n					extra,\n					n: null\n				}), books.length > 0);\n			},\n			interlude(_i, { go }) {\n				if (top >= 0) go(top, TUNING.reward.interlude, { ...state[top] });\n			},\n			half(i, { go }) {\n				let node = nodes[i];\n				for (let j = i - 1; j >= 0; j--) {\n					if (score[j] === -Infinity) continue;\n					let s = state[j];\n					if (s.n == null || s.ended) continue;\n					if (s.half == null || (node.half ?? 0) > s.half) go(j, TUNING.reward.half, {\n						...s,\n						half: node.half\n					});\n					break;\n				}\n			}\n		};\n		for (let i = 0; i < nodes.length; i++) {\n			let node = nodes[i];\n			let prior = node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold;\n			if (strongOnly && prior < 0 || excluded.has(i)) continue;\n			let best = {\n				value: -Infinity,\n				from: -1,\n				joined: false,\n				as: null\n			};\n			let go = (j, value, as, joins = false) => {\n				if (score[j] + value > best.value) best = {\n					value: score[j] + value,\n					from: j,\n					joined: joins,\n					as\n				};\n			};\n			let begin = (value, as, onlyIfAlone = false) => {\n				if (onlyIfAlone && best.value !== -Infinity) return;\n				if (!(best.value > value)) best = {\n					value,\n					from: -1,\n					joined: false,\n					as\n				};\n			};\n			let way = node.kind === \"chap\" ? node.end ? \"end\" : node.n != null ? \"chap\" : null : node.kind === \"extrahead\" ? \"book\" : node.kind;\n			if (way) into[way](i, {\n				go,\n				begin\n			});\n			if (best.value === -Infinity) continue;\n			score[i] = best.value + prior;\n			prev[i] = best.from;\n			joined[i] = best.joined;\n			state[i] = best.as;\n			let opensBook = node.kind === \"interlude\" && state[i].n == null;\n			if (node.kind === \"book\" || node.kind === \"extrahead\" || opensBook) books.push(i);\n			else remember(i);\n			if (top < 0 || score[i] > score[top]) top = i;\n		}\n		let path = [];\n		for (let i = top; i >= 0; i = prev[i]) path.push({\n			i,\n			joined: joined[i],\n			state: state[i]\n		});\n		return path.reverse();\n	}\n	function tinySections(nodes, path) {\n		let chapters = path.filter(({ i }) => nodes[i].kind === \"chap\");\n		let lengths = chapters.slice(1).map(({ i }, k) => nodes[i].ord - nodes[chapters[k].i].ord).sort((a, z) => a - z);\n		let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;\n		let tiny = /* @__PURE__ */ new Set();\n		if (typical < TUNING.tiny.typicalAtLeast) return tiny;\n		chapters.forEach(({ i }, k) => {\n			let next = chapters[k + 1];\n			if (next && !next.joined && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);\n		});\n		return tiny;\n	}\n	function frontContents(nodes, path) {\n		let chapters = path.filter(({ i, joined }) => !joined && nodes[i].kind !== \"book\" && nodes[i].kind !== \"extrahead\");\n		let lines = (k) => (chapters[k + 1] ? nodes[chapters[k + 1].i].ord : Infinity) - nodes[chapters[k].i].ord;\n		let number = (k) => chapters[k].state.n;\n		let lengths = chapters.slice(0, -1).map((_, k) => lines(k)).sort((a, z) => a - z);\n		let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;\n		for (let k = Math.min(chapters.length - 1, TUNING.contents.maxEntries); k >= TUNING.contents.minEntries; k--) {\n			let head = chapters.slice(0, k);\n			if (head.reduce((sum, _, j) => sum + lines(j), 0) >= Math.max(lines(k), typical)) continue;\n			let numbers = head.map((_, j) => number(j)).filter((n) => n != null);\n			let next = number(k);\n			if (!numbers.length || next == null || next > Math.min(...numbers) || next >= Math.max(...numbers)) continue;\n			let later = new Set(chapters.slice(k).map((_, j) => number(k + j)));\n			if (numbers.every((n) => later.has(n))) return new Set(head.map(({ i }) => i));\n		}\n		return /* @__PURE__ */ new Set();\n	}\n	function shapeCredit(nodes, path) {\n		let seen = {};\n		let taken = {};\n		for (let node of nodes) seen[node.shape] = (seen[node.shape] ?? 0) + 1;\n		for (let { i } of path) taken[nodes[i].shape] = (taken[nodes[i].shape] ?? 0) + 1;\n		let credit = {};\n		for (let shape in seen) credit[shape] = TUNING.trust.scale * (((taken[shape] ?? 0) + .5) / (seen[shape] + 1) - .5);\n		return credit;\n	}\n	function fillGaps(nodes, path, credit) {\n		let weak = [];\n		nodes.forEach((node, i) => {\n			if (node.kind === \"chap\" && node.n != null && node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold < 0) weak.push(i);\n		});\n		let filled = [];\n		let fill = (from, to, first, last, state) => {\n			let at = from;\n			for (let e = first; e <= last; e++) {\n				let found;\n				for (let i of weak) {\n					if (i <= at || i >= to) continue;\n					let node = nodes[i];\n					if (node.n !== e || node.extra && !state.extra) continue;\n					if (!found || node.base > nodes[found].base) found = i;\n				}\n				if (found != null) {\n					filled.push({\n						i: found,\n						joined: false,\n						state: {\n							...state,\n							n: e\n						}\n					});\n					at = found;\n				}\n			}\n		};\n		let previous;\n		let boundary = true;\n		for (let entry of path) {\n			let node = nodes[entry.i];\n			if (node.kind === \"book\" || node.kind === \"extrahead\") {\n				boundary = true;\n				continue;\n			}\n			let n = entry.state.n;\n			if (node.kind !== \"chap\" || n == null || entry.joined) continue;\n			if (previous && !boundary && entry.state.book === previous.state.book && entry.state.extra === previous.state.extra) {\n				if (n > previous.n + 1) fill(previous.i, entry.i, previous.n + 1, n - 1, previous.state);\n			} else if (n > 1 && n <= TUNING.fill.firstMax && !node.extra) fill(previous?.i ?? -1, entry.i, 1, n - 1, {\n				...entry.state,\n				n: 0\n			});\n			previous = {\n				i: entry.i,\n				n,\n				state: entry.state\n			};\n			boundary = false;\n		}\n		return [...path, ...filled].sort((a, z) => a.i - z.i);\n	}\n	const END_PHRASE = /^(chương\\s+)?(kết|cuối)$/i;\n	function pickTitle(members) {\n		let titles = members.map((m) => m.title).filter((t) => t && !END_PHRASE.test(t));\n		titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);\n		let title = titles[0];\n		return title && title.length > TUNING.drafts.titleMax ? `${title.slice(0, TUNING.drafts.titleMax).replace(/\\s+\\S*$/, \"\")}…` : title;\n	}\n	function buildChapters(nodes, path) {\n		let clusters = [];\n		let opening;\n		for (let { i, joined, state } of path) {\n			let node = nodes[i];\n			if (node.kind === \"book\" || node.kind === \"extrahead\") {\n				opening ??= node.index;\n				continue;\n			}\n			let last = clusters.at(-1);\n			if (joined && last) {\n				last.members.push(node);\n				last.state = state;\n				continue;\n			}\n			clusters.push({\n				members: [node],\n				state,\n				index: Math.min(opening ?? Infinity, node.index)\n			});\n			opening = void 0;\n		}\n		let mostSaid = (words) => {\n			let types = {};\n			for (let word of words) if (word) types[word] = (types[word] ?? 0) + 1;\n			return Object.keys(types).sort((a, z) => types[z] - types[a])[0];\n		};\n		let bookWord = mostSaid(path.map(({ i }) => nodes[i].kind === \"book\" ? nodes[i].bookType : null)) ?? mostSaid(path.map(({ i }) => nodes[i].bookNum != null ? nodes[i].bookType : null)) ?? \"Quyển\";\n		let drafts = [];\n		let section;\n		for (let { members, state, index } of clusters) {\n			let first = members[0];\n			let lead = members.reduce((best, m) => m.base > best.base ? m : best, first);\n			let end = members.find((m) => m.end);\n			let numbered = members.find((m) => m.n != null && m.kind !== \"interlude\");\n			let type = members.find((m) => m.chapType)?.chapType ?? (state.extra ? \"Phiên ngoại\" : void 0);\n			let heading = {\n				type,\n				title: pickTitle(members),\n				text: lead.text\n			};\n			if (end) heading.number = end.endWord ?? void 0;\n			else if (first.kind === \"half\") {\n				heading.number = String(state.n);\n				heading.part = first.halfNum != null ? {\n					text: `${first.halfType} ${first.halfNum}`,\n					leading: true\n				} : {\n					text: first.halfText,\n					bracketed: first.halfBracketed\n				};\n			} else if (numbered) {\n				heading.number = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);\n				if (numbered.half != null && numbered.kind === \"chap\") heading.part = {\n					text: numbered.halfText,\n					bracketed: numbered.halfBracketed\n				};\n			}\n			let inherited = section && !lead.outer && state.book === 0 && type === section.type ? section.name : void 0;\n			if (lead.outer) section = {\n				name: lead.outer,\n				type\n			};\n			else if (!inherited) section = void 0;\n			let group = lead.outer ?? inherited ?? state.name ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : void 0);\n			drafts.push({\n				offset: index,\n				group,\n				heading\n			});\n		}\n		let named = drafts.findIndex((d) => d.group);\n		if (named > 0) {\n			let [, type, number] = /^(.*) (\\d+)$/.exec(drafts[named].group) ?? [];\n			if (Number(number) === 2) for (let d of drafts.slice(0, named)) d.group = `${type} 1`;\n		}\n		return drafts;\n	}\n	function seriesChapters(text, { name }) {\n		let lines = [];\n		let start = 0;\n		for (let line of text.split(\"\\n\")) {\n			let found = line.length < 200 && /^\\s*((?:\\p{L}+ ){1,4}\\p{L}+) ?[—–:-]/u.exec(line);\n			if (found) lines.push({\n				key: found[1].toLowerCase(),\n				index: start + line.search(/\\S/),\n				line: line.trim(),\n				length: found[0].trim().length\n			});\n			start += line.length + 1;\n		}\n		let counts = /* @__PURE__ */ new Map();\n		for (let { key } of lines) counts.set(key, (counts.get(key) ?? 0) + 1);\n		let own = name.toLowerCase().normalize();\n		let [key, count = 0] = [...counts].filter(([words]) => own.startsWith(words)).sort((a, z) => z[1] - a[1])[0] ?? [];\n		if (!key || count < TUNING.drafts.seriesMin) return [];\n		let drafts = [];\n		for (let { key: lineKey, index, line, length } of lines) {\n			if (lineKey !== key) continue;\n			let title = cleanTitle(line.slice(length)).replace(/\\s*\\(\\s*\\S{1,12}\\s*\\)\\s*$/, \"\");\n			drafts.push({\n				offset: index,\n				heading: {\n					number: String(drafts.length + 1),\n					title,\n					text: line\n				}\n			});\n		}\n		return drafts;\n	}\n	function pagesOf(text, paragraphsPerPage = TUNING.drafts.pageParagraphs) {\n		let pattern = `(.*\\n){1,${paragraphsPerPage}}`;\n		return [...text.matchAll(new RegExp(pattern, \"gimu\"))].map((m) => ({\n			offset: m.index,\n			heading: { text: m[0] }\n		}));\n	}\n	function extractChapters(filename, text, { name }) {\n		let nodes = findCandidates(text, name);\n		let first = chooseHeadings(nodes);\n		let credit = shapeCredit(nodes, first);\n		let path = chooseHeadings(nodes, credit, true, tinySections(nodes, first));\n		path = fillGaps(nodes, path, credit);\n		let listed = frontContents(nodes, path);\n		path = path.filter(({ i }) => !listed.has(i));\n		let drafts = buildChapters(nodes, path);\n		let series = seriesChapters(text, { name });\n		if (series.length >= TUNING.drafts.seriesMin && series.length > drafts.length * TUNING.drafts.seriesOver) drafts = series;\n		if (drafts.length < 2) drafts = pagesOf(text);\n		return finishChapters(withPrologue(drafts, filename, text), text);\n	}\n	function withPrologue(drafts, filename, text) {\n		if (!text.slice(0, drafts[0]?.offset ?? text.length).trim()) return drafts;\n		return [{\n			offset: 0,\n			heading: {\n				title: filename,\n				text: filename\n			}\n		}, ...drafts];\n	}\n	function slug(text) {\n		return latinize(text).replace(/\\W+/g, \"-\").replace(/^-+|-+$/g, \"\").toLowerCase();\n	}\n	function latinize(source) {\n		let s = source;\n		s = s.replace(/[ÁĂẮẶẰẲẴǍÂẤẬẦẨẪÄǞȦǠẠȀÀẢȂĀĄÅǺḀȺÃⱯᴀ]/g, \"A\");\n		s = s.replace(/[Ꜳ]/g, \"AA\");\n		s = s.replace(/[ÆǼǢᴁ]/g, \"AE\");\n		s = s.replace(/[Ꜵ]/g, \"AO\");\n		s = s.replace(/[Ꜷ]/g, \"AU\");\n		s = s.replace(/[ꜸꜺ]/g, \"AV\");\n		s = s.replace(/[Ꜽ]/g, \"AY\");\n		s = s.replace(/[ḂḄƁḆɃƂʙᴃБ]/g, \"B\");\n		s = s.replace(/[ĆČÇḈĈĊƇȻꜾᴄ]/g, \"C\");\n		s = s.replace(/[ĎḐḒḊḌƊḎǲǅĐÐƋꝹᴅД]/g, \"D\");\n		s = s.replace(/[ǱǄ]/g, \"DZ\");\n		s = s.replace(/[ÉĔĚȨḜÊẾỆỀỂỄḘËĖẸȄÈẺȆĒḖḔĘɆẼḚƐƎᴇⱻЕЭ]/g, \"E\");\n		s = s.replace(/[Ꝫ]/g, \"ET\");\n		s = s.replace(/[ḞƑꝻꜰФ]/g, \"F\");\n		s = s.replace(/[ǴĞǦĢĜĠƓḠǤꝽɢʛГҐ]/g, \"G\");\n		s = s.replace(/[ḪȞḨĤⱧḦḢḤĦʜХ]/g, \"H\");\n		s = s.replace(/[ÍĬǏÎÏḮİỊȈÌỈȊĪĮƗĨḬІɪЙЫИ]/g, \"I\");\n		s = s.replace(/[ꞂŔŘŖṘṚṜȐȒṞɌⱤʁʀᴙᴚР]/g, \"R\");\n		s = s.replace(/[ꞄŚṤŠṦŞŜȘṠṢṨꜱС]/g, \"S\");\n		s = s.replace(/[ꞆŤŢṰȚȾṪṬƬṮƮŦᴛТ]/g, \"T\");\n		s = s.replace(/[Ꝭ]/g, \"IS\");\n		s = s.replace(/[ĴɈᴊ]/g, \"J\");\n		s = s.replace(/[ḰǨĶⱩꝂḲƘḴꝀꝄᴋК]/g, \"K\");\n		s = s.replace(/[ĹȽĽĻḼḶḸⱠꝈḺĿⱢǈŁꞀʟᴌЛ]/g, \"L\");\n		s = s.replace(/[Ǉ]/g, \"LJ\");\n		s = s.replace(/[ḾṀṂⱮƜᴍМ]/g, \"M\");\n		s = s.replace(/[ŃŇŅṊṄṆǸƝṈȠǋÑɴᴎН]/g, \"N\");\n		s = s.replace(/[Ǌ]/g, \"NJ\");\n		s = s.replace(/[ÓŎǑÔỐỘỒỔỖÖȪȮȰỌŐȌÒỎƠỚỢỜỞỠȎꝊꝌŌṒṐƟǪǬØǾÕṌṎȬƆᴏᴐО]/g, \"O\");\n		s = s.replace(/[Ƣ]/g, \"OI\");\n		s = s.replace(/[Ꝏ]/g, \"OO\");\n		s = s.replace(/[Ȣᴕ]/g, \"OU\");\n		s = s.replace(/[ṔṖꝒƤꝔⱣꝐᴘП]/g, \"P\");\n		s = s.replace(/[ꝘꝖ]/g, \"Q\");\n		s = s.replace(/[ß]/g, \"ss\");\n		s = s.replace(/[ɅꝞṾƲṼᴠВ]/g, \"V\");\n		s = s.replace(/[Ꜩ]/g, \"TZ\");\n		s = s.replace(/[ÚŬǓÛṶÜǗǙǛǕṲỤŰȔÙỦƯỨỰỪỬỮȖŪṺŲŮŨṸṴᴜУ]/g, \"U\");\n		s = s.replace(/[Ꝡ]/g, \"VY\");\n		s = s.replace(/[ẂŴẄẆẈẀⱲᴡ]/g, \"W\");\n		s = s.replace(/[ẌẊ]/g, \"X\");\n		s = s.replace(/[ÝŶŸẎỴỲƳỶỾȲɎỸʏ]/g, \"Y\");\n		s = s.replace(/[Ї]/g, \"YI\");\n		s = s.replace(/[ŹŽẐⱫŻẒȤẔƵᴢЗ]/g, \"Z\");\n		s = s.replace(/[Þ]/g, \"TH\");\n		s = s.replace(/[Ĳ]/g, \"IJ\");\n		s = s.replace(/[Œɶ]/g, \"OE\");\n		s = s.replace(/[áăắặằẳẵǎâấậầẩẫäǟȧǡạȁàảȃāąᶏẚåǻḁⱥãɐₐАа]/g, \"a\");\n		s = s.replace(/[ꜳ]/g, \"aa\");\n		s = s.replace(/[æǽǣᴂ]/g, \"ae\");\n		s = s.replace(/[ꜵ]/g, \"ao\");\n		s = s.replace(/[ꜷ]/g, \"au\");\n		s = s.replace(/[ꜹꜻ]/g, \"av\");\n		s = s.replace(/[ꜽ]/g, \"ay\");\n		s = s.replace(/[ḃḅɓḇᵬᶀƀƃб]/g, \"b\");\n		s = s.replace(/[ɵóŏǒôốộồổỗöȫȯȱọőȍòỏơớợờởỡȏꝋꝍⱺōṓṑǫǭøǿõṍṏȭɔᶗᴑᴓₒо]/g, \"o\");\n		s = s.replace(/[ćčçḉĉɕċƈȼↄꜿ]/g, \"c\");\n		s = s.replace(/[ďḑḓȡḋḍɗᶑḏᵭᶁđɖƌðꝺд]/g, \"d\");\n		s = s.replace(/[ıíĭǐîïḯịȉìỉȋīįᶖɨĩḭіᴉᵢйыи]/g, \"i\");\n		s = s.replace(/[ȷɟʄǰĵʝɉⱼ]/g, \"j\");\n		s = s.replace(/[ǳǆ]/g, \"dz\");\n		s = s.replace(/[éĕěȩḝêếệềểễḙëėẹȅèẻȇēḗḕⱸęᶒɇẽḛɛᶓɘǝₑеэ]/g, \"e\");\n		s = s.replace(/[ꝫ]/g, \"et\");\n		s = s.replace(/[ḟƒᵮᶂꝼф]/g, \"f\");\n		s = s.replace(/[ǵğǧģĝġɠḡᶃǥᵹɡᵷгґ]/g, \"g\");\n		s = s.replace(/[ḫȟḩĥⱨḧḣḥɦẖħɥʮʯх]/g, \"h\");\n		s = s.replace(/[ƕ]/g, \"hv\");\n		s = s.replace(/[ꞃŕřŗṙṛṝȑɾᵳȓṟɼᵲᶉɍɽɿɹɻɺⱹᵣр]/g, \"r\");\n		s = s.replace(/[ꞅſẜẛẝśṥšṧşŝșṡṣṩʂᵴᶊȿс]/g, \"s\");\n		s = s.replace(/[ꞇťţṱțȶẗⱦṫṭƭṯᵵƫʈŧʇт]/g, \"t\");\n		s = s.replace(/[ꝭ]/g, \"is\");\n		s = s.replace(/[ḱǩķⱪꝃḳƙḵᶄꝁꝅʞк]/g, \"k\");\n		s = s.replace(/[ĺƚɬľļḽȴḷḹⱡꝉḻŀɫᶅɭłꞁл]/g, \"l\");\n		s = s.replace(/[ǉ]/g, \"lj\");\n		s = s.replace(/[ḿṁṃɱᵯᶆɯɰм]/g, \"m\");\n		s = s.replace(/[ńňņṋȵṅṇǹɲṉƞᵰᶇɳñн]/g, \"n\");\n		s = s.replace(/[ǌ]/g, \"nj\");\n		s = s.replace(/[ƣ]/g, \"oi\");\n		s = s.replace(/[ꝏ]/g, \"oo\");\n		s = s.replace(/[ȣ]/g, \"ou\");\n		s = s.replace(/[ṕṗꝓƥᵱᶈꝕᵽꝑп]/g, \"p\");\n		s = s.replace(/[ꝙʠɋꝗ]/g, \"q\");\n		s = s.replace(/[ᴝúŭǔûṷüǘǚǜǖṳụűȕùủưứựừửữȗūṻųᶙůũṹṵᵤу]/g, \"u\");\n		s = s.replace(/[ᵺþ]/g, \"th\");\n		s = s.replace(/[ᴔœ]/g, \"oe\");\n		s = s.replace(/[ʌⱴꝟṿʋᶌⱱṽᵥв]/g, \"v\");\n		s = s.replace(/[ʍẃŵẅẇẉẁⱳẘ]/g, \"w\");\n		s = s.replace(/[ʎýŷÿẏỵỳƴỷỿȳẙɏỹ]/g, \"y\");\n		s = s.replace(/[ꜩ]/g, \"tz\");\n		s = s.replace(/[ᵫ]/g, \"ue\");\n		s = s.replace(/[ꝸ]/g, \"um\");\n		s = s.replace(/[ꝡ]/g, \"vy\");\n		s = s.replace(/[ẍẋᶍₓ]/g, \"x\");\n		s = s.replace(/[ї]/g, \"yi\");\n		s = s.replace(/[źžẑʑⱬżẓȥẕᵶᶎʐƶɀз]/g, \"z\");\n		s = s.replace(/[ﬀ]/g, \"ff\");\n		s = s.replace(/[ﬃ]/g, \"ffi\");\n		s = s.replace(/[ﬄ]/g, \"ffl\");\n		s = s.replace(/[ﬁ]/g, \"fi\");\n		s = s.replace(/[ﬂ]/g, \"fl\");\n		s = s.replace(/[ĳ]/g, \"ij\");\n		s = s.replace(/[ﬆ]/g, \"st\");\n		s = s.replace(/[Ё]/g, \"YO\");\n		s = s.replace(/[Ц]/g, \"TS\");\n		s = s.replace(/[Ш]/g, \"SH\");\n		s = s.replace(/[Щ]/g, \"SCH\");\n		s = s.replace(/[ЪъЬь]/g, \"'\");\n		s = s.replace(/[ё]/g, \"yo\");\n		s = s.replace(/[ц]/g, \"ts\");\n		s = s.replace(/[ш]/g, \"sh\");\n		s = s.replace(/[щ]/g, \"sch\");\n		s = s.replace(/[Ж]/g, \"ZH\");\n		s = s.replace(/[ж]/g, \"zh\");\n		s = s.replace(/[Я]/g, \"Ya\");\n		s = s.replace(/[Ч]/g, \"CH\");\n		s = s.replace(/[Ю]/g, \"YU\");\n		s = s.replace(/[я]/g, \"ya\");\n		s = s.replace(/[ч]/g, \"ch\");\n		s = s.replace(/[ю]/g, \"yu\");\n		return s;\n	}\n	//#endregion\n	//#region src/parser-worker.ts\n	onmessage = ({ data: { id, name, text } }) => {\n		try {\n			postMessage({\n				id,\n				chapters: extractChapters(name, normalizeFileContent(text), { name })\n			});\n		} catch (error) {\n			postMessage({\n				id,\n				error: String(error?.message ?? error)\n			});\n		}\n	};\n	//#endregion\n})();\n";
+var jsContent = "(function() {\n	//#region src/parser.ts\n	function normalizeFileContent(source) {\n		let text = source.normalize();\n		text = text.replace(/[\\r\\n]+/g, \"\\n\");\n		text = text.replace(/\\t+/g, \"\\n\");\n		text = text.replace(/(?<=\\S) {2,}(?=\\p{Lu})/gu, \"\\n\");\n		text = text.replace(/(.+)/g, (s) => s.trim());\n		text = text.replace(/^'([^']+)'$/gm, \"\\\"$1\\\"\");\n		text = text.replace(/(\\d)\\s*(\\.)\\s*(\\d)/gm, \"$1$2$3\");\n		text = text.replace(/\\s+([.,;:?!\\]】)])/gm, \"$1\");\n		text = text.replace(/([([【])\\s+/gm, \"$1\");\n		text = text.replace(/([:—]{2,})/gm, (c) => c.slice(0, 1));\n		text = text.replace(/(:)[^\\s\\w]+\\s*/gm, \"$1 \");\n		text = text.replace(/^\\s*\"\\s+|\\s+\"\\s*$/gm, \"\\\"\");\n		text = text.replace(/\\s?\"?QQ Group \\d+\"?/gu, \"\");\n		text = text.replaceAll(\"  tìm sách a \\\"Cuộc đời này không phụ diên đuôi tình\\\" cá nhân cải biên\", \"\");\n		text = text.replace(/\\b(?<protocol>https?:)(?:\\/\\/)? (?<path>(?:\\w+)(?:\\. \\w+)+(?:\\/(?:(?:\\. )?[\\w/])+)?)/gm, (...args) => {\n			let { protocol, path } = args.pop();\n			path = path.replace(/\\s/g, \"\");\n			if (protocol) return `${protocol}//${path}`;\n			return path;\n		});\n		text = text.replaceAll(\"cha mẹ vợ\", \"mẹ vợ\");\n		return text;\n	}\n	function chapterTitle({ type = \"Chương\", number, part, title, text }, ordinal) {\n		title = title?.replace(/^[\\s/|\\\\]+/, \"\") ?? \"\";\n		let isExtra = (s) => /phiên ngoại/iu.test(s ?? \"\");\n		let named = [[isExtra(text) && !isExtra(title) && !isExtra(type) ? \"Phiên ngoại\" : void 0, number != null && `${type} ${number}`].filter(Boolean).join(\" \"), title.replace(/./, (c) => c.toUpperCase())].filter(Boolean).join(\": \");\n		let shown = part && !title.includes(`(${part.text})`) ? part : null;\n		return [\n			shown?.leading && `${shown.text}:`,\n			named,\n			shown && !shown.leading && `(${shown.text})`\n		].filter(Boolean).join(\" \") || `${type} ${ordinal + 1}`;\n	}\n	const PART_MARK = /\\s*[(（]\\s*([^()（）]{1,16}?)\\s*[)）]\\s*(【[^】]*】)?\\s*$/u;\n	function partMark({ title = \"\", part }) {\n		let marked = PART_MARK.exec(title);\n		let bare = (written) => written?.toLowerCase().replace(/^[\\s\\p{P}]+|[\\s\\p{P}]+$/gu, \"\");\n		let word = bare(part?.text ?? marked?.[1]);\n		if (!word) return null;\n		let number = part?.leading ? Number(/\\d+$/.exec(word)?.[0] ?? NaN) : /^\\d+$/.test(word) ? Number(word) : word in HALF_WORDS ? null : valueOfPart(word);\n		if (Number.isNaN(number)) number = null;\n		let half = /^(thượng|trung|hạ)(?:\\s+(\\d+))?$/u.exec(word);\n		if (number == null && !half) return null;\n		let order = number ?? HALF_WORDS[half[1]] + Number(half[2] ?? 0) / 1e3;\n		let ours = marked && bare(marked[1]) === word ? marked : null;\n		return {\n			stem: (ours ? title.slice(0, ours.index) : title).trim(),\n			word,\n			number,\n			order,\n			bracketed: !!ours || !!part?.bracketed,\n			tag: ours?.[2]\n		};\n	}\n	function partsOf(drafts, text) {\n		let headingOnly = (i) => text.slice(drafts[i].offset, drafts[i + 1]?.offset ?? text.length).split(\"\\n\").filter((line) => line.trim()).length <= TUNING.drafts.headingLines;\n		let marks = drafts.map(({ heading }) => heading && partMark(heading));\n		let together = (a, b) => drafts[a].group === drafts[b].group && (drafts[a].heading.type ?? \"Chương\") === (drafts[b].heading.type ?? \"Chương\");\n		let numbers = (i) => String(drafts[i].heading.number ?? \"\").split(\"-\").map(Number);\n		let step = (a, b) => drafts[a].heading.number === drafts[b].heading.number ? 0 : numbers(b)[0] - numbers(a).at(-1);\n		marks.forEach((mark, i) => {\n			let next = marks[i + 1];\n			let title = drafts[i].heading?.title?.trim();\n			if (mark || !next || !title || !together(i, i + 1) || step(i, i + 1) > 1) return;\n			let untitled = next.stem === \"\" && step(i, i + 1) === 0;\n			if (title.toLowerCase() !== next.stem.toLowerCase() && !untitled) return;\n			let second = next.number != null ? next.number === 2 : next.order > 1;\n			let first = next.number != null ? next.number === 1 : next.order === 1;\n			if (second) marks[i] = {\n				stem: title,\n				word: next.number != null ? \"1\" : \"thượng\",\n				number: next.number != null ? 1 : null,\n				order: 1,\n				bracketed: next.bracketed\n			};\n			else if (first && headingOnly(i)) marks[i] = {\n				stem: title,\n				head: true,\n				order: 0\n			};\n			else return;\n			for (let j = i + 1; untitled && marks[j]?.stem === \"\" && step(i, j) === 0; j++) marks[j] = {\n				...marks[j],\n				stem: title,\n				given: title\n			};\n		});\n		let follows = (a, b) => {\n			let [from, to] = [marks[a], marks[b]];\n			if (!from || !to || to.head || !together(a, b)) return false;\n			if (from.stem.toLowerCase() !== to.stem.toLowerCase()) return false;\n			let named = from.stem !== \"\";\n			let s = step(a, b);\n			if (!(s === 0 || s === 1 || named && s === 2)) return false;\n			return to.order > from.order || to.order === from.order && (s === 0 || named);\n		};\n		let parts = new Array(drafts.length);\n		for (let start = 0, end = 0; start < drafts.length; start = end) {\n			for (end = start + 1; end < drafts.length && follows(end - 1, end); end++);\n			if (end - start < 2) continue;\n			let run = marks.slice(start, end);\n			let shown = run.filter((m) => !m.head);\n			if (new Set(shown.map((m) => m.order)).size < 2) continue;\n			let [first, last] = [drafts[start].heading, drafts[end - 1].heading];\n			let number = first.number === last.number ? first.number : `${numbers(start)[0]}-${numbers(end - 1).at(-1)}`;\n			let [from, to = from] = String(number ?? \"\").split(\"-\").map(Number);\n			if (to - from + 1 === shown.length) {\n				run.forEach((m, k) => {\n					parts[start + k] = m.head ? { head: true } : { title: m.given };\n				});\n				continue;\n			}\n			let of = chapterTitle({\n				...first,\n				number,\n				part: void 0,\n				title: run[0].stem\n			}, start);\n			let numbered = shown.every((m) => m.number != null);\n			let total = Math.max(new Set(shown.map((m) => m.order)).size, ...shown.map((m) => m.number ?? 0));\n			run.forEach((m, k) => {\n				let said = numbered ? `${m.number}/${total}` : m.word;\n				parts[start + k] = m.head ? { head: true } : {\n					of,\n					text: [m.bracketed ? `(${said})` : said, m.tag].filter(Boolean).join(\" \"),\n					title: m.given\n				};\n			});\n		}\n		return parts;\n	}\n	function finishChapters(drafts, text) {\n		let parts = partsOf(drafts, text);\n		let kept = [];\n		drafts.forEach((draft, i) => {\n			let part = parts[i];\n			if (part?.head) return;\n			kept.push({\n				...draft,\n				offset: parts[i - 1]?.head ? drafts[i - 1].offset : draft.offset,\n				heading: part?.title ? {\n					...draft.heading,\n					title: part.title\n				} : draft.heading,\n				part: part?.of != null ? {\n					of: part.of,\n					text: part.text ?? \"\"\n				} : void 0\n			});\n		});\n		return kept.map(({ offset, group, heading, part }, i) => {\n			let title = chapterTitle(heading, i);\n			let end = kept[i + 1]?.offset ?? text.length;\n			return {\n				id: `${slug(title)}-${i}`,\n				title,\n				offset,\n				group,\n				part,\n				content: text.slice(offset, end).trim()\n			};\n		});\n	}\n	const TUNING = {\n		base: {\n			decimal: 2,\n			digits: 1.5,\n			thien: -4,\n			phraseAlone: 1,\n			bookAlone: 3,\n			bookTitle: 8,\n			bookTitleMax: 40,\n			bookProse: -10,\n			markerProseMax: 2,\n			titlePage: -6,\n			roman: -2,\n			inline: 3,\n			runsOn: -1,\n			inlineTitleMax: 80\n		},\n		prose: {\n			longerThan: 100,\n			long: 3,\n			commas: 2,\n			manyCommas: 2,\n			oneCommaOver: 40,\n			oneComma: 1,\n			sentenceOver: 50,\n			sentence: 2\n		},\n		reward: {\n			next: 8,\n			gap: 3,\n			repeat: 3,\n			boundary: 7,\n			carryOn: 4,\n			restart: -6,\n			half: 4,\n			end: 6,\n			interlude: 1\n		},\n		path: {\n			threshold: 4.5,\n			closeLines: 3,\n			gapMax: 10,\n			smallNumber: 3,\n			startAlone: 3,\n			startFar: -6,\n			lateStartCost: 4,\n			lateStartCap: 10,\n			opensExtraLines: 4,\n			breakMinBase: 6,\n			unnamedFrom: 6,\n			unnamedUpTo: 2,\n			endLookback: 40,\n			endMin: 2,\n			skippedBooksMax: 3\n		},\n		trust: { scale: 6 },\n		tiny: {\n			typicalAtLeast: 30,\n			lines: 2,\n			chars: 3e3\n		},\n		contents: {\n			minEntries: 3,\n			maxEntries: 60\n		},\n		fill: { firstMax: 4 },\n		drafts: {\n			titleMax: 100,\n			seriesMin: 8,\n			seriesOver: 1.2,\n			pageParagraphs: 60,\n			headingLines: 2\n		}\n	};\n	const WORD_DIGITS = {\n		một: 1,\n		mốt: 1,\n		hai: 2,\n		ba: 3,\n		bốn: 4,\n		tư: 4,\n		năm: 5,\n		lăm: 5,\n		sáu: 6,\n		bảy: 7,\n		tám: 8,\n		chín: 9\n	};\n	const SINO_DIGITS = {\n		nhất: 1,\n		nhị: 2,\n		tam: 3,\n		tứ: 4,\n		ngũ: 5,\n		lục: 6,\n		thất: 7,\n		bát: 8,\n		cửu: 9\n	};\n	const TENS_UNITS = [\n		\"mốt\",\n		\"hai\",\n		\"ba\",\n		\"bốn\",\n		\"tư\",\n		\"lăm\",\n		\"sáu\",\n		\"bảy\",\n		\"tám\",\n		\"chín\"\n	];\n	const NUMBER_STARTS = /* @__PURE__ */ new Set([\n		\"mười\",\n		\"thập\",\n		...Object.keys(WORD_DIGITS),\n		...Object.keys(SINO_DIGITS)\n	]);\n	function readNumberWords(words, i) {\n		if (!NUMBER_STARTS.has(words[i])) return null;\n		let w = (k) => words[i + k];\n		let best = null;\n		let take = (value, length) => {\n			if (!best || length > best.length) best = {\n				value,\n				length\n			};\n		};\n		if (w(0) === \"nhất\") {\n			let digit = (x) => x === \"lẻ\" || x === \"linh\" ? 0 : SINO_DIGITS[x] ?? WORD_DIGITS[x];\n			if (w(1) === \"lẻ\" && w(2) === \"loi\") take(100, 3);\n			if ([\n				\"lẻ\",\n				\"linh\",\n				...Object.keys(SINO_DIGITS)\n			].includes(w(1)) && digit(w(2)) != null) take(100 + 10 * digit(w(1)) + digit(w(2)), 3);\n		}\n		if (w(0) === \"mười\") {\n			take(10, 1);\n			if (w(1) in WORD_DIGITS && w(1) !== \"tư\") take(10 + WORD_DIGITS[w(1)], 2);\n		}\n		if (w(0) in WORD_DIGITS) {\n			take(WORD_DIGITS[w(0)], 1);\n			if (w(1) === \"mươi\") {\n				let tens = 10 * WORD_DIGITS[w(0)];\n				take(tens, 2);\n				if (TENS_UNITS.includes(w(2))) take(tens + WORD_DIGITS[w(2)], 3);\n			}\n		}\n		let sino = (k) => SINO_DIGITS[w(k)];\n		if (w(0) === \"thập\") {\n			take(10, 1);\n			if (sino(1)) take(10 + sino(1), 2);\n		}\n		if (sino(0)) {\n			take(sino(0), 1);\n			if (w(1) === \"thập\") {\n				take(sino(0) * 10, 2);\n				if (sino(2)) take(sino(0) * 10 + sino(2), 3);\n			}\n		}\n		return best;\n	}\n	const ROMAN_VALUES = {\n		I: 1,\n		V: 5,\n		X: 10,\n		L: 50,\n		C: 100,\n		D: 500,\n		M: 1e3\n	};\n	function readRoman(word) {\n		if (!/^[IVXLCDM]+$/.test(word)) return null;\n		let total = 0;\n		for (let k = 0; k < word.length; k++) {\n			let [a, b] = [ROMAN_VALUES[word[k]], ROMAN_VALUES[word[k + 1]] ?? 0];\n			total += a < b ? -a : a;\n		}\n		return total > 0 && total < 4e3 ? total : null;\n	}\n	const CHAPTER_WORDS = {\n		chương: \"Chương\",\n		hồi: \"Hồi\",\n		thiên: \"Thiên\"\n	};\n	const BOOK_WORDS = {\n		quyển: \"Quyển\",\n		tập: \"Tập\",\n		bộ: \"Bộ\",\n		cuốn: \"Cuốn\",\n		quý: \"Quý\"\n	};\n	const HALF_WORDS = {\n		thượng: 1,\n		trung: 2,\n		hạ: 3\n	};\n	const KNOWN_WORDS = new Map([\n		...Object.entries(CHAPTER_WORDS).map(([word, shown]) => [word, [\"c\", { word: shown }]]),\n		...Object.entries(BOOK_WORDS).map(([word, shown]) => [word, [\"b\", { word: shown }]]),\n		...Object.entries(HALF_WORDS).map(([word, value]) => [word, [\"h\", {\n			value,\n			word\n		}]]),\n		[\"thứ\", [\"t\", {}]],\n		[\"đệ\", [\"t\", {}]],\n		[\"tiết\", [\"f\", {}]]\n	]);\n	const KNOWN_PHRASES = [\n		[\n			\"phiên ngoại\",\n			\"p\",\n			\"Phiên ngoại\"\n		],\n		[\n			\"ngoại truyện\",\n			\"p\",\n			\"Ngoại truyện\"\n		],\n		[\n			\"giai đoạn\",\n			\"b\",\n			\"Giai đoạn\"\n		]\n	];\n	function readKnownWord(word, lower, pos) {\n		for (let [phrase, cls, shown] of KNOWN_PHRASES) if (lower.startsWith(phrase, pos)) return [\n			cls,\n			{ word: shown },\n			phrase.length\n		];\n		let known = KNOWN_WORDS.get(word);\n		return known && [...known, word.length];\n	}\n	const OPENERS = \"【[(（《“\\\"«\";\n	const CLOSERS = \"】])）》”\\\"»\";\n	const DIGITS = /\\d+(?:\\.\\d+)?/y;\n	const LETTERS = /\\p{L}+/uy;\n	const NEXT_WORD = / \\p{L}+/uy;\n	const NEXT_MARK = /\\s*(\\S)/y;\n	const WORD_COUNT = /\\s*(vạn|ngàn|nghìn|k|w)?\\s*chữ(?![\\p{L}\\p{N}])/uy;\n	const countsWords = (value, decimal, unit) => decimal || (unit === \"vạn\" || unit === \"w\" ? value < 20 : unit ? value < 100 : value >= 300);\n	const readAt = (re, line, pos) => {\n		re.lastIndex = pos;\n		return re.exec(line);\n	};\n	function lexLine(line, lower, names) {\n		let tokens = [];\n		let pos = 0;\n		while (pos < line.length && tokens.length < 18) {\n			let ch = line[pos];\n			if (/\\s/.test(ch)) {\n				pos++;\n				continue;\n			}\n			let add = (cls, end, extra = {}) => {\n				tokens.push({\n					cls,\n					s: pos,\n					e: end,\n					text: line.slice(pos, end),\n					...extra\n				});\n				pos = end;\n			};\n			let name = names.find((n) => lower.startsWith(n, pos) && !/\\p{L}/u.test(lower[pos + n.length] ?? \"\"));\n			if (name) {\n				add(\"n\", pos + name.length);\n				continue;\n			}\n			if (OPENERS.includes(ch)) {\n				add(\"L\", pos + 1);\n				continue;\n			}\n			if (CLOSERS.includes(ch)) {\n				add(\"R\", pos + 1);\n				continue;\n			}\n			if (/\\d/.test(ch)) {\n				let m = readAt(DIGITS, line, pos);\n				let [major, minor] = m[0].split(\".\");\n				if (minor != null && Number(major) === 0) {\n					add(\"x\", pos + m[0].length);\n					continue;\n				}\n				let count = ![\"c\", \"t\"].includes(tokens.at(-1)?.cls ?? \"\") && readAt(WORD_COUNT, lower, pos + m[0].length);\n				if (count && countsWords(Number(m[0]), minor != null, count[1])) {\n					add(\"x\", pos + m[0].length);\n					continue;\n				}\n				add(\"N\", pos + m[0].length, {\n					value: Number(minor ?? major),\n					book: minor == null ? null : Number(major),\n					digits: true\n				});\n				continue;\n			}\n			let letters = readAt(LETTERS, line, pos);\n			if (!letters) {\n				add(\"S\", pos + 1);\n				continue;\n			}\n			let word = letters[0];\n			let lowered = lower.slice(pos, pos + word.length);\n			let words = [lowered];\n			let ahead = pos + word.length;\n			for (let k = 0; k < 4 && NUMBER_STARTS.has(lowered); k++) {\n				let next = readAt(NEXT_WORD, line, ahead);\n				if (!next) break;\n				words.push(lower.slice(ahead + 1, ahead + next[0].length));\n				ahead += next[0].length;\n			}\n			let number = readNumberWords(words, 0);\n			if (number) {\n				let end = pos;\n				for (let k = 0; k < number.length; k++) end += (k ? 1 : 0) + words[k].length;\n				add(\"N\", end, {\n					value: number.value,\n					sino: words[0] in SINO_DIGITS || words[0] === \"thập\"\n				});\n				continue;\n			}\n			let roman = readRoman(word);\n			let end = pos + word.length;\n			let known = readKnownWord(lowered, lower, pos);\n			if (roman != null && word.length <= 7) add(\"N\", end, {\n				value: roman,\n				roman: true\n			});\n			else if (known) add(known[0], pos + known[2], known[1]);\n			else if (lowered === \"kết\" || lowered === \"cuối\") {\n				let after = readAt(NEXT_MARK, line, end);\n				add(!after || /[^\\p{L}\\p{N}]/u.test(after[1]) ? \"E\" : \"x\", end, { word: lowered });\n			} else add(\"x\", end);\n		}\n		return tokens;\n	}\n	const HEADING_DEFAULTS = {\n		kind: \"chap\",\n		base: 0,\n		index: 0,\n		start: 0,\n		ord: 0,\n		text: \"\",\n		title: \"\",\n		rest: \"\",\n		whole: false,\n		shape: \"\",\n		n: null,\n		span: null,\n		end: false,\n		endWord: null,\n		chapType: null,\n		extra: false,\n		half: null,\n		halfText: null,\n		halfBracketed: false,\n		halfNum: null,\n		halfType: null,\n		bookNum: null,\n		bookType: null,\n		bookName: null,\n		outer: null,\n		inline: false,\n		runsOn: false\n	};\n	function heading(fields) {\n		return {\n			...HEADING_DEFAULTS,\n			...fields\n		};\n	}\n	const DECOR = \"[LS]*\";\n	const NAME_PART = \"(?:nR?S?)?\";\n	const BOOK_PART = \"(?:(?<bm>b)t?(?<bn>N)|(?<bt>t)(?<bn2>N)(?<bm2>b)|(?<bn3>N)(?<bm3>b))R?S?\";\n	const HEADING_RULES = [\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}${NAME_PART}${DECOR}(?:${BOOK_PART}[xc]{0,10})?${DECOR}(?:(?<pm0>p)?(?<cm>[cp])(?<cn>[NE])|(?<tt>t)?(?<cn2>[NE])(?<cm2>c))(?:L(?<bm4>b)t?(?<bn4>N)R)?`\n		},\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?`\n		},\n		{\n			kind: \"chap\",\n			base: 9,\n			re: `^${DECOR}(?<tt>t)?(?<cn>N)S(?<cn3>N)(?<cm2>c)`\n		},\n		{\n			kind: \"chap\",\n			base: 7,\n			re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?`\n		},\n		{\n			kind: \"chap\",\n			base: 7,\n			re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}${DECOR}(?<cn>N)`\n		},\n		{\n			kind: \"book\",\n			base: 6,\n			re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}`\n		},\n		{\n			kind: \"extrahead\",\n			base: 5,\n			re: \"^[LS]*x{1,8}(?<pm>p)$\"\n		},\n		{\n			kind: \"half\",\n			base: 5,\n			re: \"^[LS]*(?:f t?(?<hn>N)|t(?<hn2>N)f)\"\n		},\n		{\n			kind: \"chap\",\n			base: 5,\n			weakTitled: 4.5,\n			sino: true,\n			re: \"^(?<cn>N)(?<sep>S)\"\n		},\n		{\n			kind: \"chap\",\n			base: 5,\n			weakTitled: 3,\n			re: \"^L?(?<cn>N)R?\"\n		},\n		{\n			kind: \"chap\",\n			base: 6,\n			re: \"^[LS]*(?<pre>[xc]{1,6})(?<cm>c)(?<cn>N)(?![xNE])\"\n		},\n		{\n			kind: \"chap\",\n			base: 4,\n			re: \"^[LS]*(?<ph>[xS]{1,16})L(?<cn>N)R\"\n		},\n		{\n			kind: \"half\",\n			base: 5,\n			re: \"^(?<hl>L)?(?<hm>h)R?$\"\n		}\n	].map((rule) => ({\n		...rule,\n		re: new RegExp(rule.re, \"d\")\n	}));\n	const spanOf = (m, group) => m.indices?.groups?.[group];\n	function cleanTitle(rest) {\n		let title = rest.replace(/^[\\s:：.,\\-—–/|)\\]】”\"»*#!]+/u, \"\").trimEnd();\n		while (/[】\\]”\"»]$/u.test(title) && (title.match(/[】\\]”\"»]/gu) || []).length > (title.match(/[【[“«]/gu) || []).length) title = title.slice(0, -1).trimEnd();\n		return title;\n	}\n	function proseCost(rest) {\n		let t = TUNING.prose;\n		let cost = 0;\n		let commas = (rest.match(/[,;]/g) || []).length;\n		if (rest.length > t.longerThan) cost += t.long;\n		if (commas >= t.commas) cost += t.manyCommas;\n		else if (commas === 1 && rest.length > t.oneCommaOver) cost += t.oneComma;\n		if (rest.length > t.sentenceOver && /[.!?…\"”]$/.test(rest)) cost += t.sentence;\n		return cost;\n	}\n	function leadingTitle(m, tokens, line, rest) {\n		let span = spanOf(m, \"pre\") ?? spanOf(m, \"ph\");\n		if (!span) return null;\n		let words = tokens.slice(span[0], span[1]);\n		let from = words[(spanOf(m, \"ph\") ? words.findLastIndex((t) => t.cls === \"S\") : -1) + 1] ?? words[0];\n		return cleanTitle([line.slice(from.s, words.at(-1).e), cleanTitle(rest)].filter(Boolean).join(\" \"));\n	}\n	function readRoles(rule, at) {\n		let roles = {};\n		let number = at(\"cn\") ?? at(\"cn2\");\n		let marker = at(\"cm\") ?? at(\"cm2\");\n		if (rule.kind === \"chap\" && number) {\n			if (number.cls === \"E\") Object.assign(roles, {\n				end: true,\n				endWord: number.word\n			});\n			else {\n				roles.n = number.value;\n				if (number.book != null) roles.bookNum = number.book;\n			}\n			if (marker) {\n				roles.chapType = marker.word ?? marker.text;\n				if (marker.cls === \"p\" || at(\"pm0\")) {\n					roles.extra = true;\n					roles.chapType = (at(\"pm0\") ?? marker).word;\n				}\n			}\n		}\n		let span = at(\"cn3\");\n		if (span) roles.span = span.value;\n		let bookNumber = at(\"bn\") ?? at(\"bn2\") ?? at(\"bn3\") ?? at(\"bn4\");\n		if (bookNumber) {\n			roles.bookNum = bookNumber.value;\n			roles.bookType = (at(\"bm\") ?? at(\"bm2\") ?? at(\"bm3\") ?? at(\"bm4\"))?.word;\n		}\n		if (rule.kind === \"extrahead\") roles.extra = true;\n		if (rule.kind === \"half\") {\n			let numbered = at(\"hn\") ?? at(\"hn2\");\n			if (numbered) Object.assign(roles, {\n				halfNum: numbered.value,\n				halfType: \"tiết\",\n				half: numbered.value\n			});\n			else Object.assign(roles, {\n				half: at(\"hm\")?.value,\n				halfText: at(\"hm\")?.word,\n				halfBracketed: !!at(\"hl\")\n			});\n		}\n		return {\n			roles,\n			number,\n			marker\n		};\n	}\n	function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman, hasPhrase, titled }) {\n		let base = rule.base;\n		if (rule.weakTitled != null && !whole) base = rule.weakTitled + (roles.bookNum != null ? TUNING.base.decimal : 0) + (number?.digits ? TUNING.base.digits : 0);\n		else if (number?.book != null) base += TUNING.base.decimal;\n		if (marker?.cls === \"c\" && marker.word === \"Thiên\") base += TUNING.base.thien;\n		if (hasPhrase && whole) base += TUNING.base.phraseAlone;\n		let ending = /(?:^|\\s)(?:hoàn|xong|kết thúc)(?:$|[\\s.!)])/iu.test(title);\n		let bookMax = TUNING.base.bookTitleMax;\n		if (rule.kind === \"book\") base += whole || titled && title.length <= bookMax && !ending ? TUNING.base.bookAlone : title.length > bookMax || ending || roles.bookType === \"Giai đoạn\" ? TUNING.base.bookProse : 0;\n		base -= marker ? Math.min(proseCost(title), TUNING.base.markerProseMax) : proseCost(title);\n		if (/tác giả/.test(rest) || /^\\s*[-–~]\\s*\\d/.test(rest)) base += TUNING.base.titlePage;\n		if (hasRoman) base += TUNING.base.roman;\n		return base;\n	}\n	function shapeOf(tokens, length, whole) {\n		return tokens.slice(0, length).map((t) => t.cls !== \"N\" ? t.cls : t.book != null ? \"D\" : t.digits ? \"#\" : \"N\").join(\"\").replace(/x+/g, \"X\") + (whole ? \"\" : \"T\");\n	}\n	const SECTION_LABEL = /^\\s*(?:chính văn\\s+|\\d{4}[-./]\\d{1,2}[-./]\\d{1,2}\\s*(?=[【[(（]?\\s*(?:chương|hồi|thứ\\s)))(?=\\S)/iu;\n	const LONG_LINE_HEADING = /^\\s*(?:chính văn\\s+|\\d{4}[-./]\\d{1,2}[-./]\\d{1,2}\\s*[【[(（]?|[【[(（])\\s*(?:(?:chương|hồi)\\s+\\d{1,4}|thứ\\s+\\d{1,4}\\s+(?:chương|hồi))(?![\\p{L}\\p{N}])/iu;\n	const HEADING_READ = 400;\n	const HEADING_SAME_WITHIN = 40;\n	function partOf(title) {\n		let alone = /^\\(\\s*(\\p{L}+(?: \\p{L}+)*)\\s*\\)$/u.exec(title);\n		if (alone) {\n			let value = valueOfPart(alone[1].toLowerCase());\n			if (value != null) return {\n				half: value,\n				halfText: alone[1].toLowerCase(),\n				title: \"\"\n			};\n		}\n		let ending = /\\s*\\((thượng|trung|hạ)\\)$/iu.exec(title);\n		if (ending) return {\n			half: HALF_WORDS[ending[1].toLowerCase()],\n			halfText: ending[1].toLowerCase(),\n			title\n		};\n		return null;\n	}\n	function valueOfPart(word) {\n		if (word in HALF_WORDS) return HALF_WORDS[word];\n		let words = word.split(\" \");\n		let number = readNumberWords(words, 0);\n		return number?.length === words.length ? number.value : null;\n	}\n	const BOOK_TITLE = /^\\s*tên sách\\s*[:：]\\s*(\\S.*?)\\s*$/iu;\n	function readHeading(line, lower, names, cut = false) {\n		let runsOn = cut || line.length > HEADING_READ;\n		if (line.length > HEADING_READ) {\n			if (!LONG_LINE_HEADING.test(line)) return null;\n			line = line.slice(0, HEADING_READ);\n			lower = lower.slice(0, HEADING_READ);\n		}\n		let named = BOOK_TITLE.exec(line);\n		if (named) return heading({\n			kind: \"book\",\n			base: TUNING.base.bookTitle,\n			bookName: named[1],\n			title: named[1],\n			text: line.trim(),\n			start: line.search(/\\S/),\n			shape: \"named\"\n		});\n		let label = SECTION_LABEL.exec(line);\n		if (label) {\n			let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names, runsOn);\n			return node && {\n				...node,\n				start: label[0].search(/\\S/)\n			};\n		}\n		let tokens = lexLine(line, lower, names);\n		if (!tokens.some((t) => \"NEhbp\".includes(t.cls))) return null;\n		let classes = tokens.map((t) => t.cls).join(\"\");\n		for (let rule of HEADING_RULES) {\n			let m = rule.re.exec(classes);\n			if (!m) continue;\n			let at = (group) => {\n				let span = spanOf(m, group);\n				return span ? tokens[span[0]] : null;\n			};\n			if (at(\"cm2\") && at(\"cm2\")?.word !== \"Chương\" && !at(\"tt\")) continue;\n			if (rule.sino && (!at(\"cn\")?.sino || at(\"sep\")?.text !== \",\")) continue;\n			let last = tokens[m[0].length - 1];\n			let rest = line.slice(last.e);\n			let whole = !/\\S/.test(rest);\n			let read = readRoles(rule, at);\n			let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);\n			if (at(\"bn4\")) title = title.replace(/^chi\\s+/iu, \"\");\n			if (read.roles.n != null) title = title.replace(new RegExp(`^(?:\\\\S+\\\\s+){0,3}?(?:chương|hồi)\\\\s+${read.roles.n}\\\\s*[:：.]*\\\\s*`, \"iu\"), \"\");\n			let part = read.roles.n != null && !runsOn && partOf(title);\n			let hasRoman = tokens.some((t) => t.roman);\n			let base = baseOf(rule, read, {\n				title,\n				rest,\n				whole,\n				hasRoman,\n				hasPhrase: !!at(\"ph\"),\n				titled: /^[:：]$/.test(last.text)\n			});\n			if (runsOn) {\n				base += TUNING.base.runsOn;\n				title = \"\";\n			}\n			if (read.roles.n === 0 && !read.marker) continue;\n			if (part) title = part.title;\n			let kind = rule.kind === \"chap\" && read.roles.n === 0 ? \"interlude\" : rule.kind;\n			let inner = rule.kind === \"chap\" && read.roles.n != null && (/^(.*?)\\s*[|｜]\\s*(\\S.*)$/u.exec(rest) ?? /^(.*?)\\s*[【[]?\\s*(thứ\\s+\\S+\\s+hồi\\b.*)$/iu.exec(rest));\n			if (inner) {\n				let held = readHeading(inner[2].replace(/^[【[]\\s*/, \"\"), inner[2].replace(/^[【[]\\s*/, \"\").toLowerCase(), names);\n				if (held && held.kind === \"chap\" && held.n != null && !held.outer) {\n					let outer = `${read.marker?.word ?? \"Chương\"} ${read.roles.n}`;\n					return heading({\n						...held,\n						outer: [outer, cleanTitle(inner[1])].filter(Boolean).join(\": \"),\n						start: tokens[0].s,\n						text: line.slice(tokens[0].s)\n					});\n				}\n			}\n			return heading({\n				...read.roles,\n				...part && {\n					half: part.half,\n					halfText: part.halfText,\n					halfBracketed: true\n				},\n				kind,\n				base,\n				rest,\n				title,\n				whole,\n				shape: shapeOf(tokens, m[0].length, whole),\n				runsOn,\n				text: line.slice(tokens[0].s, last.e),\n				start: tokens[0].s\n			});\n		}\n		return null;\n	}\n	const INLINE_HEADING = /(?<![\\p{L}\\p{N}])(?<word>chương|hồi)\\s+(?<n>\\d{1,4})(?![\\p{L}\\p{N}.])/giu;\n	function inlineHeadings(line, lineStart, ord) {\n		let found = [];\n		for (let m of line.matchAll(INLINE_HEADING)) {\n			if (!/\\S/.test(line.slice(0, m.index))) continue;\n			let rest = line.slice(m.index + m[0].length);\n			let { n, word } = m.groups;\n			found.push(heading({\n				kind: \"chap\",\n				n: Number(n),\n				chapType: CHAPTER_WORDS[word.toLowerCase()],\n				base: TUNING.base.inline,\n				inline: true,\n				text: m[0],\n				rest,\n				title: cleanTitle(rest).slice(0, TUNING.base.inlineTitleMax),\n				shape: \"inline\",\n				index: lineStart + m.index,\n				ord\n			}));\n		}\n		return found;\n	}\n	function findCandidates(text, name) {\n		let lowerName = name.toLowerCase().normalize();\n		let names = [.../* @__PURE__ */ new Set([lowerName, lowerName.replace(\"hệ liệt\", \"\").trim()])].filter(Boolean).sort((a, z) => z.length - a.length);\n		let nodes = [];\n		let ord = 0;\n		let lineStart = 0;\n		while (lineStart <= text.length) {\n			let lineEnd = text.indexOf(\"\\n\", lineStart);\n			if (lineEnd === -1) lineEnd = text.length;\n			let line = text.slice(lineStart, lineEnd);\n			if (/\\S/.test(line)) {\n				ord++;\n				let lower = line.toLowerCase();\n				let node = lower.length === line.length ? readHeading(line, lower, names) : null;\n				if (node) nodes.push(heading({\n					...node,\n					index: lineStart + node.start,\n					ord\n				}));\n				let inline = !(node && !node.runsOn && node.base >= TUNING.path.breakMinBase) && line.length < 4e3 ? inlineHeadings(line, lineStart, ord) : [];\n				if (node?.runsOn) inline = inline.filter((other) => other.n !== node.n || other.index - lineStart > HEADING_SAME_WITHIN);\n				nodes.push(...inline);\n			}\n			lineStart = lineEnd + 1;\n		}\n		if (nodes.filter((node) => node.bookName).length < 2) nodes = nodes.filter((node) => !node.bookName);\n		return nodes.sort((a, z) => a.index - z.index || a.ord - z.ord);\n	}\n	const reached = (node, fields = {}) => ({\n		book: node.bookNum ?? 0,\n		word: node.bookType,\n		kind: null,\n		name: node.bookName,\n		extra: !!node.extra,\n		n: node.span ?? node.n ?? null,\n		half: null,\n		ended: false,\n		carry: 0,\n		...fields\n	});\n	function chooseHeadings(nodes, credit = {}, strongOnly = false, excluded = /* @__PURE__ */ new Set()) {\n		let score = new Array(nodes.length).fill(-Infinity);\n		let prev = new Array(nodes.length).fill(-1);\n		let joined = new Array(nodes.length).fill(false);\n		let state = new Array(nodes.length);\n		let byNumber = /* @__PURE__ */ new Map();\n		let bestByKey = /* @__PURE__ */ new Map();\n		let books = [];\n		let top = -1;\n		let remember = (i) => {\n			let { n, book, extra } = state[i];\n			if (n != null) {\n				if (!byNumber.has(n)) byNumber.set(n, []);\n				byNumber.get(n).push(i);\n			}\n			let key = `${book}/${extra ? 1 : 0}`;\n			if (!bestByKey.has(key) || score[i] > score[bestByKey.get(key)]) bestByKey.set(key, i);\n		};\n		let apart = (i, j) => nodes[i].ord - nodes[j].ord;\n		let goingOn = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			for (let d = 0; d <= TUNING.path.gapMax; d++) for (let j of byNumber.get(n - d) ?? []) {\n				let s = state[j];\n				if (s.ended || node.extra && !s.extra) continue;\n				if (book != null && s.book !== 0 && book !== s.book) continue;\n				if (d === 0) {\n					if (node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, {\n						...s,\n						half: node.half\n					});\n					else if (apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);\n				} else go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), {\n					...s,\n					n: node.span ?? n,\n					book: book ?? s.book,\n					word: node.bookType ?? s.word,\n					name: book != null ? null : s.name,\n					extra: s.extra || !!node.extra,\n					half: node.half ?? null\n				});\n			}\n		};\n		let afterBookHeading = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			for (let j of books) {\n				let s = state[j];\n				let opensExtra = s.extra && !node.extra && apart(i, j) <= TUNING.path.opensExtraLines;\n				if (s.extra !== !!node.extra && !opensExtra) continue;\n				if (book != null && book !== s.book && !s.name) continue;\n				let value = n <= TUNING.path.smallNumber ? TUNING.reward.boundary : n === s.carry + 1 ? TUNING.reward.carryOn : TUNING.reward.boundary - TUNING.path.lateStartCost - Math.min(n, TUNING.path.lateStartCap);\n				let numbered = book != null && {\n					book,\n					word: node.bookType ?? s.word,\n					name: null\n				};\n				go(j, value, {\n					...s,\n					n: node.span ?? n,\n					half: node.half ?? null,\n					...numbered\n				});\n			}\n		};\n		let intoNewBook = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			if (n > TUNING.path.smallNumber || book == null && !node.extra) return;\n			for (let j of bestByKey.values()) {\n				let s = state[j];\n				if (s.extra === !!node.extra && (book == null || book === s.book)) continue;\n				go(j, TUNING.reward.boundary - 1, reached(node, {\n					book: book ?? s.book,\n					word: node.bookType ?? s.word,\n					kind: s.kind,\n					name: book == null ? s.name : null,\n					carry: s.n ?? 0\n				}));\n			}\n		};\n		let breakingOff = (i, n, { go }) => {\n			let node = nodes[i];\n			let { bookNum: book } = node;\n			if (top < 0 || state[top].ended || node.base < TUNING.path.breakMinBase) return;\n			let s = state[top];\n			let unnamed = book == null && !node.extra && n <= TUNING.path.unnamedUpTo && s.book > 0 && (s.n ?? 0) >= TUNING.path.unnamedFrom;\n			go(top, TUNING.reward.restart, {\n				...s,\n				n: node.span ?? n,\n				book: book ?? (unnamed ? s.book + 1 : s.book),\n				word: node.bookType ?? s.word,\n				name: book != null ? null : s.name,\n				extra: !!node.extra,\n				half: node.half ?? null,\n				carry: s.n ?? 0\n			});\n		};\n		let startingHere = (i, n, { begin }) => {\n			let node = nodes[i];\n			let start = n <= TUNING.path.smallNumber ? TUNING.path.startAlone : TUNING.path.startFar;\n			if (start > 0) begin(start, reached(node));\n			else begin(start, reached(node), true);\n		};\n		let into = {\n			chap(i, ways) {\n				let n = nodes[i].n;\n				if (n == null) return;\n				goingOn(i, n, ways);\n				afterBookHeading(i, n, ways);\n				intoNewBook(i, n, ways);\n				breakingOff(i, n, ways);\n				startingHere(i, n, ways);\n			},\n			end(i, { go }) {\n				let node = nodes[i];\n				let recent = [];\n				for (let j = i - 1; j >= 0 && recent.length < TUNING.path.endLookback; j--) if (score[j] > -Infinity) recent.push(j);\n				for (let j of recent) {\n					let s = state[j];\n					if (s.ended || s.n == null || s.extra !== !!node.extra) continue;\n					if (apart(i, j) <= TUNING.path.closeLines) go(j, TUNING.reward.repeat + 1, {\n						...s,\n						ended: true\n					}, true);\n					else if (s.n >= TUNING.path.endMin) go(j, TUNING.reward.end, {\n						...s,\n						n: s.n + 1,\n						ended: true\n					});\n				}\n			},\n			book(i, { go, begin }) {\n				let node = nodes[i];\n				let b = node.bookNum ?? 0;\n				let extra = node.kind === \"extrahead\" || !!node.extra;\n				if (node.bookName && node.bookNum == null) {\n					for (let j of bestByKey.values()) go(j, 0, reached(node, {\n						book: state[j].book + 1,\n						carry: state[j].n ?? 0,\n						n: null\n					}));\n					begin(TUNING.path.startAlone, reached(node, {\n						book: 1,\n						n: null\n					}), books.length > 0);\n					return;\n				}\n				for (let j of bestByKey.values()) {\n					let s = state[j];\n					let next = b > s.book || b <= 2 && s.book === 0;\n					let ofAnotherKind = !extra && !next && s.word != null && node.bookType != null && s.word !== node.bookType;\n					let follows = extra ? !s.extra : !s.extra && (next || ofAnotherKind);\n					let skipped = extra || ofAnotherKind ? 0 : Math.max(0, b - s.book - 1);\n					let kind = ofAnotherKind || !extra && node.bookType != null && node.bookType === s.kind ? node.bookType : null;\n					if (follows) go(j, -Math.min(skipped, TUNING.path.skippedBooksMax), reached(node, {\n						book: extra ? s.book : b,\n						kind,\n						extra,\n						carry: s.n ?? 0,\n						n: null\n					}));\n				}\n				begin(TUNING.path.startAlone, reached(node, {\n					book: extra ? 0 : b,\n					extra,\n					n: null\n				}), books.length > 0);\n			},\n			interlude(_i, { go }) {\n				if (top >= 0) go(top, TUNING.reward.interlude, { ...state[top] });\n			},\n			half(i, { go }) {\n				let node = nodes[i];\n				for (let j = i - 1; j >= 0; j--) {\n					if (score[j] === -Infinity) continue;\n					let s = state[j];\n					if (s.n == null || s.ended) continue;\n					if (s.half == null || (node.half ?? 0) > s.half) go(j, TUNING.reward.half, {\n						...s,\n						half: node.half\n					});\n					break;\n				}\n			}\n		};\n		for (let i = 0; i < nodes.length; i++) {\n			let node = nodes[i];\n			let prior = node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold;\n			if (strongOnly && prior < 0 || excluded.has(i)) continue;\n			let best = {\n				value: -Infinity,\n				from: -1,\n				joined: false,\n				as: null\n			};\n			let go = (j, value, as, joins = false) => {\n				if (score[j] + value > best.value) best = {\n					value: score[j] + value,\n					from: j,\n					joined: joins,\n					as\n				};\n			};\n			let begin = (value, as, onlyIfAlone = false) => {\n				if (onlyIfAlone && best.value !== -Infinity) return;\n				if (!(best.value > value)) best = {\n					value,\n					from: -1,\n					joined: false,\n					as\n				};\n			};\n			let way = node.kind === \"chap\" ? node.end ? \"end\" : node.n != null ? \"chap\" : null : node.kind === \"extrahead\" ? \"book\" : node.kind;\n			if (way) into[way](i, {\n				go,\n				begin\n			});\n			if (best.value === -Infinity) continue;\n			score[i] = best.value + prior;\n			prev[i] = best.from;\n			joined[i] = best.joined;\n			state[i] = best.as;\n			let opensBook = node.kind === \"interlude\" && state[i].n == null;\n			if (node.kind === \"book\" || node.kind === \"extrahead\" || opensBook) books.push(i);\n			else remember(i);\n			if (top < 0 || score[i] > score[top]) top = i;\n		}\n		let path = [];\n		for (let i = top; i >= 0; i = prev[i]) path.push({\n			i,\n			joined: joined[i],\n			state: state[i]\n		});\n		return path.reverse();\n	}\n	function tinySections(nodes, path) {\n		let chapters = path.filter(({ i }) => nodes[i].kind === \"chap\");\n		let lengths = chapters.slice(1).map(({ i }, k) => nodes[i].ord - nodes[chapters[k].i].ord).sort((a, z) => a - z);\n		let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;\n		let tiny = /* @__PURE__ */ new Set();\n		if (typical < TUNING.tiny.typicalAtLeast) return tiny;\n		chapters.forEach(({ i }, k) => {\n			let next = chapters[k + 1];\n			let little = !nodes[i].runsOn || nodes[next?.i]?.index - nodes[i].index < TUNING.tiny.chars;\n			if (next && !next.joined && little && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);\n		});\n		return tiny;\n	}\n	function frontContents(nodes, path) {\n		let chapters = path.filter(({ i, joined }) => !joined && nodes[i].kind !== \"book\" && nodes[i].kind !== \"extrahead\");\n		let lines = (k) => (chapters[k + 1] ? nodes[chapters[k + 1].i].ord : Infinity) - nodes[chapters[k].i].ord;\n		let number = (k) => chapters[k].state.n;\n		let lengths = chapters.slice(0, -1).map((_, k) => lines(k)).sort((a, z) => a - z);\n		let typical = lengths[Math.floor(lengths.length / 2)] ?? 0;\n		for (let k = Math.min(chapters.length - 1, TUNING.contents.maxEntries); k >= TUNING.contents.minEntries; k--) {\n			let head = chapters.slice(0, k);\n			if (head.reduce((sum, _, j) => sum + lines(j), 0) >= Math.max(lines(k), typical)) continue;\n			let numbers = head.map((_, j) => number(j)).filter((n) => n != null);\n			let next = number(k);\n			if (!numbers.length || next == null || next > Math.min(...numbers) || next >= Math.max(...numbers)) continue;\n			let later = new Set(chapters.slice(k).map((_, j) => number(k + j)));\n			if (numbers.every((n) => later.has(n))) return new Set(head.map(({ i }) => i));\n		}\n		return /* @__PURE__ */ new Set();\n	}\n	function shapeCredit(nodes, path) {\n		let seen = {};\n		let taken = {};\n		for (let node of nodes) seen[node.shape] = (seen[node.shape] ?? 0) + 1;\n		for (let { i } of path) taken[nodes[i].shape] = (taken[nodes[i].shape] ?? 0) + 1;\n		let credit = {};\n		for (let shape in seen) credit[shape] = TUNING.trust.scale * (((taken[shape] ?? 0) + .5) / (seen[shape] + 1) - .5);\n		return credit;\n	}\n	function fillGaps(nodes, path, credit) {\n		let weak = [];\n		nodes.forEach((node, i) => {\n			if (node.kind === \"chap\" && node.n != null && node.base + (credit[node.shape] ?? 0) - TUNING.path.threshold < 0) weak.push(i);\n		});\n		let filled = [];\n		let fill = (from, to, first, last, state) => {\n			let at = from;\n			for (let e = first; e <= last; e++) {\n				let found;\n				for (let i of weak) {\n					if (i <= at || i >= to) continue;\n					let node = nodes[i];\n					if (node.n !== e || node.extra && !state.extra) continue;\n					if (!found || node.base > nodes[found].base) found = i;\n				}\n				if (found != null) {\n					filled.push({\n						i: found,\n						joined: false,\n						state: {\n							...state,\n							n: e\n						}\n					});\n					at = found;\n				}\n			}\n		};\n		let previous;\n		let boundary = true;\n		for (let entry of path) {\n			let node = nodes[entry.i];\n			if (node.kind === \"book\" || node.kind === \"extrahead\") {\n				boundary = true;\n				continue;\n			}\n			let n = entry.state.n;\n			if (node.kind !== \"chap\" || n == null || entry.joined) continue;\n			if (previous && !boundary && entry.state.book === previous.state.book && entry.state.extra === previous.state.extra) {\n				if (n > previous.n + 1) fill(previous.i, entry.i, previous.n + 1, n - 1, previous.state);\n			} else if (n > 1 && n <= TUNING.fill.firstMax && !node.extra) fill(previous?.i ?? -1, entry.i, 1, n - 1, {\n				...entry.state,\n				n: 0\n			});\n			previous = {\n				i: entry.i,\n				n,\n				state: entry.state\n			};\n			boundary = false;\n		}\n		return [...path, ...filled].sort((a, z) => a.i - z.i);\n	}\n	const END_PHRASE = /^(chương\\s+)?(kết|cuối)$/i;\n	function pickTitle(members) {\n		let titles = members.map((m) => m.title).filter((t) => t && !END_PHRASE.test(t));\n		titles.sort((a, z) => proseCost(a) - proseCost(z) || z.length - a.length);\n		let title = titles[0];\n		return title && title.length > TUNING.drafts.titleMax ? `${title.slice(0, TUNING.drafts.titleMax).replace(/\\s+\\S*$/, \"\")}…` : title;\n	}\n	function buildChapters(nodes, path) {\n		let clusters = [];\n		let opening;\n		for (let { i, joined, state } of path) {\n			let node = nodes[i];\n			if (node.kind === \"book\" || node.kind === \"extrahead\") {\n				opening ??= node.index;\n				continue;\n			}\n			let last = clusters.at(-1);\n			if (joined && last) {\n				last.members.push(node);\n				last.state = state;\n				continue;\n			}\n			clusters.push({\n				members: [node],\n				state,\n				index: Math.min(opening ?? Infinity, node.index)\n			});\n			opening = void 0;\n		}\n		let mostSaid = (words) => {\n			let types = {};\n			for (let word of words) if (word) types[word] = (types[word] ?? 0) + 1;\n			return Object.keys(types).sort((a, z) => types[z] - types[a])[0];\n		};\n		let bookWord = mostSaid(path.map(({ i }) => nodes[i].kind === \"book\" ? nodes[i].bookType : null)) ?? mostSaid(path.map(({ i }) => nodes[i].bookNum != null ? nodes[i].bookType : null)) ?? \"Quyển\";\n		let drafts = [];\n		let section;\n		for (let { members, state, index } of clusters) {\n			let first = members[0];\n			let lead = members.reduce((best, m) => m.base > best.base ? m : best, first);\n			let end = members.find((m) => m.end);\n			let numbered = members.find((m) => m.n != null && m.kind !== \"interlude\");\n			let type = members.find((m) => m.chapType)?.chapType ?? (state.extra ? \"Phiên ngoại\" : void 0);\n			let heading = {\n				type,\n				title: pickTitle(members),\n				text: lead.text\n			};\n			if (end) heading.number = end.endWord ?? void 0;\n			else if (first.kind === \"half\") {\n				heading.number = String(state.n);\n				heading.part = first.halfNum != null ? {\n					text: `${first.halfType} ${first.halfNum}`,\n					leading: true\n				} : {\n					text: first.halfText,\n					bracketed: first.halfBracketed\n				};\n			} else if (numbered) {\n				heading.number = numbered.span != null ? `${numbered.n}-${numbered.span}` : String(numbered.n);\n				if (numbered.half != null && numbered.kind === \"chap\") heading.part = {\n					text: numbered.halfText,\n					bracketed: numbered.halfBracketed\n				};\n			}\n			let inherited = section && !lead.outer && state.book === 0 && type === section.type ? section.name : void 0;\n			if (lead.outer) section = {\n				name: lead.outer,\n				type\n			};\n			else if (!inherited) section = void 0;\n			let group = lead.outer ?? inherited ?? state.name ?? (state.book > 0 ? `${state.kind ?? bookWord} ${state.book}` : void 0);\n			drafts.push({\n				offset: index,\n				group,\n				heading\n			});\n		}\n		let named = drafts.findIndex((d) => d.group);\n		if (named > 0) {\n			let [, type, number] = /^(.*) (\\d+)$/.exec(drafts[named].group) ?? [];\n			if (Number(number) === 2) for (let d of drafts.slice(0, named)) d.group = `${type} 1`;\n		}\n		return drafts;\n	}\n	function seriesChapters(text, { name }) {\n		let lines = [];\n		let start = 0;\n		for (let line of text.split(\"\\n\")) {\n			let found = line.length < 200 && /^\\s*((?:\\p{L}+ ){1,4}\\p{L}+) ?[—–:-]/u.exec(line);\n			if (found) lines.push({\n				key: found[1].toLowerCase(),\n				index: start + line.search(/\\S/),\n				line: line.trim(),\n				length: found[0].trim().length\n			});\n			start += line.length + 1;\n		}\n		let counts = /* @__PURE__ */ new Map();\n		for (let { key } of lines) counts.set(key, (counts.get(key) ?? 0) + 1);\n		let own = name.toLowerCase().normalize();\n		let [key, count = 0] = [...counts].filter(([words]) => own.startsWith(words)).sort((a, z) => z[1] - a[1])[0] ?? [];\n		if (!key || count < TUNING.drafts.seriesMin) return [];\n		let drafts = [];\n		for (let { key: lineKey, index, line, length } of lines) {\n			if (lineKey !== key) continue;\n			let title = cleanTitle(line.slice(length)).replace(/\\s*\\(\\s*\\S{1,12}\\s*\\)\\s*$/, \"\");\n			drafts.push({\n				offset: index,\n				heading: {\n					number: String(drafts.length + 1),\n					title,\n					text: line\n				}\n			});\n		}\n		return drafts;\n	}\n	function pagesOf(text, paragraphsPerPage = TUNING.drafts.pageParagraphs) {\n		let pattern = `(.*\\n){1,${paragraphsPerPage}}`;\n		return [...text.matchAll(new RegExp(pattern, \"gimu\"))].map((m) => ({\n			offset: m.index,\n			heading: { text: m[0] }\n		}));\n	}\n	function extractChapters(filename, text, { name }) {\n		let nodes = findCandidates(text, name);\n		let first = chooseHeadings(nodes);\n		let credit = shapeCredit(nodes, first);\n		let path = chooseHeadings(nodes, credit, true, tinySections(nodes, first));\n		path = fillGaps(nodes, path, credit);\n		let listed = frontContents(nodes, path);\n		path = path.filter(({ i }) => !listed.has(i));\n		let drafts = buildChapters(nodes, path);\n		let series = seriesChapters(text, { name });\n		if (series.length >= TUNING.drafts.seriesMin && series.length > drafts.length * TUNING.drafts.seriesOver) drafts = series;\n		if (drafts.length < 2) drafts = pagesOf(text);\n		return finishChapters(withPrologue(drafts, filename, text), text);\n	}\n	function withPrologue(drafts, filename, text) {\n		if (!text.slice(0, drafts[0]?.offset ?? text.length).trim()) return drafts;\n		return [{\n			offset: 0,\n			heading: {\n				title: filename,\n				text: filename\n			}\n		}, ...drafts];\n	}\n	function slug(text) {\n		return latinize(text).replace(/\\W+/g, \"-\").replace(/^-+|-+$/g, \"\").toLowerCase();\n	}\n	function latinize(source) {\n		let s = source;\n		s = s.replace(/[ÁĂẮẶẰẲẴǍÂẤẬẦẨẪÄǞȦǠẠȀÀẢȂĀĄÅǺḀȺÃⱯᴀ]/g, \"A\");\n		s = s.replace(/[Ꜳ]/g, \"AA\");\n		s = s.replace(/[ÆǼǢᴁ]/g, \"AE\");\n		s = s.replace(/[Ꜵ]/g, \"AO\");\n		s = s.replace(/[Ꜷ]/g, \"AU\");\n		s = s.replace(/[ꜸꜺ]/g, \"AV\");\n		s = s.replace(/[Ꜽ]/g, \"AY\");\n		s = s.replace(/[ḂḄƁḆɃƂʙᴃБ]/g, \"B\");\n		s = s.replace(/[ĆČÇḈĈĊƇȻꜾᴄ]/g, \"C\");\n		s = s.replace(/[ĎḐḒḊḌƊḎǲǅĐÐƋꝹᴅД]/g, \"D\");\n		s = s.replace(/[ǱǄ]/g, \"DZ\");\n		s = s.replace(/[ÉĔĚȨḜÊẾỆỀỂỄḘËĖẸȄÈẺȆĒḖḔĘɆẼḚƐƎᴇⱻЕЭ]/g, \"E\");\n		s = s.replace(/[Ꝫ]/g, \"ET\");\n		s = s.replace(/[ḞƑꝻꜰФ]/g, \"F\");\n		s = s.replace(/[ǴĞǦĢĜĠƓḠǤꝽɢʛГҐ]/g, \"G\");\n		s = s.replace(/[ḪȞḨĤⱧḦḢḤĦʜХ]/g, \"H\");\n		s = s.replace(/[ÍĬǏÎÏḮİỊȈÌỈȊĪĮƗĨḬІɪЙЫИ]/g, \"I\");\n		s = s.replace(/[ꞂŔŘŖṘṚṜȐȒṞɌⱤʁʀᴙᴚР]/g, \"R\");\n		s = s.replace(/[ꞄŚṤŠṦŞŜȘṠṢṨꜱС]/g, \"S\");\n		s = s.replace(/[ꞆŤŢṰȚȾṪṬƬṮƮŦᴛТ]/g, \"T\");\n		s = s.replace(/[Ꝭ]/g, \"IS\");\n		s = s.replace(/[ĴɈᴊ]/g, \"J\");\n		s = s.replace(/[ḰǨĶⱩꝂḲƘḴꝀꝄᴋК]/g, \"K\");\n		s = s.replace(/[ĹȽĽĻḼḶḸⱠꝈḺĿⱢǈŁꞀʟᴌЛ]/g, \"L\");\n		s = s.replace(/[Ǉ]/g, \"LJ\");\n		s = s.replace(/[ḾṀṂⱮƜᴍМ]/g, \"M\");\n		s = s.replace(/[ŃŇŅṊṄṆǸƝṈȠǋÑɴᴎН]/g, \"N\");\n		s = s.replace(/[Ǌ]/g, \"NJ\");\n		s = s.replace(/[ÓŎǑÔỐỘỒỔỖÖȪȮȰỌŐȌÒỎƠỚỢỜỞỠȎꝊꝌŌṒṐƟǪǬØǾÕṌṎȬƆᴏᴐО]/g, \"O\");\n		s = s.replace(/[Ƣ]/g, \"OI\");\n		s = s.replace(/[Ꝏ]/g, \"OO\");\n		s = s.replace(/[Ȣᴕ]/g, \"OU\");\n		s = s.replace(/[ṔṖꝒƤꝔⱣꝐᴘП]/g, \"P\");\n		s = s.replace(/[ꝘꝖ]/g, \"Q\");\n		s = s.replace(/[ß]/g, \"ss\");\n		s = s.replace(/[ɅꝞṾƲṼᴠВ]/g, \"V\");\n		s = s.replace(/[Ꜩ]/g, \"TZ\");\n		s = s.replace(/[ÚŬǓÛṶÜǗǙǛǕṲỤŰȔÙỦƯỨỰỪỬỮȖŪṺŲŮŨṸṴᴜУ]/g, \"U\");\n		s = s.replace(/[Ꝡ]/g, \"VY\");\n		s = s.replace(/[ẂŴẄẆẈẀⱲᴡ]/g, \"W\");\n		s = s.replace(/[ẌẊ]/g, \"X\");\n		s = s.replace(/[ÝŶŸẎỴỲƳỶỾȲɎỸʏ]/g, \"Y\");\n		s = s.replace(/[Ї]/g, \"YI\");\n		s = s.replace(/[ŹŽẐⱫŻẒȤẔƵᴢЗ]/g, \"Z\");\n		s = s.replace(/[Þ]/g, \"TH\");\n		s = s.replace(/[Ĳ]/g, \"IJ\");\n		s = s.replace(/[Œɶ]/g, \"OE\");\n		s = s.replace(/[áăắặằẳẵǎâấậầẩẫäǟȧǡạȁàảȃāąᶏẚåǻḁⱥãɐₐАа]/g, \"a\");\n		s = s.replace(/[ꜳ]/g, \"aa\");\n		s = s.replace(/[æǽǣᴂ]/g, \"ae\");\n		s = s.replace(/[ꜵ]/g, \"ao\");\n		s = s.replace(/[ꜷ]/g, \"au\");\n		s = s.replace(/[ꜹꜻ]/g, \"av\");\n		s = s.replace(/[ꜽ]/g, \"ay\");\n		s = s.replace(/[ḃḅɓḇᵬᶀƀƃб]/g, \"b\");\n		s = s.replace(/[ɵóŏǒôốộồổỗöȫȯȱọőȍòỏơớợờởỡȏꝋꝍⱺōṓṑǫǭøǿõṍṏȭɔᶗᴑᴓₒо]/g, \"o\");\n		s = s.replace(/[ćčçḉĉɕċƈȼↄꜿ]/g, \"c\");\n		s = s.replace(/[ďḑḓȡḋḍɗᶑḏᵭᶁđɖƌðꝺд]/g, \"d\");\n		s = s.replace(/[ıíĭǐîïḯịȉìỉȋīįᶖɨĩḭіᴉᵢйыи]/g, \"i\");\n		s = s.replace(/[ȷɟʄǰĵʝɉⱼ]/g, \"j\");\n		s = s.replace(/[ǳǆ]/g, \"dz\");\n		s = s.replace(/[éĕěȩḝêếệềểễḙëėẹȅèẻȇēḗḕⱸęᶒɇẽḛɛᶓɘǝₑеэ]/g, \"e\");\n		s = s.replace(/[ꝫ]/g, \"et\");\n		s = s.replace(/[ḟƒᵮᶂꝼф]/g, \"f\");\n		s = s.replace(/[ǵğǧģĝġɠḡᶃǥᵹɡᵷгґ]/g, \"g\");\n		s = s.replace(/[ḫȟḩĥⱨḧḣḥɦẖħɥʮʯх]/g, \"h\");\n		s = s.replace(/[ƕ]/g, \"hv\");\n		s = s.replace(/[ꞃŕřŗṙṛṝȑɾᵳȓṟɼᵲᶉɍɽɿɹɻɺⱹᵣр]/g, \"r\");\n		s = s.replace(/[ꞅſẜẛẝśṥšṧşŝșṡṣṩʂᵴᶊȿс]/g, \"s\");\n		s = s.replace(/[ꞇťţṱțȶẗⱦṫṭƭṯᵵƫʈŧʇт]/g, \"t\");\n		s = s.replace(/[ꝭ]/g, \"is\");\n		s = s.replace(/[ḱǩķⱪꝃḳƙḵᶄꝁꝅʞк]/g, \"k\");\n		s = s.replace(/[ĺƚɬľļḽȴḷḹⱡꝉḻŀɫᶅɭłꞁл]/g, \"l\");\n		s = s.replace(/[ǉ]/g, \"lj\");\n		s = s.replace(/[ḿṁṃɱᵯᶆɯɰм]/g, \"m\");\n		s = s.replace(/[ńňņṋȵṅṇǹɲṉƞᵰᶇɳñн]/g, \"n\");\n		s = s.replace(/[ǌ]/g, \"nj\");\n		s = s.replace(/[ƣ]/g, \"oi\");\n		s = s.replace(/[ꝏ]/g, \"oo\");\n		s = s.replace(/[ȣ]/g, \"ou\");\n		s = s.replace(/[ṕṗꝓƥᵱᶈꝕᵽꝑп]/g, \"p\");\n		s = s.replace(/[ꝙʠɋꝗ]/g, \"q\");\n		s = s.replace(/[ᴝúŭǔûṷüǘǚǜǖṳụűȕùủưứựừửữȗūṻųᶙůũṹṵᵤу]/g, \"u\");\n		s = s.replace(/[ᵺþ]/g, \"th\");\n		s = s.replace(/[ᴔœ]/g, \"oe\");\n		s = s.replace(/[ʌⱴꝟṿʋᶌⱱṽᵥв]/g, \"v\");\n		s = s.replace(/[ʍẃŵẅẇẉẁⱳẘ]/g, \"w\");\n		s = s.replace(/[ʎýŷÿẏỵỳƴỷỿȳẙɏỹ]/g, \"y\");\n		s = s.replace(/[ꜩ]/g, \"tz\");\n		s = s.replace(/[ᵫ]/g, \"ue\");\n		s = s.replace(/[ꝸ]/g, \"um\");\n		s = s.replace(/[ꝡ]/g, \"vy\");\n		s = s.replace(/[ẍẋᶍₓ]/g, \"x\");\n		s = s.replace(/[ї]/g, \"yi\");\n		s = s.replace(/[źžẑʑⱬżẓȥẕᵶᶎʐƶɀз]/g, \"z\");\n		s = s.replace(/[ﬀ]/g, \"ff\");\n		s = s.replace(/[ﬃ]/g, \"ffi\");\n		s = s.replace(/[ﬄ]/g, \"ffl\");\n		s = s.replace(/[ﬁ]/g, \"fi\");\n		s = s.replace(/[ﬂ]/g, \"fl\");\n		s = s.replace(/[ĳ]/g, \"ij\");\n		s = s.replace(/[ﬆ]/g, \"st\");\n		s = s.replace(/[Ё]/g, \"YO\");\n		s = s.replace(/[Ц]/g, \"TS\");\n		s = s.replace(/[Ш]/g, \"SH\");\n		s = s.replace(/[Щ]/g, \"SCH\");\n		s = s.replace(/[ЪъЬь]/g, \"'\");\n		s = s.replace(/[ё]/g, \"yo\");\n		s = s.replace(/[ц]/g, \"ts\");\n		s = s.replace(/[ш]/g, \"sh\");\n		s = s.replace(/[щ]/g, \"sch\");\n		s = s.replace(/[Ж]/g, \"ZH\");\n		s = s.replace(/[ж]/g, \"zh\");\n		s = s.replace(/[Я]/g, \"Ya\");\n		s = s.replace(/[Ч]/g, \"CH\");\n		s = s.replace(/[Ю]/g, \"YU\");\n		s = s.replace(/[я]/g, \"ya\");\n		s = s.replace(/[ч]/g, \"ch\");\n		s = s.replace(/[ю]/g, \"yu\");\n		return s;\n	}\n	//#endregion\n	//#region src/parser-worker.ts\n	onmessage = ({ data: { id, name, text } }) => {\n		try {\n			postMessage({\n				id,\n				chapters: extractChapters(name, normalizeFileContent(text), { name })\n			});\n		} catch (error) {\n			postMessage({\n				id,\n				error: String(error?.message ?? error)\n			});\n		}\n	};\n	//#endregion\n})();\n";
 var blob = typeof self !== "undefined" && self.Blob && new Blob(["(self.URL || self.webkitURL).revokeObjectURL(self.location.href);", jsContent], { type: "text/javascript;charset=utf-8" });
 function WorkerWrapper(options) {
 	let objURL;
@@ -4473,6 +4473,7 @@ var TUNING = {
 		titlePage: -6,
 		roman: -2,
 		inline: 3,
+		runsOn: -1,
 		inlineTitleMax: 80
 	},
 	prose: {
@@ -4499,7 +4500,7 @@ var TUNING = {
 	path: {
 		threshold: 4.5,
 		closeLines: 3,
-		gapMax: 4,
+		gapMax: 10,
 		smallNumber: 3,
 		startAlone: 3,
 		startFar: -6,
@@ -4516,7 +4517,8 @@ var TUNING = {
 	trust: { scale: 6 },
 	tiny: {
 		typicalAtLeast: 30,
-		lines: 2
+		lines: 2,
+		chars: 3e3
 	},
 	contents: {
 		minEntries: 3,
@@ -4697,6 +4699,8 @@ var DIGITS = /\d+(?:\.\d+)?/y;
 var LETTERS = /\p{L}+/uy;
 var NEXT_WORD = / \p{L}+/uy;
 var NEXT_MARK = /\s*(\S)/y;
+var WORD_COUNT = /\s*(vạn|ngàn|nghìn|k|w)?\s*chữ(?![\p{L}\p{N}])/uy;
+var countsWords = (value, decimal, unit) => decimal || (unit === "vạn" || unit === "w" ? value < 20 : unit ? value < 100 : value >= 300);
 var readAt$1 = (re, line, pos) => {
 	re.lastIndex = pos;
 	return re.exec(line);
@@ -4737,6 +4741,11 @@ function lexLine(line, lower, names) {
 			let m = readAt$1(DIGITS, line, pos);
 			let [major, minor] = m[0].split(".");
 			if (minor != null && Number(major) === 0) {
+				add("x", pos + m[0].length);
+				continue;
+			}
+			let count = !["c", "t"].includes(tokens.at(-1)?.cls ?? "") && readAt$1(WORD_COUNT, lower, pos + m[0].length);
+			if (count && countsWords(Number(m[0]), minor != null, count[1])) {
 				add("x", pos + m[0].length);
 				continue;
 			}
@@ -4813,7 +4822,8 @@ var HEADING_DEFAULTS = {
 	bookType: null,
 	bookName: null,
 	outer: null,
-	inline: false
+	inline: false,
+	runsOn: false
 };
 function heading(fields) {
 	return {
@@ -4985,7 +4995,10 @@ function baseOf(rule, { roles, number, marker }, { title, rest, whole, hasRoman,
 function shapeOf(tokens, length, whole) {
 	return tokens.slice(0, length).map((t) => t.cls !== "N" ? t.cls : t.book != null ? "D" : t.digits ? "#" : "N").join("").replace(/x+/g, "X") + (whole ? "" : "T");
 }
-var SECTION_LABEL = /^\s*chính văn\s+(?=\S)/iu;
+var SECTION_LABEL = /^\s*(?:chính văn\s+|\d{4}[-./]\d{1,2}[-./]\d{1,2}\s*(?=[【[(（]?\s*(?:chương|hồi|thứ\s)))(?=\S)/iu;
+var LONG_LINE_HEADING = /^\s*(?:chính văn\s+|\d{4}[-./]\d{1,2}[-./]\d{1,2}\s*[【[(（]?|[【[(（])\s*(?:(?:chương|hồi)\s+\d{1,4}|thứ\s+\d{1,4}\s+(?:chương|hồi))(?![\p{L}\p{N}])/iu;
+var HEADING_READ = 400;
+var HEADING_SAME_WITHIN = 40;
 function partOf(title) {
 	let alone = /^\(\s*(\p{L}+(?: \p{L}+)*)\s*\)$/u.exec(title);
 	if (alone) {
@@ -5011,8 +5024,13 @@ function valueOfPart(word) {
 	return number?.length === words.length ? number.value : null;
 }
 var BOOK_TITLE = /^\s*tên sách\s*[:：]\s*(\S.*?)\s*$/iu;
-function readHeading(line, lower, names) {
-	if (line.length > 400) return null;
+function readHeading(line, lower, names, cut = false) {
+	let runsOn = cut || line.length > HEADING_READ;
+	if (line.length > HEADING_READ) {
+		if (!LONG_LINE_HEADING.test(line)) return null;
+		line = line.slice(0, HEADING_READ);
+		lower = lower.slice(0, HEADING_READ);
+	}
 	let named = BOOK_TITLE.exec(line);
 	if (named) return heading({
 		kind: "book",
@@ -5025,7 +5043,7 @@ function readHeading(line, lower, names) {
 	});
 	let label = SECTION_LABEL.exec(line);
 	if (label) {
-		let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names);
+		let node = readHeading(line.slice(label[0].length), lower.slice(label[0].length), names, runsOn);
 		return node && {
 			...node,
 			start: label[0].search(/\S/)
@@ -5050,7 +5068,7 @@ function readHeading(line, lower, names) {
 		let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);
 		if (at("bn4")) title = title.replace(/^chi\s+/iu, "");
 		if (read.roles.n != null) title = title.replace(new RegExp(`^(?:\\S+\\s+){0,3}?(?:chương|hồi)\\s+${read.roles.n}\\s*[:：.]*\\s*`, "iu"), "");
-		let part = read.roles.n != null && partOf(title);
+		let part = read.roles.n != null && !runsOn && partOf(title);
 		let hasRoman = tokens.some((t) => t.roman);
 		let base = baseOf(rule, read, {
 			title,
@@ -5060,6 +5078,10 @@ function readHeading(line, lower, names) {
 			hasPhrase: !!at("ph"),
 			titled: /^[:：]$/.test(last.text)
 		});
+		if (runsOn) {
+			base += TUNING.base.runsOn;
+			title = "";
+		}
 		if (read.roles.n === 0 && !read.marker) continue;
 		if (part) title = part.title;
 		let kind = rule.kind === "chap" && read.roles.n === 0 ? "interlude" : rule.kind;
@@ -5089,6 +5111,7 @@ function readHeading(line, lower, names) {
 			title,
 			whole,
 			shape: shapeOf(tokens, m[0].length, whole),
+			runsOn,
 			text: line.slice(tokens[0].s, last.e),
 			start: tokens[0].s
 		});
@@ -5137,7 +5160,9 @@ function findCandidates(text, name) {
 				index: lineStart + node.start,
 				ord
 			}));
-			if (!(node && node.base >= TUNING.path.breakMinBase) && line.length < 4e3) nodes.push(...inlineHeadings(line, lineStart, ord));
+			let inline = !(node && !node.runsOn && node.base >= TUNING.path.breakMinBase) && line.length < 4e3 ? inlineHeadings(line, lineStart, ord) : [];
+			if (node?.runsOn) inline = inline.filter((other) => other.n !== node.n || other.index - lineStart > HEADING_SAME_WITHIN);
+			nodes.push(...inline);
 		}
 		lineStart = lineEnd + 1;
 	}
@@ -5400,7 +5425,8 @@ function tinySections(nodes, path) {
 	if (typical < TUNING.tiny.typicalAtLeast) return tiny;
 	chapters.forEach(({ i }, k) => {
 		let next = chapters[k + 1];
-		if (next && !next.joined && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);
+		let little = !nodes[i].runsOn || nodes[next?.i]?.index - nodes[i].index < TUNING.tiny.chars;
+		if (next && !next.joined && little && nodes[next.i].ord - nodes[i].ord <= TUNING.tiny.lines) tiny.add(i);
 	});
 	return tiny;
 }
@@ -5774,7 +5800,7 @@ function bookRecord({ id, name, description, chapters }) {
 		id,
 		name,
 		description,
-		parser: 16,
+		parser: 17,
 		chapters: chapters.map(({ content, ...listed }) => listed)
 	};
 }
@@ -6123,7 +6149,8 @@ function entryOf({ id, path, size, chapters, date, deletable }) {
 			...described.tags,
 			described.folder ?? ""
 		].join(" ")),
-		tagKeys: described.tags.map(fold)
+		tagKeys: described.tags.map(fold),
+		same: fold(described.title)
 	};
 }
 var byTitle = new Intl.Collator("vi", {
@@ -6138,11 +6165,41 @@ function shuffled(id, seed) {
 }
 var within = (value, [min, max] = [null, null]) => (min == null || value >= min) && (max == null || value <= max);
 var readAt = (read) => read?.updatedAt ? Date.parse(read.updatedAt) || 0 : 0;
+var books = /* @__PURE__ */ new WeakMap();
+function booksOf(entries) {
+	let made = books.get(entries);
+	if (made) return made;
+	let best = /* @__PURE__ */ new Map();
+	let versions = /* @__PURE__ */ new Map();
+	for (let entry of entries) {
+		versions.set(entry.same, (versions.get(entry.same) ?? 0) + 1);
+		let kept = best.get(entry.same);
+		if (!kept || entry.date > kept.date || entry.date === kept.date && entry.chapters > kept.chapters) best.set(entry.same, entry);
+	}
+	made = {
+		newest: [...best.values()],
+		versions
+	};
+	books.set(entries, made);
+	return made;
+}
+function readOf(entries, progress) {
+	let best = /* @__PURE__ */ new Map();
+	for (let entry of entries) {
+		let at = readAt(progress[entry.id]);
+		if (!at) continue;
+		let kept = best.get(entry.same);
+		if (!kept || at > readAt(progress[kept.id])) best.set(entry.same, entry);
+	}
+	return [...best.values()];
+}
 function findBooks(entries, progress, query = {}) {
 	let words = fold(query.q ?? "").split(/\s+/).filter(Boolean);
 	let tags = (query.tags ?? []).map(fold);
 	let sort = query.sort ?? "latest";
-	let found = entries.filter((entry) => words.every((word) => entry.words.includes(word)) && tags.every((tag) => entry.tagKeys.includes(tag)) && within(entry.size, query.size) && within(entry.chapters, query.chapters) && (sort !== "read" || readAt(progress[entry.id]) > 0));
+	let { newest, versions } = booksOf(entries);
+	let same = query.title != null ? fold(query.title) : null;
+	let found = (same != null ? entries.filter((entry) => entry.same === same) : query.every ? entries : sort === "read" ? readOf(entries, progress) : newest).filter((entry) => words.every((word) => entry.words.includes(word)) && tags.every((tag) => entry.tagKeys.includes(tag)) && within(entry.size, query.size) && within(entry.chapters, query.chapters) && (sort !== "read" || readAt(progress[entry.id]) > 0));
 	let seed = query.seed ?? 0;
 	let keys = {
 		latest: (e) => e.date,
@@ -6173,15 +6230,16 @@ function findBooks(entries, progress, query = {}) {
 	return {
 		total: found.length,
 		offset,
-		books: found.slice(offset, offset + limit).map(({ words: _words, tagKeys: _tagKeys, ...shown }) => ({
+		books: found.slice(offset, offset + limit).map(({ words: _words, tagKeys: _tagKeys, same: key, ...shown }) => ({
 			...shown,
-			...progress[shown.id] && { read: progress[shown.id] }
+			...progress[shown.id] && { read: progress[shown.id] },
+			...(versions.get(key) ?? 1) > 1 && { versions: versions.get(key) }
 		}))
 	};
 }
 function topTags(entries, limit = 40) {
 	let counted = /* @__PURE__ */ new Map();
-	for (let entry of entries) entry.tags.forEach((tag, k) => {
+	for (let entry of booksOf(entries).newest) entry.tags.forEach((tag, k) => {
 		let key = entry.tagKeys[k];
 		let tally = counted.get(key) ?? counted.set(key, {
 			count: 0,
@@ -6202,6 +6260,8 @@ function queryString(query) {
 	for (let tag of query.tags ?? []) params.append("tag", tag);
 	if (query.size) params.set("size", rangeText(query.size));
 	if (query.chapters) params.set("chapters", rangeText(query.chapters));
+	if (query.title != null) params.set("title", query.title);
+	if (query.every) params.set("every", "1");
 	for (let key of [
 		"sort",
 		"order",
@@ -6348,7 +6408,7 @@ async function browserBackend({ readBook }) {
 		},
 		async book(id) {
 			let book = await db.get("books", id);
-			if (!(!book || book.parser !== 16 || !book.chapters.some((c) => c.offset != null))) return book;
+			if (!(!book || book.parser !== 17 || !book.chapters.some((c) => c.offset != null))) return book;
 			console.info("Book read again:", {
 				id,
 				parser: book?.parser
@@ -11240,48 +11300,78 @@ function consequent_7(__anchor, { a: pattern_7, b: filtersOpen, c: __block, d: s
 function if_7({ a: pattern_7, b: filtersOpen, c: __block, d: store }) {
 	if (get(pattern_7).key === "found") return consequent_7;
 }
-var root_19 = template_el("small", ["class", "read"], " ");
-function consequent_8(__anchor, { a: pattern_8, b: readOf }) {
-	var small_4 = root_19();
+var root_19 = template(` · <button title="Every file of this book, the older ones too" class=link>`, 1, 2);
+function render_8(__prev) {
+	var __a = `${get(__prev._a).versions} files`;
+	if (__prev.a !== __a) {
+		set_text_content(__prev._b, __a, __prev.a);
+		__prev.a = __a;
+	}
+}
+function consequent_8(__anchor, { a: pattern_8, b: store, c: ask }) {
+	var fragment_2 = root_19();
+	var expression_15 = first_child_frag(fragment_2);
+	var button_9 = hydrating ? hydrate_next_sibling() : expression_15.nextSibling;
+	button_9.__click = () => ask({
+		title: get(pattern_8).title,
+		q: "",
+		tags: [],
+		size: void 0,
+		chapters: void 0,
+		sort: void 0
+	});
+	render$10(render_8, {
+		a: "",
+		_a: pattern_8,
+		_b: button_9
+	});
+	append(__anchor, fragment_2);
+}
+function if_8({ a: pattern_8, b: store, c: ask }) {
+	if (get(pattern_8).versions && store.finding.value?.query?.title == null) return consequent_8;
+}
+var root_20 = template_el("small", ["class", "read"], " ");
+function consequent_9(__anchor, { a: pattern_8, b: readOf }) {
+	var small_4 = root_20();
 	expression(hydrating ? hydrate_first_child() : small_4.firstChild, () => readOf(get(pattern_8)));
 	append(__anchor, small_4);
 }
-function if_8({ a: pattern_8, b: readOf }) {
-	if (get(pattern_8).read?.chapterCount) return consequent_8;
+function if_9({ a: pattern_8, b: readOf }) {
+	if (get(pattern_8).read?.chapterCount) return consequent_9;
 }
-var root_21 = template_el("button", ["class", "tag"], " ");
-var root_22 = template_el("button", ["class", "link delete"], "delete");
-function consequent_9(__anchor, { a: pattern_8, b: __block, c: store }) {
-	var button_10 = root_22();
-	button_10.__click = () => with_scope(__block, () => store.deleteBook(get(pattern_8).id));
-	append(__anchor, button_10);
+var root_22 = template_el("button", ["class", "tag"], " ");
+var root_23 = template_el("button", ["class", "link delete"], "delete");
+function consequent_10(__anchor, { a: pattern_8, b: __block, c: store }) {
+	var button_11 = root_23();
+	button_11.__click = () => with_scope(__block, () => store.deleteBook(get(pattern_8).id));
+	append(__anchor, button_11);
 }
-function if_9({ a: pattern_8, b: __block, c: store }) {
-	if (get(pattern_8).deletable) return consequent_9;
+function if_10({ a: pattern_8, b: __block, c: store }) {
+	if (get(pattern_8).deletable) return consequent_10;
 }
-var root_20 = template_el("span", ["class", "tags"], [null]);
-function render_8(__prev) {
-	var __a = if_9({
+var root_21 = template_el("span", ["class", "tags"], [null]);
+function render_9(__prev) {
+	var __a = if_10({
 		a: __prev._a,
 		b: __prev._b,
 		c: __prev._c
 	});
 	if (__prev.a !== __a) if_update(__prev._d, __prev.a = __a);
 }
-function consequent_10(__anchor, { a: pattern_8, b: withTag, c: __block, d: store }) {
-	var span_2 = root_20();
+function consequent_11(__anchor, { a: pattern_8, b: withTag, c: __block, d: store }) {
+	var span_2 = root_21();
 	for_block_keyed(hydrating ? hydrate_first_child() : span_2.firstChild, () => get(pattern_8).tags, (__anchor, pattern_9) => {
-		var button_9 = root_21();
-		button_9.__click = () => withTag(get(pattern_9));
-		expression(hydrating ? hydrate_first_child() : button_9.firstChild, () => get(pattern_9));
-		append(__anchor, button_9);
+		var button_10 = root_22();
+		button_10.__click = () => withTag(get(pattern_9));
+		expression(hydrating ? hydrate_first_child() : button_10.firstChild, () => get(pattern_9));
+		append(__anchor, button_10);
 	}, 0);
-	render$10(render_8, {
+	render$10(render_9, {
 		a: UNINITIALIZED,
 		_a: pattern_8,
 		_b: __block,
 		_c: store,
-		_d: if_static(hydrating ? hydrate_next_sibling() : append_into(span_2, true), if_9, 2, {
+		_d: if_static(hydrating ? hydrate_next_sibling() : append_into(span_2, true), if_10, 2, {
 			a: pattern_8,
 			b: __block,
 			c: store
@@ -11289,8 +11379,8 @@ function consequent_10(__anchor, { a: pattern_8, b: withTag, c: __block, d: stor
 	});
 	append(__anchor, span_2);
 }
-function if_10({ a: pattern_8, b: withTag, c: __block, d: store }) {
-	if (get(pattern_8).tags.length > 0 || get(pattern_8).deletable) return consequent_10;
+function if_11({ a: pattern_8, b: withTag, c: __block, d: store }) {
+	if (get(pattern_8).tags.length > 0 || get(pattern_8).deletable) return consequent_11;
 }
 var root_18 = template_el("li", null, [[
 	"a",
@@ -11299,68 +11389,74 @@ var root_18 = template_el("li", null, [[
 ], [
 	"small",
 	["class", "facts"],
-	" "
+	[null]
 ]]);
-function render_9(__prev) {
+function render_10(__prev) {
 	var __a = with_scope(__prev._a, () => __prev._b.router.route(bookRoute(__prev._c(get(__prev._d)))));
 	if (__prev.a !== __a) set_attribute(__prev._e, "href", __prev.a = __a);
 	var __b = if_8({
 		a: __prev._d,
-		b: __prev._f
+		b: __prev._b,
+		c: __prev._f
 	});
 	if (__prev.b !== __b) if_update(__prev._g, __prev.b = __b);
-	var __c = if_10({
+	var __c = if_9({
 		a: __prev._d,
-		b: __prev._h,
+		b: __prev._h
+	});
+	if (__prev.c !== __c) if_update(__prev._i, __prev.c = __c);
+	var __d = if_11({
+		a: __prev._d,
+		b: __prev._j,
 		c: __prev._a,
 		d: __prev._b
 	});
-	if (__prev.c !== __c) if_update(__prev._i, __prev.c = __c);
+	if (__prev.d !== __d) if_update(__prev._k, __prev.d = __d);
 }
-var root_23 = template_el("button", ["class", "more"], "Show more");
-function render_10(__prev) {
+var root_24 = template_el("button", ["class", "more"], "Show more");
+function render_11(__prev) {
 	__prev._a.disabled = __prev._b.finding.value?.busy;
 }
-function consequent_11(__anchor, { a: pattern_7, b: __block, c: store }) {
-	var button_11 = root_23();
-	button_11.__click = () => with_scope(__block, () => store.findMore());
-	render$10(render_10, {
-		_a: button_11,
+function consequent_12(__anchor, { a: pattern_7, b: __block, c: store }) {
+	var button_12 = root_24();
+	button_12.__click = () => with_scope(__block, () => store.findMore());
+	render$10(render_11, {
+		_a: button_12,
 		_b: store
 	});
-	append(__anchor, button_11);
+	append(__anchor, button_12);
 }
-function if_11({ a: pattern_7, b: __block, c: store }) {
-	if (get(pattern_7).more) return consequent_11;
+function if_12({ a: pattern_7, b: __block, c: store }) {
+	if (get(pattern_7).more) return consequent_12;
 }
-var root_24 = template_el("button", ["class", "link inside"]);
-function render_11(__prev) {
+var root_25 = template_el("button", ["class", "link inside"]);
+function render_12(__prev) {
 	var __a = `Search what the books say for “${with_scope(__prev._a, () => __prev._b.value.q?.trim())}”`;
 	if (__prev.a !== __a) {
 		set_text_content(__prev._c, __a, __prev.a);
 		__prev.a = __a;
 	}
 }
-function consequent_12(__anchor, { a: pattern_7, b: store, c: __block, d: asked }) {
-	var button_12 = root_24();
-	button_12.__click = () => with_scope(__block, () => store.searchLibrary(asked.value.q ?? ""));
-	render$10(render_11, {
+function consequent_13(__anchor, { a: pattern_7, b: store, c: __block, d: asked }) {
+	var button_13 = root_25();
+	button_13.__click = () => with_scope(__block, () => store.searchLibrary(asked.value.q ?? ""));
+	render$10(render_12, {
 		a: "",
 		_a: __block,
 		_b: asked,
-		_c: button_12
+		_c: button_13
 	});
-	append(__anchor, button_12);
+	append(__anchor, button_13);
 }
-function if_12({ a: pattern_7, b: store, c: __block, d: asked }) {
-	if (get(pattern_7).key === "found" && store.searching.value && with_scope(__block, () => asked.value.q?.trim())) return consequent_12;
+function if_13({ a: pattern_7, b: store, c: __block, d: asked }) {
+	if (get(pattern_7).key === "found" && store.searching.value && with_scope(__block, () => asked.value.q?.trim())) return consequent_13;
 }
 var root_14 = template_el("section", null, [[
 	"h2",
 	null,
 	[["span"]]
 ], ["ol", ["class", "books"]]]);
-function render_12(__prev) {
+function render_13(__prev) {
 	var __a = get(__prev._a).title;
 	if (__prev.a !== __a) {
 		set_text_content(__prev._b, __a, __prev.a);
@@ -11384,13 +11480,13 @@ function render_12(__prev) {
 		d: __prev._f
 	});
 	if (__prev.d !== __d) if_update(__prev._i, __prev.d = __d);
-	var __e = if_11({
+	var __e = if_12({
 		a: __prev._a,
 		b: __prev._e,
 		c: __prev._f
 	});
 	if (__prev.e !== __e) if_update(__prev._j, __prev.e = __e);
-	var __f = if_12({
+	var __f = if_13({
 		a: __prev._a,
 		b: __prev._f,
 		c: __prev._e,
@@ -11398,15 +11494,15 @@ function render_12(__prev) {
 	});
 	if (__prev.f !== __f) if_update(__prev._l, __prev.f = __f);
 }
-var root_26 = template_el("button", ["class", "tag"], [null, ["small"]]);
-function render_13(__prev) {
+var root_27 = template_el("button", ["class", "tag"], [null, ["small"]]);
+function render_14(__prev) {
 	var __a = ` ${get(__prev._a).count}`;
 	if (__prev.a !== __a) {
 		set_text_content(__prev._b, __a, __prev.a);
 		__prev.a = __a;
 	}
 }
-var root_25 = template_el("section", null, [[
+var root_26 = template_el("section", null, [[
 	"h2",
 	null,
 	[[
@@ -11415,31 +11511,31 @@ var root_25 = template_el("section", null, [[
 		"Tags"
 	]]
 ], ["div", ["class", "tags"]]]);
-function consequent_13(__anchor, { a: store, b: withTag }) {
-	var section_3 = root_25();
+function consequent_14(__anchor, { a: store, b: withTag }) {
+	var section_3 = root_26();
 	var h2_2 = hydrating ? hydrate_first_child() : section_3.firstChild;
 	for_block_keyed(hydrating ? hydrate_next_sibling() : h2_2.nextSibling, () => store.shelves.value?.tags ?? [], (__anchor, pattern_10) => {
-		var button_13 = root_26();
-		button_13.__click = () => withTag(get(pattern_10).tag);
-		var expression_18 = hydrating ? hydrate_first_child() : button_13.firstChild;
-		expression(expression_18, () => get(pattern_10).tag);
+		var button_14 = root_27();
+		button_14.__click = () => withTag(get(pattern_10).tag);
+		var expression_20 = hydrating ? hydrate_first_child() : button_14.firstChild;
+		expression(expression_20, () => get(pattern_10).tag);
 		item({
 			a: "",
 			_a: pattern_10,
-			_b: hydrating ? hydrate_next_sibling() : expression_18.nextSibling
+			_b: hydrating ? hydrate_next_sibling() : expression_20.nextSibling
 		});
-		append(__anchor, button_13);
-	}, 4, (pattern_10) => pattern_10.tag, void 0, void 0, render_13);
+		append(__anchor, button_14);
+	}, 4, (pattern_10) => pattern_10.tag, void 0, void 0, render_14);
 	append(__anchor, section_3);
 }
-function if_13({ a: store, b: withTag }) {
-	if (!store.finding.value && (store.shelves.value?.tags?.length ?? 0) > 0) return consequent_13;
+function if_14({ a: store, b: withTag }) {
+	if (!store.finding.value && (store.shelves.value?.tags?.length ?? 0) > 0) return consequent_14;
 }
 var root_12 = template(`<!><!><!>`, 1, 3);
-function render_14(__prev) {
+function render_15(__prev) {
 	var __a = if_4$1(__prev._a);
 	if (__prev.a !== __a) if_update(__prev._b, __prev.a = __a);
-	var __b = if_13({
+	var __b = if_14({
 		a: __prev._a,
 		b: __prev._c
 	});
@@ -11523,18 +11619,25 @@ function alternate$3(__anchor, { a: store, b: __block, c: sections, d: ask, e: f
 				a: void 0,
 				b: UNINITIALIZED,
 				c: UNINITIALIZED,
+				d: UNINITIALIZED,
 				_a: __block,
 				_b: store,
 				_c: placeOf,
 				_d: pattern_8,
 				_e: a_3,
-				_f: readOf,
-				_g: if_static(hydrating ? hydrate_next_sibling() : append_into(li_1), if_8, 2, {
+				_f: ask,
+				_g: if_static(hydrating ? hydrate_next_sibling() : append_into(small_3, true), if_8, 2, {
+					a: pattern_8,
+					b: store,
+					c: ask
+				}),
+				_h: readOf,
+				_i: if_static(hydrating ? hydrate_next_sibling() : append_into(li_1), if_9, 2, {
 					a: pattern_8,
 					b: readOf
 				}),
-				_h: withTag,
-				_i: if_static(hydrating ? hydrate_next_sibling() : append_into(li_1, true), if_10, 2, {
+				_j: withTag,
+				_k: if_static(hydrating ? hydrate_next_sibling() : append_into(li_1, true), if_11, 2, {
 					a: pattern_8,
 					b: withTag,
 					c: __block,
@@ -11542,7 +11645,7 @@ function alternate$3(__anchor, { a: store, b: __block, c: sections, d: ask, e: f
 				})
 			});
 			append(__anchor, li_1);
-		}, 4, (pattern_8) => pattern_8.id, void 0, void 0, render_9);
+		}, 4, (pattern_8) => pattern_8.id, void 0, void 0, render_10);
 		item({
 			a: "",
 			b: UNINITIALIZED,
@@ -11559,13 +11662,13 @@ function alternate$3(__anchor, { a: store, b: __block, c: sections, d: ask, e: f
 			_g: ifs_5,
 			_h: filtersOpen,
 			_i: ifs_6,
-			_j: if_static(hydrating ? hydrate_next_sibling() : append_into(section_2), if_11, 2, {
+			_j: if_static(hydrating ? hydrate_next_sibling() : append_into(section_2), if_12, 2, {
 				a: pattern_7,
 				b: __block,
 				c: store
 			}),
 			_k: asked,
-			_l: if_static(hydrating ? hydrate_next_sibling() : append_into(section_2, true), if_12, 2, {
+			_l: if_static(hydrating ? hydrate_next_sibling() : append_into(section_2, true), if_13, 2, {
 				a: pattern_7,
 				b: store,
 				c: __block,
@@ -11573,25 +11676,25 @@ function alternate$3(__anchor, { a: store, b: __block, c: sections, d: ask, e: f
 			})
 		});
 		append(__anchor, section_2);
-	}, 0, (pattern_7) => pattern_7.key, void 0, void 0, render_12);
-	render$10(render_14, {
+	}, 0, (pattern_7) => pattern_7.key, void 0, void 0, render_13);
+	render$10(render_15, {
 		a: UNINITIALIZED,
 		b: UNINITIALIZED,
 		_a: store,
 		_b: ifs_3,
 		_c: withTag,
-		_d: if_static(hydrating ? hydrate_next_sibling() : node_7.nextSibling, if_13, 0, {
+		_d: if_static(hydrating ? hydrate_next_sibling() : node_7.nextSibling, if_14, 0, {
 			a: store,
 			b: withTag
 		})
 	});
 	append(__anchor, fragment_1);
 }
-function if_14({ a: store, b: __block, c: sections, d: ask, e: filtersOpen, f: open, g: factsOf, h: readOf, i: withTag, j: placeOf, k: asked }) {
+function if_15({ a: store, b: __block, c: sections, d: ask, e: filtersOpen, f: open, g: factsOf, h: readOf, i: withTag, j: placeOf, k: asked }) {
 	if (store.found.value.q) return consequent_3$2;
 	else return alternate$3;
 }
-var root_27 = template_el("footer", null, [[
+var root_28 = template_el("footer", null, [[
 	"small",
 	null,
 	" "
@@ -11605,23 +11708,23 @@ var root_27 = template_el("footer", null, [[
 	],
 	"Rescan"
 ]]);
-function render_15(__prev) {
+function render_16(__prev) {
 	__prev._a.disabled = __prev._b.status.value?.scan?.running;
 }
-function consequent_14(__anchor, { a: said, b: __block, c: store }) {
-	var footer = root_27();
+function consequent_15(__anchor, { a: said, b: __block, c: store }) {
+	var footer = root_28();
 	var small_6 = hydrating ? hydrate_first_child() : footer.firstChild;
 	expression(hydrating ? hydrate_first_child() : small_6.firstChild, () => said.value);
-	var button_14 = hydrating ? hydrate_next_sibling() : small_6.nextSibling;
-	button_14.__click = () => with_scope(__block, () => store.rescan());
-	render$10(render_15, {
-		_a: button_14,
+	var button_15 = hydrating ? hydrate_next_sibling() : small_6.nextSibling;
+	button_15.__click = () => with_scope(__block, () => store.rescan());
+	render$10(render_16, {
+		_a: button_15,
 		_b: store
 	});
 	append(__anchor, footer);
 }
-function if_15({ a: said, b: __block, c: store }) {
-	if (said.value) return consequent_14;
+function if_16({ a: said, b: __block, c: store }) {
+	if (said.value) return consequent_15;
 }
 var root$7 = template_el("div", ["class", "library"], [[
 	"div",
@@ -11637,7 +11740,7 @@ var root$7 = template_el("div", ["class", "library"], [[
 		"Filters"
 	]]
 ]], 1);
-function render_16(__prev) {
+function render_17(__prev) {
 	var __filtersOpen_value = __prev._a.value;
 	var __a = __prev._b.value.q ?? "";
 	if (__prev.a !== __a) set_value(__prev._c, __prev.a = __a);
@@ -11657,7 +11760,7 @@ function render_16(__prev) {
 		b: __prev._f
 	});
 	if (__prev.e !== __e) if_update(__prev._i, __prev.e = __e);
-	var __f = if_14({
+	var __f = if_15({
 		a: __prev._j,
 		b: __prev._g,
 		c: __prev._k,
@@ -11671,7 +11774,7 @@ function render_16(__prev) {
 		k: __prev._b
 	});
 	if (__prev.f !== __f) if_update(__prev._q, __prev.f = __f);
-	var __g = if_15({
+	var __g = if_16({
 		a: __prev._r,
 		b: __prev._g,
 		c: __prev._j
@@ -11689,18 +11792,22 @@ function Library_render(__anchor, __block) {
 			...change
 		};
 		if ("q" in change) with_scope(__block, () => store.searchLibrary(""));
-		let something = with_scope(__block, () => query.q?.trim()) || query.tags?.length || query.size || query.chapters || query.sort;
+		if (!("title" in change)) delete query.title;
+		let something = with_scope(__block, () => query.q?.trim()) || query.tags?.length || query.size || query.chapters || query.sort || query.title != null;
 		with_scope(__block, () => store.find(something ? query : null, wait));
 	};
 	const withTag = (tag) => ask({ tags: [.../* @__PURE__ */ new Set([...asked.value.tags ?? [], tag])] });
 	const sections = track(() => {
 		let now = store.finding.value;
-		if (now) return [{
-			key: "found",
-			title: now.busy && !now.books.length ? "Looking…" : `${with_scope(__block, () => now.total.toLocaleString())} ${now.total === 1 ? "book" : "books"}`,
-			books: now.books,
-			more: now.books.length < now.total
-		}];
+		if (now) {
+			let what = now.query.title != null ? now.total === 1 ? "file" : "files" : now.total === 1 ? "book" : "books";
+			return [{
+				key: "found",
+				title: now.busy && !now.books.length ? "Looking…" : `${with_scope(__block, () => now.total.toLocaleString())} ${what}`,
+				books: now.books,
+				more: now.books.length < now.total
+			}];
+		}
 		let front = store.shelves.value;
 		if (!front) return [];
 		let shown = [
@@ -11734,7 +11841,8 @@ function Library_render(__anchor, __block) {
 		formatSize(book.size),
 		`${book.chapters.toLocaleString()} ${book.chapters === 1 ? "chapter" : "chapters"}`,
 		dayOf(book.date),
-		book.folder
+		book.folder,
+		store.finding.value?.query?.title != null && book.note
 	].filter(Boolean).join(" · "));
 	const readOf = (book) => book.read?.chapterCount ? `Chapter ${book.read.chapterIndex} of ${book.read.chapterCount}, ${with_scope(__block, () => formatDate(book.read.updatedAt)) ?? ""}` : "";
 	const open = (event, book) => {
@@ -11758,7 +11866,7 @@ function Library_render(__anchor, __block) {
 	button.__click = () => {
 		filtersOpen.value = !filtersOpen.value;
 	};
-	render$10(render_16, {
+	render$10(render_17, {
 		a: void 0,
 		b: void 0,
 		c: UNINITIALIZED,
@@ -11790,7 +11898,7 @@ function Library_render(__anchor, __block) {
 		_n: readOf,
 		_o: withTag,
 		_p: placeOf,
-		_q: if_static(hydrating ? hydrate_next_sibling() : append_into(div), if_14, 0, {
+		_q: if_static(hydrating ? hydrate_next_sibling() : append_into(div), if_15, 0, {
 			a: store,
 			b: __block,
 			c: sections,
@@ -11804,7 +11912,7 @@ function Library_render(__anchor, __block) {
 			k: asked
 		}),
 		_r: said,
-		_s: if_static(hydrating ? hydrate_next_sibling() : append_into(div, true), if_15, 0, {
+		_s: if_static(hydrating ? hydrate_next_sibling() : append_into(div, true), if_16, 0, {
 			a: said,
 			b: __block,
 			c: store
@@ -13726,6 +13834,9 @@ main {
   .facts {
     font-size: 0.75em;
     opacity: 0.7;
+    .link {
+      font-size: inherit;
+    }
   }
   .read {
     font-size: 0.75em;

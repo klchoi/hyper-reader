@@ -35,7 +35,8 @@ describe('the server', () => {
     return { status: response.status, answer };
   };
   type Shelved = { id: string; title: string; tags: string[]; note?: string; folder?: string; size: number; chapters: number; deletable: boolean };
-  let books = async (query = ''): Promise<Shelved[]> => (await call('GET', `books?limit=100${query}`)).answer.books;
+  // (every file: the two copies of the book in the library, which it shows as one, are the same)
+  let books = async (query = ''): Promise<Shelved[]> => (await call('GET', `books?every=1&limit=100${query}`)).answer.books;
   let bookNamed = async (title: string) => (await books()).find(book => book.title === title)!;
   // until the scan is done and every book indexed
   let settled = async () => {
@@ -100,10 +101,14 @@ describe('the server', () => {
     assert.deepEqual((await asked('q=mot')).books.map((book: Shelved) => book.title), ['Một']);
     assert.deepEqual((await asked('tag=ntl&tag=k%E1%BA%BFt%20th%C3%BAc')).total, 0);
     let page = await asked('sort=title&limit=2&offset=1');
-    assert.deepEqual([page.total, page.offset, page.books.length], [4, 1, 2]);
+    assert.deepEqual([page.total, page.offset, page.books.length], [3, 1, 2]);
+    // the two files of `Sách thử` are one book
+    let twice = (await asked('q=sach%20thu')).books;
+    assert.deepEqual(twice.map((book: Shelved & { versions?: number }) => [book.title, book.versions]), [['Sách thử', 2]]);
+    assert.equal((await asked('title=S%C3%A1ch%20th%E1%BB%AD')).total, 2);
     assert.deepEqual((await asked('sort=random&seed=7')).books.map((book: Shelved) => book.id), (await asked('sort=random&seed=7')).books.map((book: Shelved) => book.id));
     let largest = Math.max(...(await books()).map(book => book.size));
-    assert.deepEqual([(await asked(`size=${largest + 1}-`)).total, (await asked(`size=-${largest}`)).total], [0, 4]);
+    assert.deepEqual([(await asked(`size=${largest + 1}-`)).total, (await asked(`size=-${largest}`)).total], [0, 3]);
     let { answer: tags } = await call('GET', 'tags?limit=1');
     // (as either book writes it)
     assert.deepEqual(tags.map((t: { tag: string; count: number }) => [t.tag.toLowerCase(), t.count]), [['hậu cung', 2]]);

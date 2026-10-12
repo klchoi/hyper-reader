@@ -4,6 +4,8 @@
 //   tags      tags the book has, all of them
 //   size      [min, max] bytes, either left out for none
 //   chapters  [min, max] chapters
+//   title     every file of the book of this title, the older ones too (see below)
+//   every     every file of every book
 //   sort      latest (the file's time) | read (the books being read, the last read first) |
 //             title | size | chapters | random (in an order of `seed`, the same page after page);
 //             left out, the latest, or with words asked, the titles that say them as written first
@@ -12,6 +14,10 @@
 // The server answers it for its thousands of books (server/library.ts), the browser's backend for
 // the few it keeps (backends.ts): the page only ever holds the page it shows.
 //
+// A book kept as it grew is a file for every time it was kept (`... (1-30 chương)`, `(1-41
+// chương)`, `(1-66 chương)`): the library shows one book to a title, its newest file (among the
+// books being read, the file read), saying how many files there are of it.
+//
 // A file's name says what the book is: `Đổi yêu gia tộc (1-416 chương) (np, bách hợp, mẹ con)`
 // is the title, then in brackets its length (a note) and its tags. `kết thúc` (finished) is a tag
 // wherever it is said.
@@ -19,7 +25,7 @@
 export type Progress = { offset?: number; chapterId?: string; chapterIndex?: number; chapterCount?: number; updatedAt?: string };
 export type Sort = 'latest' | 'read' | 'title' | 'size' | 'chapters' | 'random';
 export type Query = {
-  q?: string; tags?: string[]; size?: Range; chapters?: Range;
+  q?: string; tags?: string[]; size?: Range; chapters?: Range; title?: string; every?: boolean;
   sort?: Sort; order?: 'asc' | 'desc'; seed?: number; offset?: number; limit?: number;
 };
 export type Range = [min: number | null, max: number | null];
@@ -27,11 +33,13 @@ export type Range = [min: number | null, max: number | null];
 export type Shelved = {
   id: string; title: string; tags: string[]; note?: string; folder?: string;
   size: number; chapters: number; date: number; deletable: boolean; read?: Progress;
+  // how many files there are of the book, when more than one
+  versions?: number;
 };
 export type Listing = { total: number; offset: number; books: Shelved[] };
 export type TagCount = { tag: string; count: number };
 // a book in the catalog: what it shows, and what a search looks in (folded)
-export type Entry = Omit<Shelved, 'read'> & { words: string; tagKeys: string[] };
+export type Entry = Omit<Shelved, 'read' | 'versions'> & { words: string; tagKeys: string[]; same: string };
 
 export const PAGE = 30;
 const MOST = 100;
@@ -95,6 +103,7 @@ export function entryOf({ id, path, size, chapters, date, deletable }: { id: str
     id, ...described, size, chapters, date, deletable,
     words: fold([described.title, ...described.tags, described.folder ?? ''].join(' ')),
     tagKeys: described.tags.map(fold),
+    same: fold(described.title),
   };
 }
 
@@ -111,11 +120,46 @@ function shuffled(id: string, seed: number) {
 const within = (value: number, [min, max]: Range = [null, null]) => (min == null || value >= min) && (max == null || value <= max);
 const readAt = (read?: Progress) => (read?.updatedAt ? Date.parse(read.updatedAt) || 0 : 0);
 
+// one book to a title: its newest file (by time, then by chapters), and how many files it has.
+// Made once for a catalog, which is made again when a book comes, changes or goes
+const books = new WeakMap<Entry[], { newest: Entry[]; versions: Map<string, number> }>();
+function booksOf(entries: Entry[]) {
+  let made = books.get(entries);
+  if (made) return made;
+  let best = new Map<string, Entry>();
+  let versions = new Map<string, number>();
+  for (let entry of entries) {
+    versions.set(entry.same, (versions.get(entry.same) ?? 0) + 1);
+    let kept = best.get(entry.same);
+    if (!kept || entry.date > kept.date || (entry.date === kept.date && entry.chapters > kept.chapters)) best.set(entry.same, entry);
+  }
+  made = { newest: [...best.values()], versions };
+  books.set(entries, made);
+  return made;
+}
+// the books being read, one to a title: the file read last
+function readOf(entries: Entry[], progress: Record<string, Progress>) {
+  let best = new Map<string, Entry>();
+  for (let entry of entries) {
+    let at = readAt(progress[entry.id]);
+    if (!at) continue;
+    let kept = best.get(entry.same);
+    if (!kept || at > readAt(progress[kept.id])) best.set(entry.same, entry);
+  }
+  return [...best.values()];
+}
+
 export function findBooks(entries: Entry[], progress: Record<string, Progress>, query: Query = {}): Listing {
   let words = fold(query.q ?? '').split(/\s+/).filter(Boolean);
   let tags = (query.tags ?? []).map(fold);
   let sort = query.sort ?? 'latest';
-  let found = entries.filter(entry => words.every(word => entry.words.includes(word))
+  let { newest, versions } = booksOf(entries);
+  let same = query.title != null ? fold(query.title) : null;
+  let pool = same != null ? entries.filter(entry => entry.same === same)
+    : query.every ? entries
+    : sort === 'read' ? readOf(entries, progress)
+    : newest;
+  let found = pool.filter(entry => words.every(word => entry.words.includes(word))
     && tags.every(tag => entry.tagKeys.includes(tag))
     && within(entry.size, query.size) && within(entry.chapters, query.chapters)
     && (sort !== 'read' || readAt(progress[entry.id]) > 0));
@@ -152,14 +196,18 @@ export function findBooks(entries: Entry[], progress: Record<string, Progress>, 
   return {
     total: found.length,
     offset,
-    books: found.slice(offset, offset + limit).map(({ words: _words, tagKeys: _tagKeys, ...shown }) => ({ ...shown, ...(progress[shown.id] && { read: progress[shown.id] }) })),
+    books: found.slice(offset, offset + limit).map(({ words: _words, tagKeys: _tagKeys, same: key, ...shown }) => ({
+      ...shown,
+      ...(progress[shown.id] && { read: progress[shown.id] }),
+      ...((versions.get(key) ?? 1) > 1 && { versions: versions.get(key) }),
+    })),
   };
 }
 
-// the tags most books have, each as it is written most often
+// the tags most books have (a book of many files counted once), each as it is written most often
 export function topTags(entries: Entry[], limit = 40): TagCount[] {
   let counted = new Map<string, { count: number; spellings: Map<string, number> }>();
-  for (let entry of entries) {
+  for (let entry of booksOf(entries).newest) {
     entry.tags.forEach((tag, k) => {
       let key = entry.tagKeys[k];
       let tally = counted.get(key) ?? counted.set(key, { count: 0, spellings: new Map() }).get(key)!;
@@ -187,6 +235,8 @@ export function queryString(query: Query) {
   for (let tag of query.tags ?? []) params.append('tag', tag);
   if (query.size) params.set('size', rangeText(query.size));
   if (query.chapters) params.set('chapters', rangeText(query.chapters));
+  if (query.title != null) params.set('title', query.title);
+  if (query.every) params.set('every', '1');
   for (let key of ['sort', 'order', 'seed', 'offset', 'limit'] as const) {
     if (query[key] != null) params.set(key, String(query[key]));
   }
@@ -201,6 +251,8 @@ export function queryOf(params: URLSearchParams): Query {
     tags: params.getAll('tag').filter(Boolean),
     size: rangeOf(params.get('size')),
     chapters: rangeOf(params.get('chapters')),
+    title: params.get('title') ?? undefined,
+    every: params.get('every') === '1' || undefined,
     sort: sort && SORTS.includes(sort) ? sort : undefined,
     order: order === 'asc' || order === 'desc' ? order : undefined,
     seed: number('seed'),

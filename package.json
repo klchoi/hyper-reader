@@ -7,7 +7,7 @@
     "test": "node --disable-warning=ExperimentalWarning --test",
     "check:books": "node tools/check-books.ts",
     "lint": "oxlint --deny-warnings src server test tools vite.config.ts",
-    "build": "vite build && node -e \"require('node:fs').copyFileSync('dist/hyper-reader.html', 'hyper-reader.html')\"",
+    "build": "vite build && node -e \"require('node:fs').copyFileSync('dist/index.html', 'hyper-reader.html')\"",
     "dev": "vite",
     "typecheck": "tsrx-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },

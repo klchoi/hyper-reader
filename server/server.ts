@@ -6,7 +6,7 @@
 // (src/parser.ts), on threads of their own (readers.ts), and their full text indexed for search
 // behind them (indexer.ts):
 //
-//   node server/server.ts [--port 8080] [--data <folder>] [--library [name=]<folder>]...
+//   node server/server.ts [--port 8080] [--host 127.0.0.1] [--data <folder>] [--library [name=]<folder>]...
 //
 // A library is known by its name (the folder's own name if none is given), so a book keeps its
 // id, and where it was left, wherever the folder is mounted. The libraries are scanned when the
@@ -14,7 +14,8 @@
 //
 // It answers on this computer only (127.0.0.1): it has no logins, and what it keeps is a private
 // library. So it answers only what is asked of it by this computer's name, and changes nothing
-// for a page of another site (see `foreign`).
+// for a page of another site (see `foreign`). In a container it listens on every address of the
+// container (`--host 0.0.0.0`), and the port is published to this computer only (compose.yaml).
 import http from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import fs from 'node:fs/promises';
@@ -156,14 +157,16 @@ function librariesOf(args: string[]) {
 }
 
 if(import.meta.main) {
-  let args = process.argv.slice(2);
+  // `--port 8080` or `--port=8080`
+  let args = process.argv.slice(2).flatMap(arg => /^--[\w-]+=/.test(arg) ? [arg.slice(0, arg.indexOf('=')), arg.slice(arg.indexOf('=') + 1)] : [arg]);
   let option = (name: string, fallback: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
   let port = Number(option('--port', '8080'));
+  let host = option('--host', '127.0.0.1');
   let data = path.resolve(option('--data', path.join(import.meta.dirname, '..', 'data')));
   let libraries = librariesOf(args);
   let server = createServer({ data, libraries });
-  server.listen(port, '127.0.0.1', () => {
-    console.log(`hyper-reader on http://127.0.0.1:${port}/, keeping books in ${data}`);
+  server.listen(port, host, () => {
+    console.log(`hyper-reader on http://${host}:${port}/, keeping books in ${data}`);
     for(let { name, dir } of libraries) console.log(`library ${name}: ${dir}`);
     // what came, changed or went while the server was not running
     server.library.scan();

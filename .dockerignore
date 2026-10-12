@@ -1,0 +1,4 @@
+# the image takes only the dependencies' lists (see Dockerfile)
+*
+!package.json
+!package-lock.json

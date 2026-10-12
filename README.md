@@ -42,16 +42,38 @@ server, and the other way round.
 
 ```
 npm install
-npm run build            src/ into one file: dist/hyper-reader.html, put in place as hyper-reader.html
-npm run dev              src/ served as it changes (http://localhost:5173/hyper-reader.html), the
-                         books left to the server (npm start)
+npm run build            src/ into one file: dist/index.html, put in place as hyper-reader.html
+npm run dev              src/ served as it changes (http://localhost:5173/), the books left to
+                         the server (npm start)
 ```
 
 The built page holds everything it needs, its libraries too, so it needs no network.
 
+### In containers, with nothing to restart
+
+```
+LIBRARY=/path/to/books docker compose up       then http://localhost:5173/
+```
+
+`compose.yaml` runs the working copy, mounted into two containers, so an edit on this machine
+is taken up where it is:
+
+- `web`, Vite: a change to src/ reaches the page open in the browser as you save it (styles and
+  components in place, without a reload)
+- `api`, the server under `node --watch`: a change to server/ or src/ (the parser) starts it
+  again, in a second; the page keeps what it shows
+
+The books of `LIBRARY` (it may go in `.env`) are mounted read-only, as the library `books`; what
+the server keeps is in the volume `data`. Both answer on this computer only (127.0.0.1). The
+dependencies are installed in the image for Linux, in a volume of their own (the ones of this
+machine stay out of it), and again when `package-lock.json` changes, the next time the
+containers start. `docker compose down -v` leaves nothing behind but the image. Both are told of an edit by the
+mount (OrbStack and Docker Desktop tell); where one does not, `POLL=1 docker compose up` has
+Vite look for changes, and the server is started again with `docker compose restart api`.
+
 ## What is in src/
 
-- `hyper-reader.html`, `styles.css` the page and its styles.
+- `index.html`, `styles.css` the page and its styles (built into `hyper-reader.html`).
 - `parser.ts` the chapter parser. It touches nothing of the page and nothing of node, so the
   page, its worker, and node (the tests, the tools, the server) all run it as it is.
 - `book.ts` what a book is (`Book`) and what is kept of it (`bookRecord`, `PARSER_VERSION`).

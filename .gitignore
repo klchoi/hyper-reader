@@ -4,3 +4,7 @@ node_modules/
 # what the server keeps of a private library
 data/
 dist/
+
+# a folder of books for the containers (see compose.yaml), and where it is set
+library/
+.env

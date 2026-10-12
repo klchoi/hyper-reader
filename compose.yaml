@@ -1,0 +1,72 @@
+# For working on the app, with nothing to restart: the page from Vite, which updates it in the
+# browser as src/ changes, and the server from node --watch, which starts it again as server/
+# or src/ changes, both run from this working copy, mounted into the containers.
+#
+#   LIBRARY=/path/to/books docker compose up        then http://localhost:5173/
+#
+# LIBRARY (it may go in .env) is the folder of books, mounted read-only: the server reads them
+# where they are. What it keeps is in the volume `data`. Both ports answer on this computer
+# only. A change to package-lock.json is installed when the containers next start.
+name: hyper-reader
+
+x-app: &app
+  build: .
+  image: hyper-reader-dev
+  init: true
+  working_dir: /app
+  volumes:
+    - .:/app
+    - node_modules:/app/node_modules
+
+services:
+  # the dependencies, installed again when package-lock.json is not the one they were installed by
+  deps:
+    <<: *app
+    command:
+      - sh
+      - -c
+      - >-
+        sum=$$(sha1sum package-lock.json);
+        [ "$$sum" = "$$(cat node_modules/.lock-sum 2>/dev/null)" ]
+        || { npm install --no-audit --no-fund && echo "$$sum" > node_modules/.lock-sum; }
+
+  # the server: started again on a change to what it runs (its own code, and the parser in src/)
+  api:
+    <<: *app
+    command:
+      - node
+      - --disable-warning=ExperimentalWarning
+      - --watch-path=server
+      - --watch-path=src
+      - server/server.ts
+      - --host=0.0.0.0
+      - --data=/data
+      - --library=books=/books
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - data:/data
+      - ${LIBRARY:-./library}:/books:ro
+    ports:
+      - 127.0.0.1:8080:8080
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  # the page, as src/ is now, its books asked of the server
+  web:
+    <<: *app
+    command: [npx, vite, --host=0.0.0.0, --port=5173, --strictPort]
+    environment:
+      API: http://api:8080
+      # POLL=1: look for changes, where the mount does not tell of them
+      POLL: ${POLL:-}
+    ports:
+      - 127.0.0.1:5173:5173
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+volumes:
+  node_modules:
+  data:

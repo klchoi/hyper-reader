@@ -168,6 +168,15 @@ describe('parts, ranges and extras', () => {
     assert.deepEqual(parts(chapters), [undefined, ...[1, 2, 3, 4].map(k => `Chương 10: Gặp gỡ > (${k}/4)`), ...[1, 2, 3].map(k => `Chương 11: Chia ly > (${k}/3)`), undefined]);
     assert.equal(titles(chapters)[1], 'Chương 10: Gặp gỡ (1)');
   });
+  it('keeps a part on its own line after a line that ends in `:.`, and before one that begins `...`', () => {
+    let text = book(`Chương 3:, Tính ngược (1)\n\n${story(6)}`, `${story(5, 1)} Nàng nói:.`, `\tChương 3:, Tính ngược (2)`, `\t... ${story(6, 2)}`, `Chương 4: Sau\n\n${story(6)}`);
+    assert.deepEqual(parts(real(parse(text))), ['Chương 3: Tính ngược > (1/2)', 'Chương 3: Tính ngược > (2/2)', undefined]);
+  });
+  it('takes a range of chapters in front of the first of them for no part of it', () => {
+    let text = book(`Chương 50: Trước\n\n${story(30)}`, '51-100', `Thứ 51 chương công viên (3)\n\n${story(30, 1)}`, `Chương 52: Sau\n\n${story(30, 2)}`, `Chương 53: Nữa\n\n${story(30, 3)}`);
+    let chapters = real(parse(text));
+    assert.deepEqual(titles(chapters), ['Chương 50: Trước', 'Chương 51: Công viên (3)', 'Chương 52: Sau', 'Chương 53: Nữa']);
+  });
   it('takes a chapter with the title of the parts after it for the first of them', () => {
     let text = book([`Chương 12: Trước\n\n${story(6)}`, `Chương 13: Yoga\n\n${story(6, 1)}`, `Chương 13: Yoga (trung)\n\n${story(6, 2)}`, `Chương 13: Yoga (hạ)\n\n${story(6, 3)}`, `Chương 14: Đi\n\n${story(6, 4)}`]);
     assert.deepEqual(parts(real(parse(text))), [undefined, 'Chương 13: Yoga > (thượng)', 'Chương 13: Yoga > (trung)', 'Chương 13: Yoga > (hạ)', undefined]);

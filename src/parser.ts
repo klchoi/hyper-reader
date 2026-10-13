@@ -10,10 +10,13 @@ export function normalizeFileContent(source: string) {
   text = text.replace(/(.+)/g, (s) => s.trim());
   text = text.replace(/^'([^']+)'$/gm, '"$1"');
   text = text.replace(/(\d)\s*(\.)\s*(\d)/gm, '$1$2$3');
-  text = text.replace(/\s+([.,;:?!\]】)])/gm, '$1');
-  text = text.replace(/([([【])\s+/gm, '$1');
+  // (spaces in a line only: the line before a heading may end in `:.`, a line may begin with
+  // `...`, and the heading is no part of either)
+  text = text.replace(/[^\S\n]+([.,;:?!\]】)])/gm, '$1');
+  text = text.replace(/([([【])[^\S\n]+/gm, '$1');
   text = text.replace(/([:—]{2,})/gm, c => c.slice(0, 1));
-  text = text.replace(/(:)[^\s\w]+\s*/gm, '$1 ');
+  text = text.replace(/(:)[^\s\w]+$/gm, '$1');
+  text = text.replace(/(:)[^\s\w]+[^\S\n]*/gm, '$1 ');
   text = text.replace(/^\s*"\s+|\s+"\s*$/gm, '"');
   //"QQ Group 712797052"
   text = text.replace(/\s?"?QQ Group \d+"?/gu, '');
@@ -870,7 +873,7 @@ type Reached = {
   n: number | null; half: number | null; ended: boolean; carry: number;
 };
 const reached = (node: Candidate, fields: Partial<Reached> = {}): Reached => ({
-  book: node.bookNum ?? 0, word: node.bookType, kind: null, name: node.bookName, extra: !!node.extra, n: node.span ?? node.n ?? null, half: null, ended: false, carry: 0, ...fields,
+  book: node.bookNum ?? 0, word: node.bookType, kind: null, name: node.bookName, extra: !!node.extra, n: node.span ?? node.n ?? null, half: node.half ?? null, ended: false, carry: 0, ...fields,
 });
 
 // The best path through the headings, as a list of { i, joined, state }: the heading's place
@@ -918,8 +921,15 @@ function chooseHeadings(nodes: Candidate[], credit: Record<string, number> = {},
         if(s.ended || (node.extra && !s.extra)) continue;
         if(book != null && s.book !== 0 && book !== s.book) continue;
         if(d === 0) {
-          // the next part of the same chapter, or the same heading again
-          if(node.half != null && (s.half == null || node.half > s.half)) go(j, TUNING.reward.next, { ...s, half: node.half });
+          // the next part of the same chapter, or the same heading again. A heading with no part
+          // goes on in parts with its title (`Na Trát`, then `Na Trát (2)`), or where one of the
+          // two has none (`Thứ 13 chương tam đối`, then `Chương 13: (thượng)`; `Chương 45`, then
+          // `Chương 45: Sơn thủy hành (thượng)`): a range of chapters in front of the first
+          // (`101-150`, then `Chương 101: Nhập học (1)`) is no part of it
+          let stem = (title: string) => title.replace(/\s*[(（][^()（）]*[)）]\s*$/u, '').toLowerCase();
+          let [ours, theirs] = [stem(node.title), stem(nodes[j].title)];
+          let goesOn = s.half == null ? !ours || !theirs || ours === theirs : node.half! > s.half;
+          if(node.half != null && goesOn) go(j, TUNING.reward.next, { ...s, half: node.half });
           else if(apart(i, j) <= TUNING.path.closeLines && (s.half == null || node.half === s.half)) go(j, TUNING.reward.repeat, { ...s }, true);
         } else {
           go(j, TUNING.reward.next - TUNING.reward.gap * (d - 1), { ...s, n: node.span ?? n, book: book ?? s.book, word: node.bookType ?? s.word, name: book != null ? null : s.name, extra: s.extra || !!node.extra, half: node.half ?? null });

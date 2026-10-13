@@ -64,7 +64,7 @@ export function chapterTitle({ type = 'Chương', number, part, title, text }: H
   let extra = isExtra(text) && !isExtra(title) && !isExtra(type) ? 'Phiên ngoại' : undefined;
   let label = [extra, number != null && `${type} ${number}`].filter(Boolean).join(' ');
   let named = [label, title.replace(/./, c => c.toUpperCase())].filter(Boolean).join(': ');
-  let shown = part && !title.replace(/（/g, '(').replace(/）/g, ')').includes(`(${part.text})`) ? part : null;
+  let shown = part && !title.replace(/[(（]\s*/g, '(').replace(/\s*[)）]/g, ')').includes(`(${part.text})`) ? part : null;
   let full = [shown?.leading && `${shown.text}:`, named, shown && !shown.leading && `(${shown.text})`].filter(Boolean).join(' ');
   return full || `${type} ${ordinal + 1}`;
 }
@@ -686,7 +686,7 @@ function partOf(title: string) {
     let value = valueOfPart(alone[1].toLowerCase());
     if(value) return { half: value, halfText: alone[1].toLowerCase(), title: '' };
   }
-  let ending = /\s*[(（](thượng|trung|hạ|\d{1,2})[)）]$/iu.exec(title);
+  let ending = /\s*[(（]\s*(thượng|trung|hạ|\d{1,2})\s*[)）]$/iu.exec(title);
   let value = ending && valueOfPart(ending[1].toLowerCase());
   if(value) return { half: value, halfText: ending![1].toLowerCase(), title };
   return null;

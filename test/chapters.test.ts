@@ -162,6 +162,12 @@ describe('parts, ranges and extras', () => {
     assert.deepEqual(parts(chapters), [undefined, 'Chương 2: Gặp gỡ > (1/2)', 'Chương 2: Gặp gỡ > (2/2)', 'Chương 3 > (1/2)', 'Chương 3 > (2/2)', undefined]);
     assert.deepEqual(titles(chapters).slice(1, 5), ['Chương 2: Gặp gỡ (1)', 'Chương 2: Gặp gỡ （2）', 'Chương 3 (1)', 'Chương 3 (2)']);
   });
+  it('reads many parts under the one number, a space in their brackets or not', () => {
+    let text = book(`Chương 9: Mở\n\n${story(6)}`, [1, 2, 3, 4].map(k => `Chương 10: Gặp gỡ ( ${k} )\n\n${story(6, k)}`), [1, 2, 3].map(k => `Chương 11: Chia ly (${k})\n\n${story(6, k)}`), `Chương 12: Đi\n\n${story(6)}`);
+    let chapters = real(parse(text));
+    assert.deepEqual(parts(chapters), [undefined, ...[1, 2, 3, 4].map(k => `Chương 10: Gặp gỡ > (${k}/4)`), ...[1, 2, 3].map(k => `Chương 11: Chia ly > (${k}/3)`), undefined]);
+    assert.equal(titles(chapters)[1], 'Chương 10: Gặp gỡ (1)');
+  });
   it('takes a chapter with the title of the parts after it for the first of them', () => {
     let text = book([`Chương 12: Trước\n\n${story(6)}`, `Chương 13: Yoga\n\n${story(6, 1)}`, `Chương 13: Yoga (trung)\n\n${story(6, 2)}`, `Chương 13: Yoga (hạ)\n\n${story(6, 3)}`, `Chương 14: Đi\n\n${story(6, 4)}`]);
     assert.deepEqual(parts(real(parse(text))), [undefined, 'Chương 13: Yoga > (thượng)', 'Chương 13: Yoga > (trung)', 'Chương 13: Yoga > (hạ)', undefined]);

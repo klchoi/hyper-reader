@@ -12,13 +12,13 @@
     "typecheck": "tsrx-tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
-    "chroma-js": "^2.6.0",
+    "chroma-js": "^3.2.0",
     "ripple": "^0.4.7"
   },
   "devDependencies": {
     "@ripple-ts/vite-plugin": "^0.4.7",
     "@tsrx/typescript-plugin": "^0.6.3",
-    "@types/chroma-js": "^2.4.5",
+    "@types/chroma-js": "^3.1.2",
     "@types/node": "^24.19.2",
     "oxlint": "^1.87.0",
     "typescript": "^5.9.3",

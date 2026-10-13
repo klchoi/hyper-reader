@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The page's other backend (see backends.ts in src/). It serves the page as built
-// (hyper-reader.html), and keeps the books in a SQLite database in a folder of its own (see
+// (dist/index.html), and keeps the books in a SQLite database in a folder of its own (see
 // store.ts): those of the libraries it is given, folders of .txt files read where they are, and
 // those dropped on the page, kept in <data>/uploads. The books are read by the page's own parser
 // (src/parser.ts), in processes of their own (readers.ts), and their full text indexed for search
@@ -27,8 +27,8 @@ import { createLibrary } from './library.ts';
 import { queryOf } from '../src/catalog.ts';
 import type { Library, LibraryDir } from './library.ts';
 
-// the page, as built
-const PAGE = path.join(import.meta.dirname, '..', 'hyper-reader.html');
+// the page, as built (npm run build, see vite.config.ts)
+const PAGE = path.join(import.meta.dirname, '..', 'dist', 'index.html');
 
 // a book's id, a chapter's: nothing that could walk out of a folder
 const ID = /^[\w-]+$/;
@@ -103,7 +103,7 @@ function readBody(request: IncomingMessage) {
   });
 }
 
-export function createServer({ data, libraries = [], allowedHosts = [] }: { data: string; libraries?: LibraryDir[]; allowedHosts?: string[] }) {
+export function createServer({ data, libraries = [], allowedHosts = [], page = PAGE }: { data: string; libraries?: LibraryDir[]; allowedHosts?: string[]; page?: string }) {
   let allowed = allowedHosts.map(name => name.toLowerCase());
   let library = createLibrary({ data, libraries });
   let table = routes(library);
@@ -138,8 +138,12 @@ export function createServer({ data, libraries = [], allowedHosts = [] }: { data
         }
         return send(404, 'not found', 'text/plain');
       }
-      // any other path is a place in the page (`/books/<id>`), which finds it itself
-      if(request.method === 'GET') return send(200, await fs.readFile(PAGE, 'utf8'), 'text/html');
+      // any other path is a place in the page (`/books/<id>`), which finds it itself. A working
+      // copy has it only once it is built: git keeps src/, not what is built of it
+      if(request.method === 'GET') {
+        let built = await fs.readFile(page, 'utf8').catch(error => { if(error.code === 'ENOENT') return undefined; throw error; });
+        return built === undefined ? send(503, 'the page is not built: npm run build', 'text/plain') : send(200, built, 'text/html');
+      }
       send(404, 'not found', 'text/plain');
     } catch(error) {
       // a path badly escaped is the asker's fault; anything else not foreseen is ours (a file of

@@ -22,7 +22,7 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe('the server', () => {
   let server: ReturnType<typeof createServer>;
-  let data: string, shelf: string, base: string;
+  let data: string, shelf: string, page: string, base: string;
   let port = () => (server.address() as AddressInfo).port;
   // the answer as the page reads it: JSON, text, or the status alone
   let call = async (method: string, route: string, body?: unknown): Promise<{ status: number; answer: any }> => {
@@ -57,7 +57,10 @@ describe('the server', () => {
     fs.writeFileSync(path.join(shelf, 'Sách thử (1-3 chương).txt'), bookText('Hoàng Dung'));
     fs.writeFileSync(path.join(shelf, 'nested', 'Sách thử (1-3 chương).txt'), bookText('Hoàng Dung'));
     fs.writeFileSync(path.join(shelf, 'notes.md'), 'not a book');
-    server = createServer({ data, libraries: [{ name: 'shelf', dir: shelf }], allowedHosts: ['Reader.example'] });
+    // a page of its own, not the one built of src/ (which the image's own try checks)
+    page = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-page-')), 'index.html');
+    fs.writeFileSync(page, '<!doctype html><title>Text Reader</title>');
+    server = createServer({ data, libraries: [{ name: 'shelf', dir: shelf }], allowedHosts: ['Reader.example'], page });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${port()}`;
     server.library.scan();
@@ -68,6 +71,7 @@ describe('the server', () => {
     await server.library.close();
     fs.rmSync(data, { recursive: true, force: true });
     fs.rmSync(shelf, { recursive: true, force: true });
+    fs.rmSync(path.dirname(page), { recursive: true, force: true });
   });
 
   it('serves the page, at any place in it, and says it keeps the books', async () => {
@@ -75,6 +79,17 @@ describe('the server', () => {
       assert.ok((await (await fetch(`${base}${at}`)).text()).includes('<title>Text Reader</title>'));
     }
     assert.deepEqual((await call('GET', 'hello')).answer, { backend: 'server' });
+  });
+  it('says the page is not built, where it is not', async () => {
+    let built = fs.readFileSync(page, 'utf8');
+    fs.rmSync(page);
+    try {
+      let response = await fetch(`${base}/books/sach-thu-1234abcd`);
+      assert.equal(response.status, 503);
+      assert.equal(await response.text(), 'the page is not built: npm run build');
+    } finally {
+      fs.writeFileSync(page, built);
+    }
   });
   it('finds the books of a library, each its own by where it is', async () => {
     let found = await books();

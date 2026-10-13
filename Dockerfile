@@ -35,7 +35,7 @@ COPY server ./server
 # the code of src/ the server runs (the parser, what a book is, the catalog): all of it, the few
 # KB of the page's own beside it, so a file it comes to need is never left out
 COPY src/*.ts ./src/
-COPY --from=page /app/hyper-reader.html ./
+COPY --from=page /app/dist/index.html ./dist/
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --start-interval=2s \

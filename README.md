@@ -1,12 +1,12 @@
 # hyper-reader
 
-A reader for long novels kept as `.txt` files: a page, `hyper-reader.html`, to read a book by
-chapter in, and a small Node server that serves it and keeps the books, where each was left, the
-names corrected in each, and the settings. The page is built from `src/` (see Building it) and
-kept in git as built.
+A reader for long novels kept as `.txt` files: a page to read a book by chapter in, and a small
+Node server that serves it and keeps the books, where each was left, the names corrected in each,
+and the settings. The page is built from `src/` (see Building it); git keeps `src/`, not the page.
 
 ## Running it
 
+`npm run build` once (and again after a change to `src/`), then
 `npm start -- [--port 8080] [--data <folder>] [--library [name=]<folder>]...`, then
 `http://127.0.0.1:8080/`. The server serves the page, and keeps the books in a SQLite
 database, `<data>/library.db` (`data/` by default):
@@ -60,7 +60,7 @@ again by the next start).
 
 ```
 npm install
-npm run build            src/ into one file: dist/index.html, put in place as hyper-reader.html
+npm run build            src/ into one file: dist/index.html, the page the server serves
 npm run dev              src/ served as it changes (http://localhost:5173/), the books left to
                          the server (npm start)
 ```
@@ -92,7 +92,7 @@ Vite look for changes, and the server is started again with `docker compose rest
 
 ## What is in src/
 
-- `index.html`, `styles.css` the page and its styles (built into `hyper-reader.html`).
+- `index.html`, `styles.css` the page and its styles (built into `dist/index.html`).
 - `parser.ts` the chapter parser. It touches nothing of the page and nothing of node, so node
   (the server, the tests, the tools) runs it as it is, and the page what it needs of it.
 - `book.ts` what a book is (`Book`) and what is kept of it (`BookRecord`, `PARSER_VERSION`).

@@ -64,7 +64,7 @@ export function chapterTitle({ type = 'Chương', number, part, title, text }: H
   let extra = isExtra(text) && !isExtra(title) && !isExtra(type) ? 'Phiên ngoại' : undefined;
   let label = [extra, number != null && `${type} ${number}`].filter(Boolean).join(' ');
   let named = [label, title.replace(/./, c => c.toUpperCase())].filter(Boolean).join(': ');
-  let shown = part && !title.includes(`(${part.text})`) ? part : null;
+  let shown = part && !title.replace(/（/g, '(').replace(/）/g, ')').includes(`(${part.text})`) ? part : null;
   let full = [shown?.leading && `${shown.text}:`, named, shown && !shown.leading && `(${shown.text})`].filter(Boolean).join(' ');
   return full || `${type} ${ordinal + 1}`;
 }
@@ -678,21 +678,23 @@ const HEADING_READ = 400;
 // characters into such a line that its heading, found again in it, is still the same one
 const HEADING_SAME_WITHIN = 40;
 
-// a chapter in parts: `Chương 27: (thượng)`, `Chương 44: (nhất)`, or a title that ends in
-// `(hạ)`. The parts are shown one by one, each as the part of its chapter
+// a chapter in parts: `Chương 27: (thượng)`, `Chương 44: (nhất)`, `Chương 2: (2)`, or a title
+// that ends in `(hạ)` or `(2)`. The parts are shown one by one, each as the part of its chapter
 function partOf(title: string) {
-  let alone = /^\(\s*(\p{L}+(?: \p{L}+)*)\s*\)$/u.exec(title);
+  let alone = /^[(（]\s*(\p{L}+(?: \p{L}+)*|\d{1,2})\s*[)）]$/u.exec(title);
   if(alone) {
     let value = valueOfPart(alone[1].toLowerCase());
-    if(value != null) return { half: value, halfText: alone[1].toLowerCase(), title: '' };
+    if(value) return { half: value, halfText: alone[1].toLowerCase(), title: '' };
   }
-  let ending = /\s*\((thượng|trung|hạ)\)$/iu.exec(title);
-  if(ending) return { half: HALF_WORDS[ending[1].toLowerCase()], halfText: ending[1].toLowerCase(), title };
+  let ending = /\s*[(（](thượng|trung|hạ|\d{1,2})[)）]$/iu.exec(title);
+  let value = ending && valueOfPart(ending[1].toLowerCase());
+  if(value) return { half: value, halfText: ending![1].toLowerCase(), title };
   return null;
 }
 
 // the number a part is written as: `thượng` is 1, `hạ` 3, `nhất` 1, `hai mươi` 20; null if it is no number
 function valueOfPart(word: string) {
+  if(/^\d+$/.test(word)) return Number(word);
   if(word in HALF_WORDS) return HALF_WORDS[word];
   let words = word.split(' ');
   let number = readNumberWords(words, 0);

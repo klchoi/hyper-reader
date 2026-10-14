@@ -82,6 +82,13 @@ type Mark = { stem: string; word?: string; number?: number | null; order: number
 const PART_MARK = /\s*[(（]\s*([^()（）]{1,16}?)\s*[)）]\s*(【[^】]*】)?\s*$/u;
 function partMark({ title = '', part }: Heading): Mark | null {
   let marked = PART_MARK.exec(title);
+  // a part in front of the title, which is then the part's own: `(trung) Chia ly`
+  let before = !marked && /^[(（]\s*(thượng|trung|hạ|\d{1,2})\s*[)）]\s*(\S.*)?$/iu.exec(title);
+  if(before && (!part || part.text.toLowerCase() === before[1].toLowerCase())) {
+    let word = before[1].toLowerCase();
+    let number = /^\d+$/.test(word) ? Number(word) : null;
+    return { stem: '', word, number, order: number ?? HALF_WORDS[word], bracketed: true, tag: before[2] };
+  }
   // a stray mark beside the part is none of it: `(lục ·)`
   let bare = (written?: string) => written?.toLowerCase().replace(/^[\s\p{P}]+|[\s\p{P}]+$/gu, '');
   let word = bare(part?.text ?? marked?.[1]);
@@ -689,7 +696,8 @@ function partOf(title: string) {
     let value = valueOfPart(alone[1].toLowerCase());
     if(value) return { half: value, halfText: alone[1].toLowerCase(), title: '' };
   }
-  let ending = /\s*[(（]\s*(thượng|trung|hạ|\d{1,2})\s*[)）]$/iu.exec(title);
+  // (or before it: `Thứ 3 chương (trung) mạnh hơn...`)
+  let ending = /\s*[(（]\s*(thượng|trung|hạ|\d{1,2})\s*[)）]$/iu.exec(title) ?? /^[(（]\s*(thượng|trung|hạ|\d{1,2})\s*[)）]\s*(?=\S)/iu.exec(title);
   let value = ending && valueOfPart(ending[1].toLowerCase());
   if(value) return { half: value, halfText: ending![1].toLowerCase(), title };
   return null;
@@ -926,7 +934,7 @@ function chooseHeadings(nodes: Candidate[], credit: Record<string, number> = {},
           // two has none (`Thứ 13 chương tam đối`, then `Chương 13: (thượng)`; `Chương 45`, then
           // `Chương 45: Sơn thủy hành (thượng)`): a range of chapters in front of the first
           // (`101-150`, then `Chương 101: Nhập học (1)`) is no part of it
-          let stem = (title: string) => title.replace(/\s*[(（][^()（）]*[)）]\s*$/u, '').toLowerCase();
+          let stem = (title: string) => title.replace(/\s*[(（][^()（）]*[)）]\s*$|^[(（][^()（）]*[)）]\s*/gu, '').toLowerCase();
           let [ours, theirs] = [stem(node.title), stem(nodes[j].title)];
           let goesOn = s.half == null ? !ours || !theirs || ours === theirs : node.half! > s.half;
           if(node.half != null && goesOn) go(j, TUNING.reward.next, { ...s, half: node.half });

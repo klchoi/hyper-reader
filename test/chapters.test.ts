@@ -172,6 +172,11 @@ describe('parts, ranges and extras', () => {
     let text = book(`Chương 3:, Tính ngược (1)\n\n${story(6)}`, `${story(5, 1)} Nàng nói:.`, `\tChương 3:, Tính ngược (2)`, `\t... ${story(6, 2)}`, `Chương 4: Sau\n\n${story(6)}`);
     assert.deepEqual(parts(real(parse(text))), ['Chương 3: Tính ngược > (1/2)', 'Chương 3: Tính ngược > (2/2)', undefined]);
   });
+  it('reads a part named in front of the title', () => {
+    let text = book(`Chương 2: Trước\n\n${story(6)}`, ['thượng', 'trung', 'hạ'].map((p, k) => `Thứ 3 chương (${p}) ${['Gặp gỡ', 'Chia ly', 'Trở về'][k]}\n\n${story(6, k)}`), `Chương 4: Sau\n\n${story(6)}`);
+    let chapters = real(parse(text));
+    assert.deepEqual(parts(chapters), [undefined, 'Chương 3 > (thượng) Gặp gỡ', 'Chương 3 > (trung) Chia ly', 'Chương 3 > (hạ) Trở về', undefined]);
+  });
   it('takes a range of chapters in front of the first of them for no part of it', () => {
     let text = book(`Chương 50: Trước\n\n${story(30)}`, '51-100', `Thứ 51 chương công viên (3)\n\n${story(30, 1)}`, `Chương 52: Sau\n\n${story(30, 2)}`, `Chương 53: Nữa\n\n${story(30, 3)}`);
     let chapters = real(parse(text));

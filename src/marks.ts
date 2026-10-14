@@ -3,7 +3,7 @@
 // patterns find (name-patterns.ts), each with the person it is of. Nothing of the page: the
 // server marks a chapter before it sends it, so the page only colours where it is told
 // (names.ts), and marks one itself only while the list is edited.
-import { buildRegex, nameRegexes, namePatterns, standaloneRelationships } from './name-patterns.ts';
+import { addressedBy, buildRegex, nameRegexes, namePatterns, standaloneRelationships } from './name-patterns.ts';
 
 // ---- words and their case -----------------------------------------------------------
 export function titleCase(s: string) {
@@ -214,8 +214,11 @@ function plainNameWords(words: string[]) {
   // `nhi` is a fond form of any name, `tử` only ever tags along with a prefix:
   // on its own `Khổng Tử` is a whole name, not a `Khổng` being addressed
   let suffixes = prefixed ? ['nhi', 'tử'] : ['nhi'];
-  if (words.length > 1 && suffixes.includes(words.at(-1)!)) words = words.slice(0, -1);
-  return words;
+  if (words.length > 1 && suffixes.includes(words.at(-1)!)) return words.slice(0, -1);
+  // and `Liễu di` is a `Liễu` called by what she is
+  let called = addressedBy.map(nameWordsOf).filter(by => by.length < words.length && by.every((word, i) => words.at(i - by.length) === word));
+  let longest = Math.max(0, ...called.map(by => by.length));
+  return words.slice(0, words.length - longest);
 }
 // `Lôi Lôi` and `Tiểu Lôi` are nobody new, they are what somebody calls
 // `Lục Nguyệt Lôi`: every word they are written with is a word of the full name.

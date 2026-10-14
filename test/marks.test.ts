@@ -2,7 +2,7 @@
 // names in them are, those of the list and those the text gives, each the name of somebody.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { anyOf, findMarks, linesOf, markChapter, nameFixer } from '../src/marks.ts';
+import { aliasCandidates, anyOf, findMarks, linesOf, markChapter, nameFixer } from '../src/marks.ts';
 
 // what is marked in `texts`, as [text, name, person, in the list]
 const marked = (texts: string[], names: string) => findMarks(texts, names).marks
@@ -42,6 +42,16 @@ describe('the names in a chapter', () => {
   });
   it('finds nothing with nothing to find', () => {
     assert.deepEqual(findMarks(['một ngày dài.'], ''), { marks: [], persons: {} });
+  });
+});
+
+describe('who a name could be', () => {
+  it('offers who of the list a name is made from, called fondly or by what they are', () => {
+    let names = 'Bạch Linh\nLiễu Khánh Hà\nNgô Hàn';
+    assert.deepEqual(aliasCandidates(names, 'Linh nhi'), ['Bạch Linh']);
+    assert.deepEqual(aliasCandidates(names, 'Liễu di'), ['Liễu Khánh Hà']);
+    assert.deepEqual(aliasCandidates(names, 'Liễu tỷ tỷ'), ['Liễu Khánh Hà']);
+    assert.deepEqual(marked(['Nàng gặp Liễu di.'], names), [[0, 'Liễu di', 'liễu di', false]]);
   });
 });
 

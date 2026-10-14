@@ -11,6 +11,13 @@ export const standaloneRelationships = [
   'phụ thân', 'mẫu thân',
 ];
 
+// what somebody is called by behind their name: `Liễu di`, `Mộ Dung tỷ tỷ`. Such a name is
+// somebody of the list called so, and the add button offers who
+export const addressedBy = [
+  'ba ba', 'ba', 'mụ mụ', 'mẹ', 'thúc', 'di', 'ca ca', 'ca', 'tỷ tỷ', 'tỷ', 'tổng', 'lang', 'nô',
+  'bá bá', 'bá', 'bá phụ', 'bá mẫu', 'đại tỷ', 'đại ca', 'lão bà',
+];
+
 // patterns with named holes in them: `{Word}` is filled from `placeholders`, each fill a group
 // of its own name, so the holes can be filled within each other
 export function buildRegex(patterns: (RegExp | string | false | null | undefined)[], placeholders: Record<string, RegExp>, flags?: string) {
@@ -37,7 +44,7 @@ export const namePlaceholders = {
 export const namePatterns = [
   [
     /{NameBegin}{Word}(\s{Word}){1,3}/,
-    /{NameBegin}({Word} )?{Word} (ba( ba)?|mụ mụ|mẹ|thúc|di|ca( ca)?|tỷ( tỷ)?|tổng|lang|nô|bá( bá)?|bá phụ|bá mẫu|đại tỷ|đại ca|lão bà){wb}/,
+    `{NameBegin}({Word} )?{Word} (${[...addressedBy].sort((a, z) => z.length - a.length).join('|')}){wb}`,
     new RegExp(standaloneRelationships.join('|')),
   ],
   [

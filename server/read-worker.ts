@@ -6,6 +6,7 @@ import { extractChapters, normalizeFileContent } from '../src/parser.ts';
 import { Book, PARSER_VERSION } from '../src/book.ts';
 import { findNames } from '../src/name-patterns.ts';
 import type { BookRead } from './store.ts';
+import { rawOffsets, rawText } from './raw.ts';
 
 export type Asked = { id: number; kind: 'read' | 'text'; file: string };
 export type Answered = { id: number; result?: BookRead | ReadText; error?: { message: string; code?: string } };
@@ -19,15 +20,18 @@ function readText(file: string): ReadText {
 
 const jobs = {
   // the book in a file: what it is called, its chapters (where each begins and ends in the text
-  // as read) and its characters
+  // as read, and where it begins in the file's own, see raw.ts) and its characters
   read(file: string): BookRead {
-    let { size, mtime, text } = readText(file);
+    let { size, mtimeMs: mtime } = fs.statSync(file);
+    let source = fs.readFileSync(file, 'utf8');
+    let text = normalizeFileContent(source);
     let { name, description } = Book({ name: path.basename(file) });
     let chapters = extractChapters(name, text, { name });
+    let raw = rawOffsets(rawText(source), text, chapters.map(c => c.offset));
     return {
       name, description, size, mtime, parser: PARSER_VERSION,
       chapters: chapters.map((c, i) => ({
-        id: c.id, title: c.title, offset: c.offset, end: chapters[i + 1]?.offset ?? text.length, group: c.group, part: c.part,
+        id: c.id, title: c.title, offset: c.offset, end: chapters[i + 1]?.offset ?? text.length, rawOffset: raw[i], group: c.group, part: c.part,
       })),
       characters: findNames(text),
     };

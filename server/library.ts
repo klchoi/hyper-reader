@@ -6,7 +6,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createStore, plain } from './store.ts';
+import { createStore, INDEX_VERSION, plain } from './store.ts';
 import type { BookRow, ChapterRow } from './store.ts';
 import { createReaders } from './readers.ts';
 import type { ReadText } from './read-worker.ts';
@@ -20,6 +20,8 @@ import type { Marked } from '../src/marks.ts';
 import type { Entry, Progress, Query } from '../src/catalog.ts';
 
 const UPLOADS = 'uploads';
+// characters of a file's text a chapter is taken to run over, before and after (see `search`)
+const SPARE = 1024;
 
 // a book's id: its name, readable, and its place (library and path), which makes it its own;
 // two files may well give one name (`Đại dâm hiệp (1-2 bộ 183 chương ...)` and `... (1)`)
@@ -218,7 +220,7 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
       let row = store.book(id);
       if(!row) return null;
       if(row.parser !== PARSER_VERSION) return library.rereadBook(id);
-      if(row.indexed !== PARSER_VERSION) indexer.first(id);
+      if(row.indexed !== INDEX_VERSION) indexer.first(id);
       return recordOf(row);
     },
     // a chapter as the page shows it: its lines corrected by the book's names list, and the names
@@ -261,9 +263,9 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
     scanned: (): Promise<void> => scanning ?? Promise.resolve(),
     status: () => ({
       libraries: [...roots.keys()].filter(root => root !== UPLOADS),
-      books: store.indexCount(PARSER_VERSION).total,
+      books: store.indexCount(INDEX_VERSION).total,
       scan,
-      index: store.indexCount(PARSER_VERSION),
+      index: store.indexCount(INDEX_VERSION),
     }),
 
     // ---- search
@@ -290,9 +292,19 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
       if(!bookId) return store.booksSaying(phrase);
       let row = store.book(bookId);
       if(!row) return null;
-      let indexed = row.indexed === PARSER_VERSION;
+      let indexed = row.indexed === INDEX_VERSION;
       if(!indexed) indexer.first(bookId);
-      let chapters = store.chaptersSaying(phrase, bookId);
+      // the chapters the blocks it is in run over, in the file's text (see raw.ts): with a little
+      // to spare, where a chapter is found to begin there only near where it does
+      let blocks = store.blocksSaying(phrase, bookId);
+      let all = blocks.length ? store.chapters(bookId) : [];
+      let at = 0;
+      let chapters = all.filter((chapter, n) => {
+        let begins = (chapter.raw_offset ?? 0) - SPARE;
+        let ends = n + 1 < all.length ? (all[n + 1].raw_offset ?? 0) + SPARE : Infinity;
+        while(at < blocks.length && blocks[at].end <= begins) at++;
+        return at < blocks.length && blocks[at].offset < ends;
+      });
       // (a file changed since it was read says nothing, until it is read again)
       let text = chapters.length ? await textOf(row) ?? '' : '';
       let exact = accented(q) ? asked(q) : null;

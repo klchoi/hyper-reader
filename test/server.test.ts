@@ -12,6 +12,7 @@ import { createServer } from '../server/server.ts';
 import { createLibrary } from '../server/library.ts';
 import { extractChapters, normalizeFileContent } from '../src/parser.ts';
 import { PARSER_VERSION } from '../src/book.ts';
+import { INDEX_VERSION } from '../server/store.ts';
 import type { Line, Mark } from '../src/marks.ts';
 
 const story = (count: number, who: string) => Array.from({ length: count }, (_, k) => (
@@ -218,26 +219,29 @@ describe('the server', () => {
     await call('POST', `books/${id}/reread`);
     await settled();
   });
-  it('keeps the index of a book a newer parser reads into the same chapters, and only then', async () => {
+  it('leaves a book an older parser read to be read again when opened, its index kept, unless its file changed', async () => {
     await settled();
     let { id } = (await books()).find(book => !book.folder && !book.deletable)!;
     let db = new DatabaseSync(path.join(data, 'library.db'));
-    let rowids = () => (db.prepare('select rowid from chapters where book_id = ? order by n').all(id) as { rowid: number }[]).map(row => row.rowid);
-    let indexed = () => (db.prepare('select indexed from books where id = ?').get(id) as { indexed: number }).indexed;
-    let before = rowids();
+    let blocks = () => (db.prepare('select rowid from blocks where book_id = ? order by offset').all(id) as { rowid: number }[]).map(row => row.rowid);
+    let row = () => db.prepare('select parser, indexed from books where id = ?').get(id) as { parser: number; indexed: number };
+    let before = blocks();
+    assert.ok(before.length > 0);
     db.prepare('update books set parser = 1 where id = ?').run(id);
-    // a scan reads only what came, changed or went: the book is read again when opened
+    // a scan reads only what came, changed or went
     await call('POST', 'library/scan');
     await server.library.scanned();
     assert.equal((await call('GET', 'library')).answer.scan.read, 0);
-    assert.equal((db.prepare('select parser from books where id = ?').get(id) as { parser: number }).parser, 1);
+    assert.equal(row().parser, 1);
     assert.equal((await call('GET', `books/${id}`)).answer.parser, PARSER_VERSION);
-    assert.deepEqual([rowids(), indexed()], [before, PARSER_VERSION]);
+    assert.deepEqual([blocks(), row().indexed], [before, INDEX_VERSION]);
     // a file that changed is another matter
     let file = path.join(shelf, 'Sách thử (1-3 chương).txt');
     fs.appendFileSync(file, '\n\nThêm một câu.');
     await call('POST', `books/${id}/reread`);
-    assert.notDeepEqual(rowids(), before);
+    assert.deepEqual([blocks(), row().indexed], [[], 0]);
+    await settled();
+    assert.ok(blocks().length > 0 && blocks().every(rowid => !before.includes(rowid)));
     db.close();
     fs.writeFileSync(file, bookText('Hoàng Dung'));
     await call('POST', `books/${id}/reread`);
@@ -279,6 +283,41 @@ describe('the server', () => {
     let text = normalizeFileContent(bookText('Hoàng Dung'));
     assert.equal(text.slice(first.offset, first.offset + first.match.length), 'Hoàng Dung');
     assert.deepEqual((await call('GET', `search?q=dai+ca&book=${id}`)).answer.mentions, []);
+  });
+  it('finds what is said in a chapter too long for one block of the index', async () => {
+    let long = Array.from({ length: 400 }, (_, k) => `Dòng ${k}: ${k % 50 ? 'trời mưa mãi không thôi, gió thổi qua sân vắng' : 'Lệnh Hồ Xung đứng dậy'}.`).join('\n');
+    let text = ['Sách dài', 'Chương 1: Mở đầu', long, 'Chương 2: Hết', 'Lệnh Hồ Xung đi rồi.'].join('\n\n');
+    let { answer: record } = await call('POST', 'books', { name: 'Sách dài (1-2 chương).txt', size: 0, text });
+    await settled();
+    let db = new DatabaseSync(path.join(data, 'library.db'), { readOnly: true });
+    let blocks = (db.prepare('select count(*) as n from blocks where book_id = ?').get(record.id) as { n: number }).n;
+    db.close();
+    assert.ok(blocks > 3);
+    let inBook = (await call('GET', `search?q=${encodeURIComponent('lenh ho xung')}&book=${record.id}`)).answer;
+    assert.equal(inBook.total, 9);
+    assert.deepEqual([...new Set(inBook.mentions.map((m: { title: string }) => m.title))], ['Chương 1: Mở đầu', 'Chương 2: Hết']);
+    let found = (await call('GET', `search?q=${encodeURIComponent('lenh ho xung')}`)).answer;
+    assert.deepEqual(found.map((book: { name: string; chapters: number }) => [book.name, book.chapters]), [['Sách dài', 2]]);
+    await call('DELETE', `books/${record.id}`);
+  });
+  it('keeps the index to the file\'s own text, and finds in it what the parser reads otherwise', async () => {
+    let messy = (n: number) => Array.from({ length: 5 }, (_, k) => `\t Dòng ${k} , Dương Quá ${n % 2 ? 'đi' : 'về'}  rồi .`).join('\r\n\r\n');
+    let text = ['Sách bừa', ...[1, 2, 3].map(n => `Chương ${n}  :  Tiêu đề ${n}\r\n\r\nQQ Group 712797052\r\n${messy(n)}`)].join('\r\n\r\n\r\n');
+    let { answer: record } = await call('POST', 'books', { name: 'Sách bừa (1-3 chương).txt', size: 0, text });
+    await settled();
+    let db = new DatabaseSync(path.join(data, 'library.db'), { readOnly: true });
+    let { last } = db.prepare('select max("end") as last from blocks where book_id = ?').get(record.id) as { last: number };
+    let starts = (db.prepare('select raw_offset from chapters where book_id = ? order by n').all(record.id) as { raw_offset: number }[]).map(c => c.raw_offset);
+    db.close();
+    assert.equal(last, text.length);
+    assert.deepEqual(starts.slice(1), [1, 2, 3].map(n => text.indexOf(`Chương ${n}`)));
+    let inBook = (await call('GET', `search?q=${encodeURIComponent('duong qua di')}&book=${record.id}`)).answer;
+    assert.equal(inBook.total, 10);
+    let read = normalizeFileContent(text);
+    assert.ok(inBook.mentions.every((m: { offset: number; match: string }) => read.slice(m.offset, m.offset + m.match.length) === m.match));
+    let found = (await call('GET', `search?q=${encodeURIComponent('duong qua di')}`)).answer;
+    assert.deepEqual(found.map((book: { name: string; chapters: number }) => [book.name, book.chapters]), [['Sách bừa', 2]]);
+    await call('DELETE', `books/${record.id}`);
   });
   it('holds what is found to the accents it was asked with', async () => {
     let both = `${bookText('Hoàng Dung')}\n\nNàng hoảng dùng tay che mặt.\n\nRồi hoảng dùng chân chạy.`;

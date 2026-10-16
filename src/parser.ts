@@ -2,6 +2,8 @@
 // in the server's readers (server/read-worker.ts), the tests and the tools, and what the page
 // needs of it (`latinize`, `slug`) in the page.
 
+// (a change to what it makes of a text changes the offsets the chapters count in: bump
+// PARSER_VERSION in book.ts. The index is kept to the file's own text, see server/raw.ts)
 export function normalizeFileContent(source: string) {
   let text = source.normalize();
   text = text.replace(/[\r\n]+/g, '\n');

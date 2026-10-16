@@ -1,7 +1,8 @@
 // The books the server keeps: those of the libraries it is given (folders of .txt files, read
 // where they are) and those dropped on the page (kept in <data>/uploads, a library of its own).
-// A scan finds what came, changed or went in the libraries since the last, and reads only that;
-// the full text is indexed behind it, a book opened first.
+// A scan finds what came, changed or went in the libraries since the last, and reads only that
+// (a book an older parser read is read again when opened, not by a scan); the full text is
+// indexed behind it, a book opened first.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -166,7 +167,7 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
       for(let file of files) {
         let had = known.get(file.rel);
         known.delete(file.rel);
-        let same = had && had.size === file.size && had.mtime === file.mtime && had.parser === PARSER_VERSION;
+        let same = had && had.size === file.size && had.mtime === file.mtime;
         if(!same) toRead.push({ root, rel: file.rel });
       }
       // a book whose file is gone goes; where it was left and its names stay, for it to come back to

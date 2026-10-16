@@ -226,6 +226,11 @@ describe('the server', () => {
     let indexed = () => (db.prepare('select indexed from books where id = ?').get(id) as { indexed: number }).indexed;
     let before = rowids();
     db.prepare('update books set parser = 1 where id = ?').run(id);
+    // a scan reads only what came, changed or went: the book is read again when opened
+    await call('POST', 'library/scan');
+    await server.library.scanned();
+    assert.equal((await call('GET', 'library')).answer.scan.read, 0);
+    assert.equal((db.prepare('select parser from books where id = ?').get(id) as { parser: number }).parser, 1);
     assert.equal((await call('GET', `books/${id}`)).answer.parser, PARSER_VERSION);
     assert.deepEqual([rowids(), indexed()], [before, PARSER_VERSION]);
     // a file that changed is another matter

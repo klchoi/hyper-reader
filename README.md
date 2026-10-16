@@ -16,7 +16,7 @@ database, `<data>/library.db` (`data/` by default):
   so a book keeps its id (and where it was left) wherever the folder is mounted. The libraries are
   scanned when the server starts and when asked (`POST /api/library/scan`): only what came,
   changed or went since the last scan is read again, so a scan of a library already read takes
-  a moment;
+  a moment. A book a newer parser would read otherwise is read again when it is opened;
 - the books dropped on the page, kept in `<data>/uploads`, a library of their own, the only
   books that can be deleted from the page.
 

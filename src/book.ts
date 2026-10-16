@@ -2,8 +2,8 @@
 import { slug } from './parser.ts';
 import type { Chapter, Listed } from './parser.ts';
 
-// bump when a change to the parser should reach the books already stored, which
-// are parsed again the next time they are opened
+// bump when a change to the parser should reach the books already stored, which are parsed
+// again the next time they are opened (not all at once: a scan leaves them as they are)
 export const PARSER_VERSION = 19;
 
 export type BookInfo = { id: string; name: string; description?: string };

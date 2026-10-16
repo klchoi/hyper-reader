@@ -60,7 +60,10 @@ const refusal = (message: string, status: number) => Object.assign(new Error(mes
 
 export type LibraryDir = { name: string; dir: string };
 
-export function createLibrary({ data, libraries = [] }: { data: string; libraries?: LibraryDir[] }) {
+// `sample`: of each library, only so many books (0: all of them), the same ones from one scan to
+// the next, the others left out as though they were not there: for working on the app with a
+// library too big to read again and again
+export function createLibrary({ data, libraries = [], sample = 0 }: { data: string; libraries?: LibraryDir[]; sample?: number }) {
   let uploads = path.join(data, UPLOADS);
   fs.mkdirSync(uploads, { recursive: true });
   let database = path.join(data, 'library.db');
@@ -157,6 +160,7 @@ export function createLibrary({ data, libraries = [] }: { data: string; librarie
     let toRead: { root: string; rel: string }[] = [];
     for(let [root, dir] of roots) {
       let files = await filesUnder(dir);
+      if(sample > 0) files = files.map(file => ({ file, key: hashOf(file.rel.normalize()) })).sort((a, z) => a.key < z.key ? -1 : a.key > z.key ? 1 : 0).slice(0, sample).map(({ file }) => file);
       now.files += files.length;
       let known = new Map(store.booksIn(root).map(row => [row.path, row]));
       for(let file of files) {

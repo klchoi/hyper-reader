@@ -5,7 +5,9 @@
 #   LIBRARY=/path/to/books docker compose up        then http://localhost:5173/
 #
 # LIBRARY (it may go in .env) is the folder of books, mounted read-only: the server reads them
-# where they are. What it keeps is in the volume `data`. Both ports answer on this computer
+# where they are, 500 of them (SAMPLE=500, the same ones each time; SAMPLE=0: all of them). The
+# server starts again on every edit of src/, and a library of thousands read again and again
+# wears out the disk. What it keeps is in the volume `data`. Both ports answer on this computer
 # only. A change to package-lock.json is installed when the containers next start.
 name: hyper-reader
 
@@ -44,6 +46,7 @@ services:
       - --host=0.0.0.0
       - --data=/data
       - --library=books=/books
+      - --sample=${SAMPLE:-500}
     volumes:
       - .:/app
       - node_modules:/app/node_modules

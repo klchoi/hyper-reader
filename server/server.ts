@@ -7,11 +7,13 @@
 // behind them (indexer.ts); the processes end when they have nothing left to do:
 //
 //   node server/server.ts [--port 8080] [--host 127.0.0.1] [--data <folder>] [--library [name=]<folder>]...
-//                         [--allow-host <name>]...
+//                         [--allow-host <name>]... [--sample <n>]
 //
 // A library is known by its name (the folder's own name if none is given), so a book keeps its
 // id, and where it was left, wherever the folder is mounted. The libraries are scanned when the
-// server starts, and again when asked (POST /api/library/scan).
+// server starts, and again when asked (POST /api/library/scan). `--sample 500` keeps only 500
+// books of each (always the same ones), for working on the app (compose.yaml): a library of
+// thousands, read again on every start, wears out the disk the database is on.
 //
 // It answers on this computer only (127.0.0.1): it has no logins, and what it keeps is a private
 // library. So it answers only what is asked of it by this computer's name, and changes nothing
@@ -103,9 +105,9 @@ function readBody(request: IncomingMessage) {
   });
 }
 
-export function createServer({ data, libraries = [], allowedHosts = [], page = PAGE }: { data: string; libraries?: LibraryDir[]; allowedHosts?: string[]; page?: string }) {
+export function createServer({ data, libraries = [], allowedHosts = [], page = PAGE, sample = 0 }: { data: string; libraries?: LibraryDir[]; allowedHosts?: string[]; page?: string; sample?: number }) {
   let allowed = allowedHosts.map(name => name.toLowerCase());
-  let library = createLibrary({ data, libraries });
+  let library = createLibrary({ data, libraries, sample });
   let table = routes(library);
   let server = http.createServer(async (request, response) => {
     let send = (status: number, body?: string, type?: string) => {
@@ -183,10 +185,12 @@ if(import.meta.main) {
     if(!args[at + 1]) throw new Error('--allow-host takes a name: --allow-host reader.example.com');
     return [args[at + 1]];
   });
-  let server = createServer({ data, libraries, allowedHosts });
+  let sample = Number(option('--sample', '0'));
+  if(!Number.isInteger(sample) || sample < 0) throw new Error('--sample takes a number of books: --sample 500 (0: all of them)');
+  let server = createServer({ data, libraries, allowedHosts, sample });
   server.listen(port, host, () => {
     console.log(`hyper-reader on http://${host}:${port}/, keeping books in ${data}`);
-    for(let { name, dir } of libraries) console.log(`library ${name}: ${dir}`);
+    for(let { name, dir } of libraries) console.log(`library ${name}: ${dir}${sample ? ` (a sample of ${sample} books)` : ''}`);
     for(let name of allowedHosts) console.log(`answering ${name} too`);
     // what came, changed or went while the server was not running
     server.library.scan();

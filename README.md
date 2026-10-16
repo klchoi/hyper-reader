@@ -82,8 +82,10 @@ is taken up where it is:
   again, in a second; the page keeps what it shows
 
 The containers are made from the Dockerfile's `dev` image. The books of `LIBRARY` (it may go in
-`.env`) are mounted read-only, as the library `books`; what the server keeps is in the volume
-`data`. Both answer on this computer only (127.0.0.1). The
+`.env`) are mounted read-only, as the library `books`, and only 500 of them are read (always the
+same ones): the server starts again on every edit, and a library of thousands read again and
+again wears out the disk its database is on. `SAMPLE=2000` reads more, `SAMPLE=0` all of them.
+What the server keeps is in the volume `data`. Both answer on this computer only (127.0.0.1). The
 dependencies are installed in the image for Linux, in a volume of their own (the ones of this
 machine stay out of it), and again when `package-lock.json` changes, the next time the
 containers start. `docker compose down -v` leaves nothing behind but the image. Both are told of an edit by the

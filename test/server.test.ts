@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createServer } from '../server/server.ts';
+import { createLibrary } from '../server/library.ts';
 import { extractChapters, normalizeFileContent } from '../src/parser.ts';
 import { PARSER_VERSION } from '../src/book.ts';
 import type { Line, Mark } from '../src/marks.ts';
@@ -350,5 +351,35 @@ describe('the server', () => {
   });
   it('turns away a path badly escaped', async () => {
     assert.equal((await raw('GET', '/api/names/%E0%A4%A', {})).status, 400);
+  });
+});
+
+describe('a sample of a library', () => {
+  it('reads only so many of its books, the same ones each time', async () => {
+    let data = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-test-'));
+    let shelf = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-shelf-'));
+    for(let n = 1; n <= 5; n++) fs.writeFileSync(path.join(shelf, `Sách ${n} (1-3 chương).txt`), bookText('Hoàng Dung'));
+    // a scan of the library by a server started again, and the books it then has
+    let scanned = async () => {
+      let library = createLibrary({ data, libraries: [{ name: 'shelf', dir: shelf }], sample: 2 });
+      try {
+        library.scan();
+        await library.scanned();
+        let { books } = await library.books({ every: true, limit: 100 });
+        return { scan: library.status().scan, ids: books.map(book => book.id).sort() };
+      } finally {
+        await library.close();
+      }
+    };
+    try {
+      let first = await scanned();
+      assert.deepEqual([first.scan.files, first.ids.length], [2, 2]);
+      let again = await scanned();
+      assert.deepEqual([again.scan.files, again.scan.read, again.scan.removed], [2, 0, 0]);
+      assert.deepEqual(again.ids, first.ids);
+    } finally {
+      fs.rmSync(data, { recursive: true, force: true });
+      fs.rmSync(shelf, { recursive: true, force: true });
+    }
   });
 });

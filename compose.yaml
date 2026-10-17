@@ -34,14 +34,20 @@ services:
         [ "$$sum" = "$$(cat node_modules/.lock-sum 2>/dev/null)" ]
         || { npm install --no-audit --no-fund && echo "$$sum" > node_modules/.lock-sum; }
 
-  # the server: started again on a change to what it runs (its own code, and the parser in src/)
+  # the server: started again on a change to what it runs, its own code and what it takes of
+  # src/ (the parser, what a book is, the catalog, the marks), not on an edit of the page, which
+  # would end the indexer in the middle of a book (test/compose.test.ts holds the list to it)
   api:
     <<: *app
     command:
       - node
       - --disable-warning=ExperimentalWarning
       - --watch-path=server
-      - --watch-path=src
+      - --watch-path=src/book.ts
+      - --watch-path=src/catalog.ts
+      - --watch-path=src/marks.ts
+      - --watch-path=src/name-patterns.ts
+      - --watch-path=src/parser.ts
       - server/server.ts
       - --host=0.0.0.0
       - --data=/data

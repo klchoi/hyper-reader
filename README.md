@@ -81,8 +81,9 @@ is taken up where it is:
 
 - `web`, Vite: a change to src/ reaches the page open in the browser as you save it (styles and
   components in place, without a reload)
-- `api`, the server under `node --watch`: a change to server/ or src/ (the parser) starts it
-  again, in a second; the page keeps what it shows
+- `api`, the server under `node --watch`: a change to server/, or to what it runs of src/ (the
+  parser, what a book is, the catalog, the marks), starts it again, in a second; the page keeps
+  what it shows. An edit of the page alone leaves it running
 
 The containers are made from the Dockerfile's `dev` image. The books of `LIBRARY` (it may go in
 `.env`) are mounted read-only, as the library `books`, and only 500 of them are read (always the

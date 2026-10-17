@@ -12,7 +12,7 @@ import { createServer } from '../server/server.ts';
 import { createLibrary } from '../server/library.ts';
 import { extractChapters, normalizeFileContent } from '../src/parser.ts';
 import { PARSER_VERSION } from '../src/book.ts';
-import { INDEX_VERSION } from '../server/store.ts';
+import { indexFile } from '../server/index-store.ts';
 import type { Line, Mark } from '../src/marks.ts';
 
 const story = (count: number, who: string) => Array.from({ length: count }, (_, k) => (
@@ -50,6 +50,11 @@ describe('the server', () => {
       await wait(25);
     }
     throw new Error('not indexed');
+  };
+  // until it is so
+  let until = async (done: () => boolean) => {
+    for(let tries = 0; tries < 400 && !done(); tries++) await wait(25);
+    assert.ok(done());
   };
 
   before(async () => {
@@ -185,10 +190,6 @@ describe('the server', () => {
     assert.equal((await call('GET', `books/${kept.id}`)).status, 404);
   });
   it('ends its indexer once every book is indexed, and starts it for a book read', async () => {
-    let until = async (done: () => boolean) => {
-      for(let tries = 0; tries < 400 && !done(); tries++) await wait(25);
-      assert.ok(done());
-    };
     await until(() => !server.library.running().indexer);
     // a book opened that is indexed already asks nothing of it
     let opened = (await books())[0];
@@ -223,8 +224,10 @@ describe('the server', () => {
     await settled();
     let { id } = (await books()).find(book => !book.folder && !book.deletable)!;
     let db = new DatabaseSync(path.join(data, 'library.db'));
-    let blocks = () => (db.prepare('select rowid from blocks where book_id = ? order by offset').all(id) as { rowid: number }[]).map(row => row.rowid);
-    let row = () => db.prepare('select parser, indexed from books where id = ?').get(id) as { parser: number; indexed: number };
+    let ix = new DatabaseSync(indexFile(data), { readOnly: true });
+    let blocks = () => (ix.prepare('select rowid from blocks where book_id = ? order by offset').all(id) as { rowid: number }[]).map(row => row.rowid);
+    let done = () => (ix.prepare('select done from indexed where book_id = ?').get(id) as { done: number } | undefined)?.done;
+    let row = () => db.prepare('select parser from books where id = ?').get(id) as { parser: number };
     let chapters = () => (db.prepare('select rowid from chapters where book_id = ? order by n').all(id) as { rowid: number }[]).map(c => c.rowid);
     let before = blocks();
     let chaptersBefore = chapters();
@@ -236,17 +239,17 @@ describe('the server', () => {
     assert.equal((await call('GET', 'library')).answer.scan.read, 0);
     assert.equal(row().parser, 1);
     assert.equal((await call('GET', `books/${id}`)).answer.parser, PARSER_VERSION);
-    assert.deepEqual([blocks(), row().indexed], [before, INDEX_VERSION]);
+    assert.deepEqual([blocks(), done()], [before, 1]);
     // the same chapters read again are left as they were written, not written again
     assert.deepEqual(chapters(), chaptersBefore);
     // a file that changed is another matter
     let file = path.join(shelf, 'Sách thử (1-3 chương).txt');
     fs.appendFileSync(file, '\n\nThêm một câu.');
     await call('POST', `books/${id}/reread`);
-    assert.deepEqual([blocks(), row().indexed], [[], 0]);
     await settled();
     assert.ok(blocks().length > 0 && blocks().every(rowid => !before.includes(rowid)));
     db.close();
+    ix.close();
     fs.writeFileSync(file, bookText('Hoàng Dung'));
     await call('POST', `books/${id}/reread`);
     await settled();
@@ -265,6 +268,12 @@ describe('the server', () => {
     assert.deepEqual((await books()).map(book => book.title).sort(), ['Mới', 'Sách thử']);
     // where a book was left outlives it, for it to come back to
     assert.equal((await call('GET', 'progress')).answer[gone.id].offset, 120);
+    // what the index held of it does not, once the indexer has nothing else to do
+    await until(() => !server.library.running().indexer);
+    let ix = new DatabaseSync(indexFile(data), { readOnly: true });
+    let held = ix.prepare('select count(*) as n from indexed where book_id = ?').get(gone.id) as { n: number };
+    ix.close();
+    assert.equal(held.n, 0);
   });
   it('finds the books a character is in', async () => {
     let [person] = (await call('GET', `characters?q=${encodeURIComponent('hoang dung')}`)).answer;
@@ -293,7 +302,7 @@ describe('the server', () => {
     let text = ['Sách dài', 'Chương 1: Mở đầu', long, 'Chương 2: Hết', 'Lệnh Hồ Xung đi rồi.'].join('\n\n');
     let { answer: record } = await call('POST', 'books', { name: 'Sách dài (1-2 chương).txt', size: 0, text });
     await settled();
-    let db = new DatabaseSync(path.join(data, 'library.db'), { readOnly: true });
+    let db = new DatabaseSync(indexFile(data), { readOnly: true });
     let blocks = (db.prepare('select count(*) as n from blocks where book_id = ?').get(record.id) as { n: number }).n;
     db.close();
     assert.ok(blocks > 3);
@@ -308,13 +317,14 @@ describe('the server', () => {
     let long = Array.from({ length: 400 }, (_, k) => `Dòng ${k}: ${k % 50 ? 'trời mưa mãi không thôi, gió thổi qua sân vắng' : 'Nhạc Bất Quần đứng dậy'}.`).join('\n');
     let { answer: record } = await call('POST', 'books', { name: 'Sách dở (1-1 chương).txt', size: 0, text: ['Sách dở', 'Chương 1: Mở đầu', long].join('\n\n') });
     await settled();
-    let db = new DatabaseSync(path.join(data, 'library.db'));
+    let db = new DatabaseSync(indexFile(data));
+    db.exec('pragma busy_timeout = 5000');
     let blocks = () => (db.prepare('select rowid from blocks where book_id = ? order by offset').all(record.id) as { rowid: number }[]).map(row => row.rowid);
     let all = blocks();
     assert.ok(all.length > 3);
     // as an indexer stopped after two blocks leaves it
     db.prepare('delete from blocks where book_id = ? and rowid > ?').run(record.id, all[1]);
-    db.prepare('update books set indexed = 0 where id = ?').run(record.id);
+    db.prepare('update indexed set done = 0 where book_id = ?').run(record.id);
     let { answer: book } = await call('GET', `books/${record.id}`);
     assert.equal(book.id, record.id);
     await settled();
@@ -330,8 +340,10 @@ describe('the server', () => {
     let text = ['Sách bừa', ...[1, 2, 3].map(n => `Chương ${n}  :  Tiêu đề ${n}\r\n\r\nQQ Group 712797052\r\n${messy(n)}`)].join('\r\n\r\n\r\n');
     let { answer: record } = await call('POST', 'books', { name: 'Sách bừa (1-3 chương).txt', size: 0, text });
     await settled();
+    let ix = new DatabaseSync(indexFile(data), { readOnly: true });
+    let { last } = ix.prepare('select max("end") as last from blocks where book_id = ?').get(record.id) as { last: number };
+    ix.close();
     let db = new DatabaseSync(path.join(data, 'library.db'), { readOnly: true });
-    let { last } = db.prepare('select max("end") as last from blocks where book_id = ?').get(record.id) as { last: number };
     let starts = (db.prepare('select raw_offset from chapters where book_id = ? order by n').all(record.id) as { raw_offset: number }[]).map(c => c.raw_offset);
     db.close();
     assert.equal(last, text.length);
@@ -503,5 +515,40 @@ describe('what the reader keeps', () => {
     let left = db.prepare("select name from sqlite_master where name in ('progress', 'settings', 'names')").all();
     db.close();
     assert.deepEqual(left, []);
+  });
+});
+
+describe('the index', () => {
+  it('is a file of its own: deleted, it is made again from the files, and nothing else is read again', async () => {
+    let data = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-test-'));
+    let shelf = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-shelf-'));
+    fs.writeFileSync(path.join(shelf, 'Sách (1-3 chương).txt'), bookText('Hoàng Dung'));
+    // (the index of another INDEX_VERSION, left by an older server)
+    fs.writeFileSync(path.join(data, 'index-1.db'), 'old');
+    let started = async () => {
+      let library = createLibrary({ data, libraries: [{ name: 'shelf', dir: shelf }] });
+      library.scan();
+      await library.scanned();
+      for(let tries = 0; tries < 400 && library.status().index.done < library.status().index.total; tries++) await wait(25);
+      return library;
+    };
+    let found = async (library: ReturnType<typeof createLibrary>) => (await library.search('hoang dung') as { chapters: number }[]).map(book => book.chapters);
+    try {
+      let library = await started();
+      assert.ok(!fs.existsSync(path.join(data, 'index-1.db')));
+      assert.deepEqual(await found(library), [3]);
+      await library.close();
+      for(let file of ['', '-wal', '-shm']) fs.rmSync(indexFile(data) + file, { force: true });
+      library = await started();
+      try {
+        assert.equal(library.status().scan.read, 0);
+        assert.deepEqual(await found(library), [3]);
+      } finally {
+        await library.close();
+      }
+    } finally {
+      fs.rmSync(data, { recursive: true, force: true });
+      fs.rmSync(shelf, { recursive: true, force: true });
+    }
   });
 });

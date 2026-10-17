@@ -6,7 +6,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createReaderStore, createStore, INDEX_VERSION, plain } from './store.ts';
+import { createReaderStore, createStore, plain } from './store.ts';
+import { createIndexStore, createSearch, deleteOtherIndexes, indexFile } from './index-store.ts';
 import type { BookRow, ChapterRow } from './store.ts';
 import { createReaders } from './readers.ts';
 import type { ReadText } from './read-worker.ts';
@@ -73,9 +74,14 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
   // what the reader keeps first, taken out of an older library.db before it is opened
   let reader = createReaderStore(path.join(data, 'reader.db'), { library: database });
   let store = createStore(database);
+  // the index, made if it is not there (the indexer writes it), and those of other indexes gone
+  let index = indexFile(data);
+  deleteOtherIndexes(data);
+  createIndexStore(index).close();
+  let search = createSearch(database, index);
   let roots = new Map<string, string>([[UPLOADS, uploads], ...libraries.map(({ name, dir }): [string, string] => [name, path.resolve(dir)])]);
   let readers = createReaders();
-  let indexer = createIndexer({ database, roots });
+  let indexer = createIndexer({ database, index, roots });
   // what was left unindexed when the server last stopped
   indexer.nudge();
   let fileOf = (row: BookRow) => path.join(roots.get(row.root) ?? '', row.path);
@@ -222,7 +228,7 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
       let row = store.book(id);
       if(!row) return null;
       if(row.parser !== PARSER_VERSION) return library.rereadBook(id);
-      if(row.indexed !== INDEX_VERSION) indexer.first(id);
+      if(!search.isIndexed(id)) indexer.first(id);
       return recordOf(row);
     },
     // a chapter as the page shows it: its lines corrected by the book's names list, and the names
@@ -265,9 +271,9 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
     scanned: (): Promise<void> => scanning ?? Promise.resolve(),
     status: () => ({
       libraries: [...roots.keys()].filter(root => root !== UPLOADS),
-      books: store.indexCount(INDEX_VERSION).total,
+      books: search.indexCount().total,
       scan,
-      index: store.indexCount(INDEX_VERSION),
+      index: search.indexCount(),
     }),
 
     // ---- search
@@ -291,14 +297,14 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
       let words = plain(q).trim().replace(/\s+/g, ' ');
       if(!words) return bookId ? { indexed: true, mentions: [] } : [];
       let phrase = `"${words.replaceAll('"', '""')}"`;
-      if(!bookId) return store.booksSaying(phrase);
+      if(!bookId) return search.booksSaying(phrase);
       let row = store.book(bookId);
       if(!row) return null;
-      let indexed = row.indexed === INDEX_VERSION;
+      let indexed = search.isIndexed(bookId);
       if(!indexed) indexer.first(bookId);
       // the chapters the blocks it is in run over, in the file's text (see raw.ts): with a little
       // to spare, where a chapter is found to begin there only near where it does
-      let blocks = store.blocksSaying(phrase, bookId);
+      let blocks = search.blocksSaying(phrase, bookId);
       let all = blocks.length ? store.chapters(bookId) : [];
       let at = 0;
       let chapters = all.filter((chapter, n) => {
@@ -340,6 +346,7 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
       closing ??= (async () => {
         await scanning?.catch(() => {});
         await Promise.all([readers.close(), indexer.close()]);
+        search.close();
         store.close();
         reader.close();
       })();

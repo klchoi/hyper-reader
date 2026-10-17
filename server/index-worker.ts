@@ -1,11 +1,14 @@
-// The full text of the books into the index, in a process of its own with a connection of its
-// own (see indexer.ts): the book asked for first, then every book not yet indexed under this
-// index, one after another, in writes of a few MB so none holds the database long. With none
-// left it says it is idle, and waits to be told of more, or ended.
+// The full text of the books into the index, in a process of its own with connections of its own
+// (see indexer.ts): the book asked for first, then every book of library.db not indexed, one
+// after another, in writes of 16 MB. It writes the index only (index-store.ts), which nothing
+// else writes, and library.db only for a book read before its chapters were kept to its file's
+// text. With none left it forgets the books gone from library.db, says it is idle, and waits to
+// be told of more, or ended.
 import fs from 'node:fs';
 import path from 'node:path';
-import { createStore, INDEX_VERSION } from './store.ts';
+import { createStore } from './store.ts';
 import type { ChapterRow } from './store.ts';
+import { createIndexStore, createSearch } from './index-store.ts';
 import { normalizeFileContent } from '../src/parser.ts';
 import { rawOffsets, rawText } from './raw.ts';
 
@@ -13,8 +16,10 @@ import { rawOffsets, rawText } from './raw.ts';
 // to do, having heard so many messages
 export type Told = { indexed: string } | { failed: string; error: string } | { idle: number };
 
-const given: { database: string; roots: [string, string][] } = JSON.parse(process.argv[2]);
+const given: { database: string; index: string; roots: [string, string][] } = JSON.parse(process.argv[2]);
 const store = createStore(given.database);
+const index = createIndexStore(given.index);
+const search = createSearch(given.database, given.index);
 const roots = new Map<string, string>(given.roots);
 // characters of text a write takes in: each write makes a piece of the index the next merge
 // writes again, so few big ones write least (of 400 MB of text, 2 MB writes made 2.6 GB of
@@ -53,9 +58,15 @@ function* blocksOf(text: string, chapters: ChapterRow[], from = 0) {
   }
 }
 
-function index(id: string) {
+// whether a book of library.db is still as it was read (its size and time)
+const still = ({ id, size, mtime }: { id: string; size: number; mtime: number }) => {
+  let now = store.book(id);
+  return !!now && now.size === size && now.mtime === mtime;
+};
+
+function indexBook(id: string) {
   let book = store.book(id);
-  if(!book || book.indexed === INDEX_VERSION) return false;
+  if(!book || search.isIndexed(id)) return false;
   let file = path.join(roots.get(book.root) ?? '', book.path);
   let stat = fs.statSync(file, { throwIfNoEntry: false });
   if(!stat || stat.size !== book.size || stat.mtimeMs !== book.mtime) {
@@ -71,11 +82,12 @@ function index(id: string) {
     chapters = chapters.map((c, n) => ({ ...c, raw_offset: raw[n] }));
     store.keepRawOffsets(chapters as { rowid: number; raw_offset: number }[]);
   }
-  // a book stopped in the middle of is taken up where it was left; one indexed under another
-  // index, or not begun, is begun
+  // a book stopped in the middle of is taken up where it was left; one of another file, or not
+  // begun, is begun
   let from = 0;
-  if(book.indexing === INDEX_VERSION) from = store.indexedTo(id);
-  else store.startIndexing(book, INDEX_VERSION);
+  let had = index.indexed(id);
+  if(had && had.size === book.size && had.mtime === book.mtime) from = index.indexedTo(id);
+  else index.begin(book);
   let batch = [];
   let size = 0;
   for(let block of blocksOf(text, chapters, from)) {
@@ -84,27 +96,31 @@ function index(id: string) {
     size += body.length;
     if(size < BATCH) continue;
     // the book read again meanwhile: it is to be indexed as it is now
-    if(!store.indexBlocks(book, batch)) return false;
+    if(!still(book)) return false;
+    index.indexBlocks(id, batch);
     batch = [];
     size = 0;
   }
-  if(!store.indexBlocks(book, batch)) return false;
-  store.markIndexed(book, INDEX_VERSION);
+  if(!still(book)) return false;
+  index.indexBlocks(id, batch);
+  index.finish(id);
   return true;
 }
 
 async function run() {
   for(;;) {
-    let id = first.shift() ?? store.toIndex(INDEX_VERSION, passed.size + 1).find(next => !passed.has(next));
+    let id = first.shift() ?? search.toIndex(passed.size + 1).find(next => !passed.has(next));
     if(!id) {
-      // nothing left: until a book comes in (or the indexer is ended)
+      // nothing left: what the index holds of books gone goes too, and until a book comes in (or
+      // the indexer is ended)
+      index.forget(search.gone());
       tell({ idle: heard });
       await new Promise<void>(resolve => { wake = resolve; });
       wake = null;
       continue;
     }
     try {
-      if(index(id)) tell({ indexed: id });
+      if(indexBook(id)) tell({ indexed: id });
     } catch(error) {
       passed.add(id);
       tell({ failed: id, error: String((error as Error).message) });

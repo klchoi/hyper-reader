@@ -6,13 +6,13 @@ import type { Helper } from './readers.ts';
 import { startHelper } from './readers.ts';
 import type { Told } from './index-worker.ts';
 
-export function createIndexer({ database, roots, onIndexed = () => {} }: { database: string; roots: Map<string, string>; onIndexed?: (id: string) => void }) {
+export function createIndexer({ database, index, roots, onIndexed = () => {} }: { database: string; index: string; roots: Map<string, string>; onIndexed?: (id: string) => void }) {
   let helper: Helper | null = null;
   // what this indexer was told: it is ended only when it says it is idle having heard all of it,
   // so nothing told it is lost on the way
   let sent = 0;
   let start = () => {
-    let started = startHelper(new URL('./index-worker.ts', import.meta.url), [JSON.stringify({ database, roots: [...roots] })]);
+    let started = startHelper(new URL('./index-worker.ts', import.meta.url), [JSON.stringify({ database, index, roots: [...roots] })]);
     started.process.on('message', (message: Told | { ready: true }) => {
       if('ready' in message) return;
       if('idle' in message) {

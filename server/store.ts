@@ -1,28 +1,25 @@
-// What the server keeps, in two SQLite databases (node:sqlite):
+// What the server keeps, in three SQLite databases (node:sqlite), by what it would take to lose
+// each:
 //
-// - <data>/library.db, what it knows of the books: the books found in the libraries, their
-//   chapters, the characters named in them, and the full text, indexed for search (FTS5). All of
-//   it is made again from the files: it may be deleted, or kept somewhere else (it is big, and
-//   much written to), and nothing of the reader's goes with it. A book's text is not kept here:
-//   it stays in its file, and a chapter is cut from it at the offsets kept for it.
 // - <data>/reader.db, what the reader keeps (`createReaderStore`): where each book was left, the
 //   settings, the names corrected. Small, written to little, and made of nothing else: this is
 //   the one to keep a copy of.
+// - <data>/library.db, what is known of the books (`createStore`): the books found in the
+//   libraries, their chapters, the characters named in them. Made again from the files by a
+//   scan, a few minutes. A book's text is not kept here: it stays in its file, and a chapter is
+//   cut from it at the offsets kept for it.
+// - <data>/index-<INDEX_VERSION>.db, the full text indexed for search (see index-store.ts): by far
+//   the biggest, and the one written to most. Made again from the files by the indexer, behind
+//   everything else; a new index is a new file, the old one deleted.
 //
 // library.db:
 //
 //   books        one row a file: where it is (`root`, the library, and `path` in it), what it is
-//                called, its size and time (a file changed since is read again), the parser
-//                that read it, the index its text was indexed under (0: not yet), and the one
-//                it is being indexed under, its blocks so far kept (0: none)
+//                called, its size and time (a file changed since is read again), and the parser
+//                that read it
 //   chapters     a book's chapters in order, where each begins and ends in the text as read,
 //                and where it begins in the file's own (see raw.ts)
 //   characters   the names a book's text gives most often, and how often
-//   blocks       a book's file's text (see raw.ts) cut into pieces for the index, where each
-//                begins and ends in it: cut where the chapters began when it was indexed, but
-//                kept to the file, so whatever a newer parser makes of a book, its index stays
-//   book_text    the blocks' text, folded (see `fold`), for search; contentless: the index
-//                only, its rows are the blocks' rowids
 //
 // reader.db:
 //   progress, settings, names   as the page sends them; progress and names outlive their book,
@@ -33,17 +30,9 @@ import type { StatementSync } from 'node:sqlite';
 import type { Part } from '../src/parser.ts';
 import { fold } from '../src/catalog.ts';
 
-// what is searched is folded the same way on both sides. The index takes the text in lower case
-// and with `đ` as `d`, which the tokenizer's removal of diacritics leaves as it is (the tones and
-// the other marks it takes away itself); a name is kept with no marks at all, so `hoang dung`
-// finds `Hoàng Dung`
-export const foldForIndex = (text: string) => text.toLowerCase().replaceAll('đ', 'd');
+// a name is kept with no marks at all, so `hoang dung` finds `Hoàng Dung` (see index-store.ts for
+// the full text)
 export const plain = fold;
-
-// bump when what the index holds of a file changes (`rawText` in raw.ts, the folding above, the
-// tokenizer, how a text is cut into blocks): every book is indexed again. A change to the parser
-// (PARSER_VERSION), what it makes of a text included, leaves the index as it is
-export const INDEX_VERSION = 2;
 
 const MIGRATIONS = [
   `create table books (
@@ -150,9 +139,15 @@ const MIGRATIONS = [
   // writes of 16 MB (see index-worker.ts), 1.5 GB written in place of 2.6 GB, the index no bigger
   // and no slower to search (at 16, it is 70% bigger, for nothing less written)
   `insert into book_text(book_text, rank) values('automerge', 8);`,
+  // the full text kept in a database of its own (see index-store.ts), and indexed again there
+  `drop trigger block_gone;
+  drop table book_text;
+  drop table blocks;
+  alter table books drop column indexed;
+  alter table books drop column indexing;`,
 ];
 
-function openStore(file: string, migrations: string[]) {
+export function openStore(file: string, migrations: string[]) {
   let db = new DatabaseSync(file);
   // one writer at a time, readers alongside; a writer waits for another rather than failing. The
   // log, as big as a write of the indexer once written back, is cut back to 64 MB, not left so
@@ -168,7 +163,7 @@ function openStore(file: string, migrations: string[]) {
 }
 
 // `work` all at once, or not at all
-function transaction<T>(db: DatabaseSync, work: () => T) {
+export function transaction<T>(db: DatabaseSync, work: () => T) {
   db.exec('begin immediate');
   try {
     let result = work();
@@ -181,10 +176,10 @@ function transaction<T>(db: DatabaseSync, work: () => T) {
 }
 
 // a book's row as the page knows it: its record without the chapters
-const BOOK_COLUMNS = 'id, root, path, name, description, size, mtime, parser, indexed, indexing, chapter_count as chapterCount';
+const BOOK_COLUMNS = 'id, root, path, name, description, size, mtime, parser, chapter_count as chapterCount';
 export type BookRow = {
   id: string; root: string; path: string; name: string; description: string | null;
-  size: number; mtime: number; parser: number; indexed: number; indexing: number; chapterCount: number;
+  size: number; mtime: number; parser: number; chapterCount: number;
 };
 export type ChapterRow = {
   rowid: number; n: number; id: string; title: string; offset: number; end: number; raw_offset: number | null;
@@ -200,7 +195,7 @@ export type BookRead = {
 };
 
 // each statement of a database prepared once, the first time it is run
-function statementsOf(db: DatabaseSync) {
+export function statementsOf(db: DatabaseSync) {
   let statements = new Map<string, StatementSync>();
   return (text: string) => {
     if(!statements.has(text)) statements.set(text, db.prepare(text));
@@ -223,19 +218,18 @@ export function createStore(file: string) {
     book: (id: string) => (sql(`select ${BOOK_COLUMNS} from books where id = ?`).get(id) ?? null) as BookRow | null,
     chapters: (id: string) => sql('select rowid, n, id, title, offset, "end", raw_offset, grp, part_of, part_text from chapters where book_id = ? order by n').all(id) as ChapterRow[],
     // a book read: its row, and its chapters and characters in place of what it had, only what is
-    // not as it was written (a book read again is mostly the same). Its index is kept as long as
-    // its file is the one indexed, whatever the parser made of it
+    // not as it was written (a book read again is mostly the same). Its index is the indexer's
+    // (see index-store.ts): kept as long as its file is the one indexed, whatever the parser made
+    // of it
     keepBook({ id, root, path, name, description, size, mtime, parser, chapters, characters }: BookRead & { id: string; root: string; path: string }) {
       transaction(db, () => {
-        let was = sql('select size, mtime, indexed, indexing from books where id = ?').get(id) as { size: number; mtime: number; indexed: number; indexing: number } | undefined;
-        let same = !!was && was.size === size && was.mtime === mtime;
-        if(!same) sql('delete from blocks where book_id = ?').run(id);
-        sql(`insert into books (id, root, path, name, description, size, mtime, parser, indexed, indexing, chapter_count, added_at)
-             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        let was = !!sql('select 1 from books where id = ?').get(id);
+        sql(`insert into books (id, root, path, name, description, size, mtime, parser, chapter_count, added_at)
+             values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              on conflict (id) do update set root = excluded.root, path = excluded.path, name = excluded.name,
                description = excluded.description, size = excluded.size, mtime = excluded.mtime, parser = excluded.parser,
-               indexed = excluded.indexed, indexing = excluded.indexing, chapter_count = excluded.chapter_count`)
-          .run(id, root, path, name, description ?? null, size, mtime, parser, same ? was!.indexed : 0, same ? was!.indexing : 0, chapters.length, new Date().toISOString());
+               chapter_count = excluded.chapter_count`)
+          .run(id, root, path, name, description ?? null, size, mtime, parser, chapters.length, new Date().toISOString());
         let kept = was ? store.chapters(id) : [];
         let insert = sql('insert into chapters (book_id, n, id, title, offset, "end", raw_offset, grp, part_of, part_text) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         let update = sql('update chapters set id = ?, title = ?, offset = ?, "end" = ?, raw_offset = ?, grp = ?, part_of = ?, part_text = ? where rowid = ?');
@@ -257,10 +251,7 @@ export function createStore(file: string) {
     },
     forgetBook: (id: string) => { sql('delete from books where id = ?').run(id); },
 
-    // ---- the full text
-    // the books still to index under this index, in the order they came
-    toIndex: (index: number, limit: number) => (sql('select id from books where indexed != ? order by added_at limit ?').all(index, limit) as { id: string }[]).map(row => row.id),
-    indexCount: (index: number) => sql('select count(*) as total, coalesce(sum(indexed = ?), 0) as done from books').get(index) as { total: number; done: number },
+    // ---- for the indexer
     // where a book's chapters begin in its file's text, for a book read before it was kept
     // (its chapters as they are: none read again meanwhile)
     keepRawOffsets(chapters: { rowid: number; raw_offset: number }[]) {
@@ -269,31 +260,6 @@ export function createStore(file: string) {
         for(let { rowid, raw_offset } of chapters) update.run(raw_offset, rowid);
       });
     },
-    // a book to be indexed under `index`, anew: its blocks, and what the index holds of them, gone
-    startIndexing({ id, size, mtime }: BookRow, index: number) {
-      transaction(db, () => {
-        sql('delete from blocks where book_id = ?').run(id);
-        sql('update books set indexing = ? where id = ? and size = ? and mtime = ?').run(index, id, size, mtime);
-      });
-    },
-    // how far into its file's text a book is indexed: where its last block ends
-    indexedTo: (id: string) => (sql('select coalesce(max("end"), 0) as at from blocks where book_id = ?').get(id) as { at: number }).at,
-    // blocks of a book into the index: [{ offset, end, body }], as long as it is still the book
-    // that was read (false: it is not, and was left as it is)
-    indexBlocks({ id, size, mtime }: BookRow, blocks: { offset: number; end: number; body: string }[]) {
-      return transaction(db, () => {
-        if(!sql('select 1 from books where id = ? and size = ? and mtime = ?').get(id, size, mtime)) return false;
-        let block = sql('insert into blocks (book_id, offset, "end") values (?, ?, ?)');
-        let insert = sql('insert into book_text (rowid, body) values (?, ?)');
-        for(let { offset, end, body } of blocks) insert.run(block.run(id, offset, end).lastInsertRowid, foldForIndex(body));
-        return true;
-      });
-    },
-    // a book indexed, as long as it is still the book that was read
-    markIndexed: ({ id, size, mtime }: BookRow, index: number) => {
-      sql('update books set indexed = ? where id = ? and size = ? and mtime = ?').run(index, id, size, mtime);
-    },
-
     // ---- search
     // the characters whose names begin with `q`, as said in the books they are named in
     characters: (q: string, limit = 500) => {
@@ -301,15 +267,6 @@ export function createStore(file: string) {
       return sql(`select c.name, c.mentions, b.id as bookId, b.name as bookName from characters c join books b on b.id = c.book_id
                   where c.folded >= ? and c.folded < ? order by c.mentions desc limit ?`).all(key, `${key}\uffff`, limit) as { name: string; mentions: number; bookId: string; bookName: string }[];
     },
-    // where a phrase is in one book: the blocks it is in, in order, where they are in its file
-    blocksSaying: (phrase: string, bookId: string) => sql(`select k.offset, k."end" from book_text join blocks k on k.rowid = book_text.rowid
-                  where book_text match ? and k.book_id = ? order by k.offset`).all(phrase, bookId) as { offset: number; end: number }[],
-    // the books a phrase is in, and in how many of their chapters: a block's chapter is the one
-    // it begins in (blocks are cut where the chapters began when the book was indexed)
-    booksSaying: (phrase: string, limit = 100) => sql(`select k.book_id as id, b.name, count(distinct coalesce((select c.n from chapters c
-                    where c.book_id = k.book_id and c.raw_offset <= k.offset order by c.raw_offset desc limit 1), -1)) as chapters
-                  from book_text join blocks k on k.rowid = book_text.rowid join books b on b.id = k.book_id
-                  where book_text match ? group by k.book_id order by chapters desc limit ?`).all(phrase, limit) as { id: string; name: string; chapters: number }[],
   };
   return store;
 }

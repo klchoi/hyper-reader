@@ -8,10 +8,18 @@ and the settings. The page is built from `src/` (see Building it); git keeps `sr
 
 `npm run build` once (and again after a change to `src/`), then
 `npm start -- [--port 8080] [--data <folder>] [--library [name=]<folder>]...`, then
-`http://127.0.0.1:8080/`. The server serves the page, and keeps the books in a SQLite
-database, `<data>/library.db` (`data/` by default), all of it made again from the files if it is
-deleted; where each book was left, the settings and the names corrected are kept apart, in
-`<data>/reader.db`, the one file to keep a copy of. The books are:
+`http://127.0.0.1:8080/`. The server serves the page, and keeps what it knows in three SQLite
+databases in `<data>` (`data/` by default):
+
+- `reader.db`: where each book was left, the settings, the names corrected. The one file to
+  keep a copy of;
+- `library.db`: the books, their chapters and characters. Made again by a scan if deleted;
+- `index-<n>.db`: the full text, indexed for search. By far the biggest, and the most written
+  to: made again from the files by the indexer if deleted, and it may be kept where writes cost
+  least (a folder without copy-on-write, another disk). A new index is a new file, the old one
+  deleted.
+
+The books are:
 
 - the books of each library, a folder of `.txt` files (sub-folders too), read where they are and
   never written to or deleted. A library is known by its name, the folder's own if none is given,

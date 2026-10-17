@@ -217,25 +217,37 @@ export function createStore(file: string) {
     booksIn: (root: string) => sql(`select ${BOOK_COLUMNS} from books where root = ?`).all(root) as BookRow[],
     book: (id: string) => (sql(`select ${BOOK_COLUMNS} from books where id = ?`).get(id) ?? null) as BookRow | null,
     chapters: (id: string) => sql('select rowid, n, id, title, offset, "end", raw_offset, grp, part_of, part_text from chapters where book_id = ? order by n').all(id) as ChapterRow[],
-    // a book read: its row, and its chapters and characters in place of what it had. Its index
-    // is kept as long as its file is the one indexed, whatever the parser made of it
+    // a book read: its row, and its chapters and characters in place of what it had, only what is
+    // not as it was written (a book read again is mostly the same). Its index is kept as long as
+    // its file is the one indexed, whatever the parser made of it
     keepBook({ id, root, path, name, description, size, mtime, parser, chapters, characters }: BookRead & { id: string; root: string; path: string }) {
       transaction(db, () => {
         let was = sql('select size, mtime, indexed, indexing from books where id = ?').get(id) as { size: number; mtime: number; indexed: number; indexing: number } | undefined;
         let same = !!was && was.size === size && was.mtime === mtime;
         if(!same) sql('delete from blocks where book_id = ?').run(id);
-        sql('delete from characters where book_id = ?').run(id);
         sql(`insert into books (id, root, path, name, description, size, mtime, parser, indexed, indexing, chapter_count, added_at)
              values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              on conflict (id) do update set root = excluded.root, path = excluded.path, name = excluded.name,
                description = excluded.description, size = excluded.size, mtime = excluded.mtime, parser = excluded.parser,
                indexed = excluded.indexed, indexing = excluded.indexing, chapter_count = excluded.chapter_count`)
           .run(id, root, path, name, description ?? null, size, mtime, parser, same ? was!.indexed : 0, same ? was!.indexing : 0, chapters.length, new Date().toISOString());
-        sql('delete from chapters where book_id = ?').run(id);
-        let chapter = sql('insert into chapters (book_id, n, id, title, offset, "end", raw_offset, grp, part_of, part_text) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        chapters.forEach((c, n) => chapter.run(id, n, c.id, c.title, c.offset, c.end, c.rawOffset, c.group ?? null, c.part?.of ?? null, c.part?.text ?? null));
-        let character = sql('insert into characters (book_id, name, folded, mentions) values (?, ?, ?, ?)');
-        for(let { name: who, mentions } of characters) character.run(id, who, plain(who), mentions);
+        let kept = was ? store.chapters(id) : [];
+        let insert = sql('insert into chapters (book_id, n, id, title, offset, "end", raw_offset, grp, part_of, part_text) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        let update = sql('update chapters set id = ?, title = ?, offset = ?, "end" = ?, raw_offset = ?, grp = ?, part_of = ?, part_text = ? where rowid = ?');
+        chapters.forEach((c, n) => {
+          let row = [c.id, c.title, c.offset, c.end, c.rawOffset, c.group ?? null, c.part?.of ?? null, c.part?.text ?? null] as const;
+          let k = kept[n];
+          if(!k) insert.run(id, n, ...row);
+          else if([k.id, k.title, k.offset, k.end, k.raw_offset, k.grp, k.part_of, k.part_text].some((value, at) => value !== row[at])) update.run(...row, k.rowid);
+        });
+        if(kept.length > chapters.length) sql('delete from chapters where book_id = ? and n >= ?').run(id, chapters.length);
+        let had = was ? sql('select name, mentions from characters where book_id = ? order by name').all(id) as { name: string; mentions: number }[] : [];
+        let now = [...characters].sort((a, z) => a.name < z.name ? -1 : a.name > z.name ? 1 : 0);
+        if(had.length !== now.length || had.some((c, n) => c.name !== now[n].name || c.mentions !== now[n].mentions)) {
+          sql('delete from characters where book_id = ?').run(id);
+          let character = sql('insert into characters (book_id, name, folded, mentions) values (?, ?, ?, ?)');
+          for(let { name: who, mentions } of characters) character.run(id, who, plain(who), mentions);
+        }
       });
     },
     forgetBook: (id: string) => { sql('delete from books where id = ?').run(id); },

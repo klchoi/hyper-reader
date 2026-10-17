@@ -225,7 +225,9 @@ describe('the server', () => {
     let db = new DatabaseSync(path.join(data, 'library.db'));
     let blocks = () => (db.prepare('select rowid from blocks where book_id = ? order by offset').all(id) as { rowid: number }[]).map(row => row.rowid);
     let row = () => db.prepare('select parser, indexed from books where id = ?').get(id) as { parser: number; indexed: number };
+    let chapters = () => (db.prepare('select rowid from chapters where book_id = ? order by n').all(id) as { rowid: number }[]).map(c => c.rowid);
     let before = blocks();
+    let chaptersBefore = chapters();
     assert.ok(before.length > 0);
     db.prepare('update books set parser = 1 where id = ?').run(id);
     // a scan reads only what came, changed or went
@@ -235,6 +237,8 @@ describe('the server', () => {
     assert.equal(row().parser, 1);
     assert.equal((await call('GET', `books/${id}`)).answer.parser, PARSER_VERSION);
     assert.deepEqual([blocks(), row().indexed], [before, INDEX_VERSION]);
+    // the same chapters read again are left as they were written, not written again
+    assert.deepEqual(chapters(), chaptersBefore);
     // a file that changed is another matter
     let file = path.join(shelf, 'Sách thử (1-3 chương).txt');
     fs.appendFileSync(file, '\n\nThêm một câu.');

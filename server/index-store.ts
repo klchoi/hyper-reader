@@ -1,8 +1,9 @@
 // The full text of the books, indexed for search (FTS5), in a database of its own beside library.db
-// (see store.ts): <data>/index-<INDEX_VERSION>.db. It is by far the biggest of what the server
-// keeps, and the one written to most, and it is made again from the files alone: it can be kept
-// where it costs least (a folder without copy-on-write, another disk), and a new index is a new
-// file, the old one deleted (`indexFile`), not millions of rows deleted one by one.
+// (see store.ts): index-<INDEX_VERSION>.db, in <data> or a folder of its own (--index-dir). It is
+// by far the biggest of what the server keeps, and the one written to most, and it is made again
+// from the files alone: it can be kept where it costs least (a folder without copy-on-write,
+// another disk), and a new index is a new file, the old one deleted (`indexFile`), not millions
+// of rows deleted one by one.
 //
 //   indexed      a book of library.db indexed, or being indexed: the size and time its file had
 //                (a book whose file is not as kept in library.db is not indexed, whatever is
@@ -27,12 +28,12 @@ import { openStore, statementsOf, transaction } from './store.ts';
 // to the parser (PARSER_VERSION), what it makes of a text included, leaves the index as it is
 export const INDEX_VERSION = 2;
 
-// the index's file in `data`; those of other indexes, which are deleted
-export const indexFile = (data: string) => path.join(data, `index-${INDEX_VERSION}.db`);
-export function deleteOtherIndexes(data: string) {
-  for(let file of fs.readdirSync(data)) {
+// the index's file in its folder; those of other indexes, which are deleted
+export const indexFile = (dir: string) => path.join(dir, `index-${INDEX_VERSION}.db`);
+export function deleteOtherIndexes(dir: string) {
+  for(let file of fs.readdirSync(dir)) {
     let index = /^index-(\d+)\.db(?:-wal|-shm)?$/.exec(file);
-    if(index && Number(index[1]) !== INDEX_VERSION) fs.rmSync(path.join(data, file), { force: true });
+    if(index && Number(index[1]) !== INDEX_VERSION) fs.rmSync(path.join(dir, file), { force: true });
   }
 }
 

@@ -66,8 +66,9 @@ export type LibraryDir = { name: string; dir: string };
 
 // `sample`: of each library, only so many books (0: all of them), the same ones from one scan to
 // the next, the others left out as though they were not there: for working on the app with a
-// library too big to read again and again
-export function createLibrary({ data, libraries = [], sample = 0 }: { data: string; libraries?: LibraryDir[]; sample?: number }) {
+// library too big to read again and again. `indexDir`: the folder the index is kept in (see
+// index-store.ts), `data` if none is given
+export function createLibrary({ data, libraries = [], sample = 0, indexDir = data }: { data: string; libraries?: LibraryDir[]; sample?: number; indexDir?: string }) {
   let uploads = path.join(data, UPLOADS);
   fs.mkdirSync(uploads, { recursive: true });
   let database = path.join(data, 'library.db');
@@ -75,8 +76,9 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
   let reader = createReaderStore(path.join(data, 'reader.db'), { library: database });
   let store = createStore(database);
   // the index, made if it is not there (the indexer writes it), and those of other indexes gone
-  let index = indexFile(data);
-  deleteOtherIndexes(data);
+  fs.mkdirSync(indexDir, { recursive: true });
+  let index = indexFile(indexDir);
+  deleteOtherIndexes(indexDir);
   createIndexStore(index).close();
   let search = createSearch(database, index);
   let roots = new Map<string, string>([[UPLOADS, uploads], ...libraries.map(({ name, dir }): [string, string] => [name, path.resolve(dir)])]);

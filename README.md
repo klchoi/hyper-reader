@@ -16,8 +16,8 @@ databases in `<data>` (`data/` by default):
 - `library.db`: the books, their chapters and characters. Made again by a scan if deleted;
 - `index-<n>.db`: the full text, indexed for search. By far the biggest, and the most written
   to: made again from the files by the indexer if deleted, and it may be kept where writes cost
-  least (a folder without copy-on-write, another disk). A new index is a new file, the old one
-  deleted.
+  least, in a folder of its own (`--index-dir <folder>`: one without copy-on-write, another
+  disk). A new index is a new file, the old one deleted.
 
 The books are:
 
@@ -66,6 +66,18 @@ own: put it behind a proxy that asks who is asking, and give the server the name
 reached by (`--allow-host reader.example.com`), which it answers along with its own; the page
 may be served over https there. `docker stop` closes it at once (a scan going on is taken up
 again by the next start).
+
+The full-text index is by far the biggest of what the server keeps, and the most written to.
+On a copy-on-write filesystem (btrfs, ZFS) every write of it goes somewhere new, and wears the
+disk: keep it in a folder of its own without copy-on-write, `--index-dir`:
+
+```
+mkdir /path/to/index && chattr +C /path/to/index      # (btrfs: +C on the folder while empty)
+docker run ... -v /path/to/index:/index ghcr.io/klchoi/hyper-reader --library=novels=/books --index-dir=/index
+```
+
+It is made again from the books if it is lost, so it needs no copy kept; `reader.db`, in
+`/data`, does.
 
 ## Building it
 

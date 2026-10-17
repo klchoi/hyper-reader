@@ -519,6 +519,24 @@ describe('what the reader keeps', () => {
 });
 
 describe('the index', () => {
+  it('is kept in a folder of its own, where one is given', async () => {
+    let data = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-test-'));
+    let shelf = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-shelf-'));
+    let indexDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-index-')), 'made');
+    fs.writeFileSync(path.join(shelf, 'Sách (1-3 chương).txt'), bookText('Hoàng Dung'));
+    let library = createLibrary({ data, libraries: [{ name: 'shelf', dir: shelf }], indexDir });
+    try {
+      library.scan();
+      await library.scanned();
+      for(let tries = 0; tries < 400 && library.status().index.done < library.status().index.total; tries++) await wait(25);
+      assert.deepEqual((await library.search('hoang dung') as { chapters: number }[]).map(book => book.chapters), [3]);
+      assert.ok(fs.existsSync(indexFile(indexDir)));
+      assert.deepEqual(fs.readdirSync(data).filter(file => file.startsWith('index-')), []);
+    } finally {
+      await library.close();
+      for(let dir of [data, shelf, path.dirname(indexDir)]) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
   it('is a file of its own: deleted, it is made again from the files, and nothing else is read again', async () => {
     let data = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-test-'));
     let shelf = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-shelf-'));

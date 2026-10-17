@@ -7,8 +7,10 @@
 # LIBRARY (it may go in .env) is the folder of books, mounted read-only: the server reads them
 # where they are, 500 of them (SAMPLE=500, the same ones each time; SAMPLE=0: all of them). The
 # server starts again on every edit of src/, and a library of thousands read again and again
-# wears out the disk. What it keeps is in the volume `data`. Both ports answer on this computer
-# only. A change to package-lock.json is installed when the containers next start.
+# wears out the disk. What it keeps is in the volume `data`, or in DATA (a folder of this
+# machine's, in .env), and its full-text index, the biggest and most written to, with it, or in
+# INDEX: a folder without copy-on-write (see tools/move-store.sh). Both ports answer on this
+# computer only. A change to package-lock.json is installed when the containers next start.
 name: hyper-reader
 
 x-app: &app
@@ -53,10 +55,13 @@ services:
       - --data=/data
       - --library=books=/books
       - --sample=${SAMPLE:-500}
+      - --index-dir=/index
     volumes:
       - .:/app
       - node_modules:/app/node_modules
-      - data:/data
+      - ${DATA:-data}:/data
+      # (the volume `data` again where INDEX is not given: the index beside the rest, as it was)
+      - ${INDEX:-data}:/index
       - ${LIBRARY:-./library}:/books:ro
     ports:
       - 127.0.0.1:8080:8080

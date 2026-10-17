@@ -300,6 +300,27 @@ describe('the server', () => {
     assert.deepEqual(found.map((book: { name: string; chapters: number }) => [book.name, book.chapters]), [['Sách dài', 2]]);
     await call('DELETE', `books/${record.id}`);
   });
+  it('takes up a book where its indexing stopped, not from its beginning', async () => {
+    let long = Array.from({ length: 400 }, (_, k) => `Dòng ${k}: ${k % 50 ? 'trời mưa mãi không thôi, gió thổi qua sân vắng' : 'Nhạc Bất Quần đứng dậy'}.`).join('\n');
+    let { answer: record } = await call('POST', 'books', { name: 'Sách dở (1-1 chương).txt', size: 0, text: ['Sách dở', 'Chương 1: Mở đầu', long].join('\n\n') });
+    await settled();
+    let db = new DatabaseSync(path.join(data, 'library.db'));
+    let blocks = () => (db.prepare('select rowid from blocks where book_id = ? order by offset').all(record.id) as { rowid: number }[]).map(row => row.rowid);
+    let all = blocks();
+    assert.ok(all.length > 3);
+    // as an indexer stopped after two blocks leaves it
+    db.prepare('delete from blocks where book_id = ? and rowid > ?').run(record.id, all[1]);
+    db.prepare('update books set indexed = 0 where id = ?').run(record.id);
+    let { answer: book } = await call('GET', `books/${record.id}`);
+    assert.equal(book.id, record.id);
+    await settled();
+    let again = blocks();
+    db.close();
+    assert.deepEqual([again.length, again.slice(0, 2)], [all.length, all.slice(0, 2)]);
+    assert.ok(again.slice(2).every(rowid => rowid > all.at(-1)!));
+    assert.equal((await call('GET', `search?q=${encodeURIComponent('nhac bat quan')}&book=${record.id}`)).answer.total, 8);
+    await call('DELETE', `books/${record.id}`);
+  });
   it('keeps the index to the file\'s own text, and finds in it what the parser reads otherwise', async () => {
     let messy = (n: number) => Array.from({ length: 5 }, (_, k) => `\t Dòng ${k} , Dương Quá ${n % 2 ? 'đi' : 'về'}  rồi .`).join('\r\n\r\n');
     let text = ['Sách bừa', ...[1, 2, 3].map(n => `Chương ${n}  :  Tiêu đề ${n}\r\n\r\nQQ Group 712797052\r\n${messy(n)}`)].join('\r\n\r\n\r\n');

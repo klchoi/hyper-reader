@@ -36,12 +36,12 @@ process.on('message', ({ first: id }: { first?: string }) => {
 process.on('disconnect', () => process.exit());
 
 // a file's text cut into blocks: where its chapters begin in it now, and a long chapter at the
-// end of a line
-function* blocksOf(text: string, chapters: ChapterRow[]) {
+// end of a line; from `from` on (what is before it indexed already)
+function* blocksOf(text: string, chapters: ChapterRow[], from = 0) {
   let starts = [...new Set([0, ...chapters.map(c => c.raw_offset ?? 0)])].sort((a, z) => a - z);
   for(let [n, offset] of starts.entries()) {
     let end = starts[n + 1] ?? text.length;
-    for(let at = offset; at < end;) {
+    for(let at = Math.max(offset, from); at < end;) {
       let cut = end - at <= BLOCK ? end : text.lastIndexOf('\n', at + BLOCK);
       if(cut <= at) cut = Math.min(end, at + BLOCK);
       yield { offset: at, end: cut };
@@ -68,11 +68,14 @@ function index(id: string) {
     chapters = chapters.map((c, n) => ({ ...c, raw_offset: raw[n] }));
     store.keepRawOffsets(chapters as { rowid: number; raw_offset: number }[]);
   }
-  // (what a book stopped halfway left of it)
-  store.unindex(id);
+  // a book stopped in the middle of is taken up where it was left; one indexed under another
+  // index, or not begun, is begun
+  let from = 0;
+  if(book.indexing === INDEX_VERSION) from = store.indexedTo(id);
+  else store.startIndexing(book, INDEX_VERSION);
   let batch = [];
   let size = 0;
-  for(let block of blocksOf(text, chapters)) {
+  for(let block of blocksOf(text, chapters, from)) {
     let body = text.slice(block.offset, block.end);
     batch.push({ ...block, body });
     size += body.length;

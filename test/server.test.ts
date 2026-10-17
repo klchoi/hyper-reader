@@ -427,3 +427,56 @@ describe('a sample of a library', () => {
     }
   });
 });
+
+describe('what the reader keeps', () => {
+  let made: string[] = [];
+  let folder = (name: string) => {
+    let dir = fs.mkdtempSync(path.join(os.tmpdir(), `hyper-reader-${name}-`));
+    made.push(dir);
+    return dir;
+  };
+  after(() => { for(let dir of made) fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it('outlives library.db, which is made again from the files', async () => {
+    let data = folder('test');
+    let shelf = folder('shelf');
+    fs.writeFileSync(path.join(shelf, 'Sách (1-3 chương).txt'), bookText('Hoàng Dung'));
+    let open = () => createLibrary({ data, libraries: [{ name: 'shelf', dir: shelf }] });
+    let library = open();
+    await library.saveProgress('sach-1', { offset: 42 });
+    await library.saveSettings({ zen: true });
+    await library.saveNames('sach-1', 'Lâm = Lam\n');
+    await library.close();
+    for(let file of ['library.db', 'library.db-wal', 'library.db-shm']) fs.rmSync(path.join(data, file), { force: true });
+    library = open();
+    try {
+      library.scan();
+      await library.scanned();
+      assert.equal((await library.books({ every: true })).total, 1);
+      assert.deepEqual([(await library.progress())['sach-1'], await library.settings(), await library.names('sach-1')], [{ offset: 42 }, { zen: true }, 'Lâm = Lam\n']);
+    } finally {
+      await library.close();
+    }
+  });
+  it('is taken out of a library.db that kept it, once', async () => {
+    let data = folder('test');
+    let old = new DatabaseSync(path.join(data, 'library.db'));
+    old.exec(`create table progress (book_id text primary key, record text not null);
+      create table settings (key text primary key, value text not null);
+      create table names (book_id text primary key, text text not null);
+      insert into progress values ('a-1', '{"offset":7}');
+      insert into settings values ('fontSize', '18');
+      insert into names values ('a-1', 'Lâm = Lam');`);
+    old.close();
+    let library = createLibrary({ data });
+    try {
+      assert.deepEqual([(await library.progress())['a-1'], await library.settings(), await library.names('a-1')], [{ offset: 7 }, { fontSize: 18 }, 'Lâm = Lam']);
+    } finally {
+      await library.close();
+    }
+    let db = new DatabaseSync(path.join(data, 'library.db'), { readOnly: true });
+    let left = db.prepare("select name from sqlite_master where name in ('progress', 'settings', 'names')").all();
+    db.close();
+    assert.deepEqual(left, []);
+  });
+});

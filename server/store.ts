@@ -1,7 +1,15 @@
-// What the server keeps, in one SQLite database (node:sqlite): the books found in the libraries,
-// their chapters, the characters named in them, where each was left, the settings, the names,
-// and the full text of the chapters, indexed for search (FTS5). A book's text is not kept here:
-// it stays in its file, and a chapter is cut from it at the offsets kept for it.
+// What the server keeps, in two SQLite databases (node:sqlite):
+//
+// - <data>/library.db, what it knows of the books: the books found in the libraries, their
+//   chapters, the characters named in them, and the full text, indexed for search (FTS5). All of
+//   it is made again from the files: it may be deleted, or kept somewhere else (it is big, and
+//   much written to), and nothing of the reader's goes with it. A book's text is not kept here:
+//   it stays in its file, and a chapter is cut from it at the offsets kept for it.
+// - <data>/reader.db, what the reader keeps (`createReaderStore`): where each book was left, the
+//   settings, the names corrected. Small, written to little, and made of nothing else: this is
+//   the one to keep a copy of.
+//
+// library.db:
 //
 //   books        one row a file: where it is (`root`, the library, and `path` in it), what it is
 //                called, its size and time (a file changed since is read again), the parser
@@ -14,8 +22,11 @@
 //                kept to the file, so whatever a newer parser makes of a book, its index stays
 //   book_text    the blocks' text, folded (see `fold`), for search; contentless: the index
 //                only, its rows are the blocks' rowids
+//
+// reader.db:
 //   progress, settings, names   as the page sends them; progress and names outlive their book,
 //                so a file that comes back finds them again
+import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import type { StatementSync } from 'node:sqlite';
 import type { Part } from '../src/parser.ts';
@@ -129,16 +140,19 @@ const MIGRATIONS = [
     delete from book_text where rowid = old.rowid;
   end;
   update books set indexed = 0;`,
+  // what the reader keeps, kept in reader.db (see `createReaderStore`, which takes it from here
+  // first)
+  'drop table if exists progress; drop table if exists settings; drop table if exists names;',
 ];
 
-function openStore(file: string) {
+function openStore(file: string, migrations: string[]) {
   let db = new DatabaseSync(file);
   // one writer at a time, readers alongside; a writer waits for another rather than failing
   db.exec('pragma journal_mode = wal; pragma synchronous = normal; pragma foreign_keys = on; pragma busy_timeout = 30000;');
   let version = db.prepare('pragma user_version').get()!.user_version as number;
-  for(let at = version; at < MIGRATIONS.length; at++) {
+  for(let at = version; at < migrations.length; at++) {
     transaction(db, () => {
-      db.exec(MIGRATIONS[at]);
+      db.exec(migrations[at]);
       db.exec(`pragma user_version = ${at + 1}`);
     });
   }
@@ -177,14 +191,18 @@ export type BookRead = {
   characters: { name: string; mentions: number }[];
 };
 
-export function createStore(file: string) {
-  let db = openStore(file);
+// each statement of a database prepared once, the first time it is run
+function statementsOf(db: DatabaseSync) {
   let statements = new Map<string, StatementSync>();
-  // each statement is prepared once, the first time it is run
-  let sql = (text: string) => {
+  return (text: string) => {
     if(!statements.has(text)) statements.set(text, db.prepare(text));
     return statements.get(text)!;
   };
+}
+
+export function createStore(file: string) {
+  let db = openStore(file, MIGRATIONS);
+  let sql = statementsOf(db);
 
   let store = {
     db,
@@ -218,27 +236,6 @@ export function createStore(file: string) {
       });
     },
     forgetBook: (id: string) => { sql('delete from books where id = ?').run(id); },
-
-    // ---- what the page keeps
-    progress() {
-      let all: Record<string, unknown> = {};
-      for(let { book_id, record } of sql('select book_id, record from progress').all() as { book_id: string; record: string }[]) all[book_id] = JSON.parse(record);
-      return all;
-    },
-    saveProgress: (id: string, record: unknown) => { sql('insert into progress values (?, ?) on conflict (book_id) do update set record = excluded.record').run(id, JSON.stringify(record)); },
-    settings() {
-      let all: Record<string, unknown> = {};
-      for(let { key, value } of sql('select key, value from settings').all() as { key: string; value: string }[]) all[key] = JSON.parse(value);
-      return all;
-    },
-    saveSettings(settings: Record<string, unknown>) {
-      transaction(db, () => {
-        let setting = sql('insert into settings values (?, ?) on conflict (key) do update set value = excluded.value');
-        for(let [key, value] of Object.entries(settings)) setting.run(key, JSON.stringify(value ?? null));
-      });
-    },
-    names: (id: string) => sql('select text from names where book_id = ?').get(id)?.text as string | undefined,
-    saveNames: (id: string, text: string) => { sql('insert into names values (?, ?) on conflict (book_id) do update set text = excluded.text').run(id, text); },
 
     // ---- the full text
     // the books still to index under this index, in the order they came
@@ -291,3 +288,63 @@ export function createStore(file: string) {
 }
 
 export type Store = ReturnType<typeof createStore>;
+
+const READER_MIGRATIONS = [
+  `create table progress (book_id text primary key, record text not null);
+  create table settings (key text primary key, value text not null);
+  create table names (book_id text primary key, text text not null);`,
+];
+
+// What the reader keeps (see above). Kept in library.db until it was kept here: taken from there,
+// once, where `library` (library.db) has it still
+export function createReaderStore(file: string, { library }: { library?: string } = {}) {
+  let db = openStore(file, READER_MIGRATIONS);
+  let sql = statementsOf(db);
+  if(library && fs.existsSync(library)) takeFrom(db, library);
+
+  return {
+    db,
+    close: () => db.close(),
+    progress() {
+      let all: Record<string, unknown> = {};
+      for(let { book_id, record } of sql('select book_id, record from progress').all() as { book_id: string; record: string }[]) all[book_id] = JSON.parse(record);
+      return all;
+    },
+    saveProgress: (id: string, record: unknown) => { sql('insert into progress values (?, ?) on conflict (book_id) do update set record = excluded.record').run(id, JSON.stringify(record)); },
+    settings() {
+      let all: Record<string, unknown> = {};
+      for(let { key, value } of sql('select key, value from settings').all() as { key: string; value: string }[]) all[key] = JSON.parse(value);
+      return all;
+    },
+    saveSettings(settings: Record<string, unknown>) {
+      transaction(db, () => {
+        let setting = sql('insert into settings values (?, ?) on conflict (key) do update set value = excluded.value');
+        for(let [key, value] of Object.entries(settings)) setting.run(key, JSON.stringify(value ?? null));
+      });
+    },
+    names: (id: string) => sql('select text from names where book_id = ?').get(id)?.text as string | undefined,
+    saveNames: (id: string, text: string) => { sql('insert into names values (?, ?) on conflict (book_id) do update set text = excluded.text').run(id, text); },
+
+  };
+}
+
+export type ReaderStore = ReturnType<typeof createReaderStore>;
+
+// the reader's tables of an older library.db into reader.db, and out of library.db: what is
+// there already is kept (a copy taken by a server stopped before it could take them out)
+function takeFrom(db: DatabaseSync, library: string) {
+  db.prepare('attach database ? as library').run(library);
+  try {
+    let tables = (db.prepare("select name from library.sqlite_master where type = 'table' and name in ('progress', 'settings', 'names')").all() as { name: string }[]).map(row => row.name);
+    if(!tables.length) return;
+    transaction(db, () => {
+      for(let table of tables) db.exec(`insert or ignore into main.${table} select * from library.${table}`);
+    });
+    // (a second transaction: two databases are not written all at once, or not at all, together)
+    transaction(db, () => {
+      for(let table of tables) db.exec(`drop table library.${table}`);
+    });
+  } finally {
+    db.exec('detach database library');
+  }
+}

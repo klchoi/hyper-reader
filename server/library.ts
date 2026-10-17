@@ -6,7 +6,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createStore, INDEX_VERSION, plain } from './store.ts';
+import { createReaderStore, createStore, INDEX_VERSION, plain } from './store.ts';
 import type { BookRow, ChapterRow } from './store.ts';
 import { createReaders } from './readers.ts';
 import type { ReadText } from './read-worker.ts';
@@ -70,6 +70,8 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
   let uploads = path.join(data, UPLOADS);
   fs.mkdirSync(uploads, { recursive: true });
   let database = path.join(data, 'library.db');
+  // what the reader keeps first, taken out of an older library.db before it is opened
+  let reader = createReaderStore(path.join(data, 'reader.db'), { library: database });
   let store = createStore(database);
   let roots = new Map<string, string>([[UPLOADS, uploads], ...libraries.map(({ name, dir }): [string, string] => [name, path.resolve(dir)])]);
   let readers = createReaders();
@@ -192,15 +194,15 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
   let library = {
     roots,
     // ---- the page's backend
-    settings: async () => store.settings(),
-    saveSettings: async (settings: Record<string, unknown>) => store.saveSettings(settings),
-    progress: async () => store.progress(),
-    saveProgress: async (id: string, record: unknown) => store.saveProgress(id, record),
-    names: async (id: string) => store.names(id),
-    saveNames: async (id: string, text: string) => store.saveNames(id, text),
+    settings: async () => reader.settings(),
+    saveSettings: async (settings: Record<string, unknown>) => reader.saveSettings(settings),
+    progress: async () => reader.progress(),
+    saveProgress: async (id: string, record: unknown) => reader.saveProgress(id, record),
+    names: async (id: string) => reader.names(id),
+    saveNames: async (id: string, text: string) => reader.saveNames(id, text),
     // the books asked for, a page of them (see src/catalog.ts); a book of a library is the
     // reader's own file, and only those dropped on the page can be deleted from it
-    books: async (query: Query = {}) => findBooks(catalogued(), store.progress() as Record<string, Progress>, query),
+    books: async (query: Query = {}) => findBooks(catalogued(), reader.progress() as Record<string, Progress>, query),
     // the tags most books have
     tags: async (limit = 40) => topTags(catalogued(), limit),
     // a book dropped on the page, kept with the uploads under its own name: one of that name
@@ -234,7 +236,7 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
       // the file changed since it was read: read again, and the chapter asked of that
       if(text == null) return again && await library.rereadBook(id) ? library.chapter(id, chapterId, { raw, again: false }) : null;
       let content = text.slice(chapter.offset, chapter.end).trim();
-      let at = markedOf(`${id}/${row.size}/${row.mtime}/${chapterId}`, content, chapter.offset, store.names(id) ?? '');
+      let at = markedOf(`${id}/${row.size}/${row.mtime}/${chapterId}`, content, chapter.offset, reader.names(id) ?? '');
       return { ...listedOf(chapter), length: content.length, ...at, ...(raw && { content }) };
     },
     async rereadBook(id: string): Promise<BookRecord | null> {
@@ -339,6 +341,7 @@ export function createLibrary({ data, libraries = [], sample = 0 }: { data: stri
         await scanning?.catch(() => {});
         await Promise.all([readers.close(), indexer.close()]);
         store.close();
+        reader.close();
       })();
       return closing;
     },

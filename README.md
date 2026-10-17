@@ -9,7 +9,9 @@ and the settings. The page is built from `src/` (see Building it); git keeps `sr
 `npm run build` once (and again after a change to `src/`), then
 `npm start -- [--port 8080] [--data <folder>] [--library [name=]<folder>]...`, then
 `http://127.0.0.1:8080/`. The server serves the page, and keeps the books in a SQLite
-database, `<data>/library.db` (`data/` by default):
+database, `<data>/library.db` (`data/` by default), all of it made again from the files if it is
+deleted; where each book was left, the settings and the names corrected are kept apart, in
+`<data>/reader.db`, the one file to keep a copy of. The books are:
 
 - the books of each library, a folder of `.txt` files (sub-folders too), read where they are and
   never written to or deleted. A library is known by its name, the folder's own if none is given,

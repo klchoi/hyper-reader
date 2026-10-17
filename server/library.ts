@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createReaderStore, createStore, plain } from './store.ts';
-import { createIndexStore, createSearch, deleteOtherIndexes, indexFile } from './index-store.ts';
+import { createIndexStore, createSearch, prepareIndex } from './index-store.ts';
 import type { BookRow, ChapterRow } from './store.ts';
 import { createReaders } from './readers.ts';
 import type { ReadText } from './read-worker.ts';
@@ -75,10 +75,9 @@ export function createLibrary({ data, libraries = [], sample = 0, indexDir = dat
   // what the reader keeps first, taken out of an older library.db before it is opened
   let reader = createReaderStore(path.join(data, 'reader.db'), { library: database });
   let store = createStore(database);
-  // the index, made if it is not there (the indexer writes it), and those of other indexes gone
+  // the index, made if it is not there (the indexer writes it), one of another version gone
   fs.mkdirSync(indexDir, { recursive: true });
-  let index = indexFile(indexDir);
-  deleteOtherIndexes(indexDir);
+  let index = prepareIndex(indexDir);
   createIndexStore(index).close();
   let search = createSearch(database, index);
   let roots = new Map<string, string>([[UPLOADS, uploads], ...libraries.map(({ name, dir }): [string, string] => [name, path.resolve(dir)])]);

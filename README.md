@@ -14,7 +14,7 @@ databases in `<data>` (`data/` by default):
 - `reader.db`: where each book was left, the settings, the names corrected. The one file to
   keep a copy of;
 - `library.db`: the books, their chapters and characters. Made again by a scan if deleted;
-- `index-<n>.db`: the full text, indexed for search. By far the biggest, and the most written
+- `index.db`: the full text, indexed for search. By far the biggest, and the most written
   to: made again from the files by the indexer if deleted, and it may be kept where writes cost
   least, in a folder of its own (`--index-dir <folder>`: one without copy-on-write, another
   disk). A new index is a new file, the old one deleted.

@@ -12,7 +12,7 @@ import { createServer } from '../server/server.ts';
 import { createLibrary } from '../server/library.ts';
 import { extractChapters, normalizeFileContent } from '../src/parser.ts';
 import { PARSER_VERSION } from '../src/book.ts';
-import { indexFile } from '../server/index-store.ts';
+import { INDEX_VERSION, indexFile } from '../server/index-store.ts';
 import type { Line, Mark } from '../src/marks.ts';
 
 const story = (count: number, who: string) => Array.from({ length: count }, (_, k) => (
@@ -564,6 +564,53 @@ describe('the index', () => {
       } finally {
         await library.close();
       }
+    } finally {
+      fs.rmSync(data, { recursive: true, force: true });
+      fs.rmSync(shelf, { recursive: true, force: true });
+    }
+  });
+  it('keeps its version in it: one an older server named index-<version>.db is kept, one of another version made again', async () => {
+    let data = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-test-'));
+    let shelf = fs.mkdtempSync(path.join(os.tmpdir(), 'hyper-reader-shelf-'));
+    fs.writeFileSync(path.join(shelf, 'Sách (1-3 chương).txt'), bookText('Hoàng Dung'));
+    let started = async () => {
+      let library = createLibrary({ data, libraries: [{ name: 'shelf', dir: shelf }] });
+      library.scan();
+      await library.scanned();
+      for(let tries = 0; tries < 400 && library.status().index.done < library.status().index.total; tries++) await wait(25);
+      return library;
+    };
+    let found = async (library: ReturnType<typeof createLibrary>) => (await library.search('hoang dung') as { chapters: number }[]).map(book => book.chapters);
+    let poke = (work: (db: DatabaseSync) => unknown) => {
+      let db = new DatabaseSync(indexFile(data));
+      try {
+        return work(db);
+      } finally {
+        db.close();
+      }
+    };
+    try {
+      await (await started()).close();
+      // as an older server left it: named by its version, which is not in it
+      poke(db => db.exec('pragma application_id = 0; insert into indexed (book_id, size, mtime, done) values (\'kept\', 0, 0, 1);'));
+      for(let end of ['', '-wal', '-shm']) if(fs.existsSync(indexFile(data) + end)) fs.renameSync(indexFile(data) + end, path.join(data, `index-${INDEX_VERSION}.db${end}`));
+      let library = await started();
+      try {
+        assert.deepEqual(fs.readdirSync(data).filter(file => file.startsWith('index')).sort(), ['index.db', 'index.db-shm', 'index.db-wal']);
+        assert.deepEqual(await found(library), [3]);
+      } finally {
+        await library.close();
+      }
+      assert.deepEqual(poke(db => db.prepare('select book_id from indexed where book_id = \'kept\'').all().length), 1);
+      // of another version: made again
+      poke(db => db.exec(`pragma application_id = ${INDEX_VERSION + 1}`));
+      library = await started();
+      try {
+        assert.deepEqual(await found(library), [3]);
+      } finally {
+        await library.close();
+      }
+      assert.deepEqual(poke(db => [db.prepare('select book_id from indexed where book_id = \'kept\'').all().length, (db.prepare('pragma application_id').get() as { application_id: number }).application_id]), [0, INDEX_VERSION]);
     } finally {
       fs.rmSync(data, { recursive: true, force: true });
       fs.rmSync(shelf, { recursive: true, force: true });

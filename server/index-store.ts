@@ -1,9 +1,9 @@
 // The full text of the books, indexed for search (FTS5), in a database of its own beside library.db
-// (see store.ts): index-<INDEX_VERSION>.db, in <data> or a folder of its own (--index-dir). It is
-// by far the biggest of what the server keeps, and the one written to most, and it is made again
-// from the files alone: it can be kept where it costs least (a folder without copy-on-write,
-// another disk), and a new index is a new file, the old one deleted (`indexFile`), not millions
-// of rows deleted one by one.
+// (see store.ts): index.db, in <data> or a folder of its own (--index-dir). It is by far the
+// biggest of what the server keeps, and the one written to most, and it is made again from the
+// files alone: it can be kept where it costs least (a folder without copy-on-write, another disk),
+// and a new index is a new file, the old one deleted (`prepareIndex`), not millions of rows
+// deleted one by one.
 //
 //   indexed      a book of library.db indexed, or being indexed: the size and time its file had
 //                (a book whose file is not as kept in library.db is not indexed, whatever is
@@ -24,17 +24,40 @@ import { DatabaseSync } from 'node:sqlite';
 import { openStore, statementsOf, transaction } from './store.ts';
 
 // bump when what the index holds of a file changes (`rawText` in raw.ts, the folding below, the
-// tokenizer, how a text is cut into blocks): every book is indexed again, in a new file. A change
+// tokenizer, how a text is cut into blocks): every book is indexed again, in a new file (kept in
+// it: see `prepareIndex`). A change
 // to the parser (PARSER_VERSION), what it makes of a text included, leaves the index as it is
 export const INDEX_VERSION = 2;
 
-// the index's file in its folder; those of other indexes, which are deleted
-export const indexFile = (dir: string) => path.join(dir, `index-${INDEX_VERSION}.db`);
-export function deleteOtherIndexes(dir: string) {
-  for(let file of fs.readdirSync(dir)) {
-    let index = /^index-(\d+)\.db(?:-wal|-shm)?$/.exec(file);
-    if(index && Number(index[1]) !== INDEX_VERSION) fs.rmSync(path.join(dir, file), { force: true });
+// the index's file in its folder
+export const indexFile = (dir: string) => path.join(dir, 'index.db');
+const FILES = ['', '-wal', '-shm'];
+// which INDEX_VERSION an index is of, kept in it (SQLite's application_id, which nothing else uses)
+const versionOf = (file: string) => {
+  let db = new DatabaseSync(file);
+  try {
+    return (db.prepare('pragma application_id').get() as { application_id: number }).application_id;
+  } finally {
+    db.close();
   }
+};
+const stamp = (db: DatabaseSync) => {
+  if((db.prepare('pragma application_id').get() as { application_id: number }).application_id !== INDEX_VERSION) db.exec(`pragma application_id = ${INDEX_VERSION}`);
+};
+// the folder's index made ready to open: one of another INDEX_VERSION deleted, to be made again;
+// one an older server kept as index-<INDEX_VERSION>.db renamed, and those of other versions deleted
+export function prepareIndex(dir: string) {
+  let file = indexFile(dir);
+  let named = path.join(dir, `index-${INDEX_VERSION}.db`);
+  if(!fs.existsSync(file) && fs.existsSync(named)) {
+    for(let end of FILES) if(fs.existsSync(named + end)) fs.renameSync(named + end, file + end);
+    let db = new DatabaseSync(file);
+    stamp(db);
+    db.close();
+  }
+  if(fs.existsSync(file) && versionOf(file) !== INDEX_VERSION) for(let end of FILES) fs.rmSync(file + end, { force: true });
+  for(let other of fs.readdirSync(dir)) if(/^index-\d+\.db(?:-wal|-shm)?$/.test(other)) fs.rmSync(path.join(dir, other), { force: true });
+  return file;
 }
 
 // what is searched is folded the same way on both sides. The index takes the text in lower case
@@ -76,6 +99,7 @@ type Book = { id: string; size: number; mtime: number };
 // the index, as the indexer writes it
 export function createIndexStore(file: string) {
   let db = openStore(file, MIGRATIONS);
+  stamp(db);
   let sql = statementsOf(db);
   return {
     db,

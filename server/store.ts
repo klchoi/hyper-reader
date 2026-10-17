@@ -8,7 +8,7 @@
 //   libraries, their chapters, the characters named in them. Made again from the files by a
 //   scan, a few minutes. A book's text is not kept here: it stays in its file, and a chapter is
 //   cut from it at the offsets kept for it.
-// - <data>/index-<INDEX_VERSION>.db, the full text indexed for search (see index-store.ts): by far
+// - <data>/index.db, the full text indexed for search (see index-store.ts): by far
 //   the biggest, and the one written to most. Made again from the files by the indexer, behind
 //   everything else; a new index is a new file, the old one deleted.
 //

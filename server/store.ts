@@ -146,12 +146,17 @@ const MIGRATIONS = [
   'drop table if exists progress; drop table if exists settings; drop table if exists names;',
   // a book the indexer was stopped in the middle of is taken up where it was left, not begun again
   'alter table books add column indexing integer not null default 0;',
+  // the index's pieces merged once 8 of a size are there, not 4: of 400 MB of text, written in
+  // writes of 16 MB (see index-worker.ts), 1.5 GB written in place of 2.6 GB, the index no bigger
+  // and no slower to search (at 16, it is 70% bigger, for nothing less written)
+  `insert into book_text(book_text, rank) values('automerge', 8);`,
 ];
 
 function openStore(file: string, migrations: string[]) {
   let db = new DatabaseSync(file);
-  // one writer at a time, readers alongside; a writer waits for another rather than failing
-  db.exec('pragma journal_mode = wal; pragma synchronous = normal; pragma foreign_keys = on; pragma busy_timeout = 30000;');
+  // one writer at a time, readers alongside; a writer waits for another rather than failing. The
+  // log, as big as a write of the indexer once written back, is cut back to 64 MB, not left so
+  db.exec('pragma journal_mode = wal; pragma synchronous = normal; pragma foreign_keys = on; pragma busy_timeout = 30000; pragma journal_size_limit = 67108864;');
   let version = db.prepare('pragma user_version').get()!.user_version as number;
   for(let at = version; at < migrations.length; at++) {
     transaction(db, () => {

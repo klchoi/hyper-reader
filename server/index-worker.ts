@@ -16,7 +16,10 @@ export type Told = { indexed: string } | { failed: string; error: string } | { i
 const given: { database: string; roots: [string, string][] } = JSON.parse(process.argv[2]);
 const store = createStore(given.database);
 const roots = new Map<string, string>(given.roots);
-const BATCH = 2e6;   // characters of text a write takes in
+// characters of text a write takes in: each write makes a piece of the index the next merge
+// writes again, so few big ones write least (of 400 MB of text, 2 MB writes made 2.6 GB of
+// writes, 16 MB ones 2.0 GB; 64 MB, no less again), while holding the database a second or two
+const BATCH = 16e6;
 const BLOCK = 16e3;  // characters of text a block takes in, at most (cut at a line's end)
 const tell = (told: Told) => process.send!(told);
 

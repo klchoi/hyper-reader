@@ -1,5 +1,6 @@
 // The buttons down the other side: back to the library, and for the book open, reading it
-// again, zen, and its names (and its chapters, on a narrow screen); and at the foot, the cog that opens the settings.
+// again, zen, and its names (and its chapters, on a narrow screen), and the paragraph at the top of
+// the page bookmarked (or no longer); and at the foot, the cog that opens the settings.
 import { StoreContext } from './store.ts';
 
 export function Rail() @{
@@ -21,8 +22,14 @@ export function Rail() @{
           <button
             class={['chapters', { selected: store.chaptersOpen.value }]}
             onClick={() => store.toggleChapters()}
-            title="Chapters"
+            title="Chapters and bookmarks"
             aria-expanded={store.chaptersOpen.value}
+          />
+          <button
+            class={['bookmark', { selected: !!store.bookmarkHere.value }]}
+            onClick={() => store.toggleBookmark()}
+            title={store.bookmarkHere.value ? 'Remove the bookmark here (B)' : 'Bookmark this paragraph (B)'}
+            aria-pressed={!!store.bookmarkHere.value}
           />
           <button class="refresh" onClick={() => store.refreshBook()} title="Refresh book" />
           <button class="zen" onClick={() => store.saveSettings({ zen: !store.settings.value.zen })} title="Toggle Zen Mode" />

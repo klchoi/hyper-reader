@@ -5,26 +5,37 @@
 import { Context, tick, track } from 'ripple';
 import type { Tracked } from 'ripple';
 import { serverBackend } from './backends.ts';
-import type { BookRecord, BookSaying, FileInfo, LibraryStatus, Mention, Person, Progress, Shown } from './backends.ts';
-import { PAGE } from './catalog.ts';
+import type { Bookmark, BookRecord, BookSaying, FileInfo, LibraryStatus, Mention, Person, Progress, Shown } from './backends.ts';
+import { fold, PAGE } from './catalog.ts';
 import type { Query, Shelved, TagCount } from './catalog.ts';
 import { offerFor, paintChapter, paintTitles } from './names.ts';
 import type { AddNameAt, AddNameOffer } from './names.ts';
 import { markChapter, nameFixer, namesWith } from './marks.ts';
 import type { Marked } from './marks.ts';
-import { bookRoute, chapterAt, createRouter, getColorScheme, markFound, nextTick, toOffset } from './places.ts';
+import { bookRoute, chapterAt, createRouter, getColorScheme, markFound, nextTick, offsetAtTop, toOffset } from './places.ts';
 import type { Listed, Route } from './places.ts';
 import { latinize } from './parser.ts';
 
 // the most books or chapters the palette lists at once
 const LISTED = 200;
 // how many books the library's front shows of each kind, and of tags
-const FRONT = { reading: 6, latest: 10, random: 6, tags: 40 };
+const FRONT = { reading: 6, latest: 10, random: 6, tags: 40, bookmarks: 8 };
+// how many bookmarks a search of the library shows above its books, and the palette lists
+const BOOKMARKS_FOUND = { library: 5, palette: 20 };
 const newSeed = () => Math.floor(Math.random() * 2 ** 31);
 
 export type Settings = Record<string, any>;
 // what the palette offers: a book, a chapter, or a place in the book that says what was typed
-export type Command = { key: string; label: string; term: string; open: { bookId: string; offset?: number; chapterId?: string }; mention?: Mention };
+export type Command = { key: string; label: string; term: string; open: { bookId: string; offset?: number; chapterId?: string }; mention?: Mention; bookmark?: Bookmark };
+// what the list beside the page shows: the book's chapters, or its bookmarks
+export type Sidebar = 'chapters' | 'bookmarks';
+
+// whether a bookmark says every word of `q` (folded, as the server folds them): its note, the
+// words it begins with, its chapter's title
+export function bookmarkSays(bookmark: Bookmark, q: string) {
+  let said = fold([bookmark.note, bookmark.quote, bookmark.chapterTitle ?? ''].join('\n'));
+  return fold(q).split(/\s+/).every(word => said.includes(word));
+}
 
 // a font name reaches css as a quoted family, so a name is only ever read as
 // a name - and Reader stays behind it for whatever the chosen face is missing
@@ -61,7 +72,7 @@ export function hasFont(family: string) {
 // size. The faces, sizes and weights, and the list of what is installed, are kept in this browser,
 // and the other settings with the backend, for every device alike
 const DEVICE_KEY = 'hyper-reader:device';
-const deviceKeys = new Set<string>(['fonts', ...Object.values(fontSettings).flatMap(Object.values)]);
+const deviceKeys = new Set<string>(['fonts', 'sidebar', ...Object.values(fontSettings).flatMap(Object.values)]);
 const keptOnDevice = (): Settings | null => {
   try { return JSON.parse(localStorage.getItem(DEVICE_KEY) ?? 'null'); } catch { return null; }
 };
@@ -115,6 +126,28 @@ export function createStore() {
   // the chapter list, where the window is too narrow to keep it beside the page (see styles.css)
   const chaptersOpen = track(false);
   const addName = track<AddNameOffer | null>(null);
+  // the bookmarks of the book open, in the order of its text; the paragraph at the top of the page
+  // (the one `B` bookmarks); and the bookmark whose note is being written
+  const bookmarks = track<Bookmark[]>([]);
+  const readingAt = track<number | null>(null);
+  const noting = track<number | null>(null);
+  // the bookmark the reader is at: the last at or before the paragraph at the top of the page
+  const bookmarkAt = track(() => {
+    let at = readingAt.value;
+    return at == null ? undefined : bookmarks.value.findLast(b => b.offset <= at);
+  });
+  // the one of the paragraph at the top of the page, if it has one
+  const bookmarkHere = track(() => {
+    let at = readingAt.value;
+    return at == null ? undefined : bookmarks.value.find(b => b.offset === paragraphAt(at));
+  });
+  // of every book: the newest, on the library's front; those that say what the library is asked
+  // for; all of them, searched, where the library shows them all (null: it does not); and those
+  // the palette offers with no book open
+  const recentBookmarks = track<Bookmark[]>([]);
+  const foundBookmarks = track<{ q: string; total: number; bookmarks: Bookmark[] }>({ q: '', total: 0, bookmarks: [] });
+  const allBookmarks = track<{ q: string; total: number; bookmarks: Bookmark[]; busy: boolean } | null>(null);
+  const paletteBookmarks = track<{ q: string; bookmarks: Bookmark[] }>({ q: '', bookmarks: [] });
   // the names as the list corrects them, made again only when the list changes
   const fixNames = track(() => nameFixer(names.value));
   // while the list is edited, the chapter as what is typed would have it, marked here; and the
@@ -127,6 +160,14 @@ export function createStore() {
   const bookCommands = track(() => paletteBooks.value.books.map(({ id, title, read }) => (
     { key: `book:${id}`, label: title, open: { bookId: id, offset: read?.offset, chapterId: read?.chapterId }, term: '' }
   )));
+  // the bookmarks that say what was typed: the book's, or with none open, every book's
+  const bookmarkCommands = track<Command[]>(() => {
+    let q = palette.value.q;
+    if (!q) return [];
+    let open = book.value;
+    let found = open ? bookmarks.value.filter(b => bookmarkSays(b, q)) : paletteBookmarks.value.q === q ? paletteBookmarks.value.bookmarks : [];
+    return found.map(b => ({ key: `bookmark:${b.id}`, label: b.note || b.quote, term: '', open: { bookId: b.bookId, offset: b.offset }, bookmark: b }));
+  });
   const chapterCommands = track(() => {
     let open = book.value;
     if (!open) return [];
@@ -144,7 +185,7 @@ export function createStore() {
   // the chapters named so, of which the palette lists the first LISTED (a book of thousands is
   // narrowed by typing), or the books found so; and the places in the book that say it
   const named = track(() => (book.value ? chapterCommands.value.filter(c => c.term.includes(palette.value.q)) : bookCommands.value));
-  const commands = track<Command[]>(() => [...named.value.slice(0, LISTED), ...mentionCommands.value]);
+  const commands = track<Command[]>(() => [...bookmarkCommands.value, ...named.value.slice(0, LISTED), ...mentionCommands.value]);
   const unlisted = track(() => (book.value ? Math.max(0, named.value.length - LISTED) : paletteBooks.value.total - paletteBooks.value.books.length));
   const selectedCommand = track(() => {
     let found = commands.value;
@@ -209,6 +250,7 @@ export function createStore() {
       backend.tags(FRONT.tags),
     ]);
     shelves.value = { reading: reading.books, latest: latest.books, random: random.books, seed, tags };
+    recentBookmarks.value = (await backend.findBookmarks('', 0, FRONT.bookmarks)).bookmarks;
   }
   // other books at random
   async function shuffle() {
@@ -223,12 +265,22 @@ export function createStore() {
   function find(query: Query | null, wait = 0) {
     clearTimeout(findTimer);
     let ask = ++asking;
-    if (!query) return void (finding.value = null);
+    if (!query) {
+      foundBookmarks.value = { q: '', total: 0, bookmarks: [] };
+      return void (finding.value = null);
+    }
     // what was found stays in sight until what is asked now comes
     finding.value = { query, total: finding.value?.total ?? 0, books: finding.value?.books ?? [], busy: true };
     findTimer = setTimeout(async () => {
-      let { total, books } = await backend.books({ ...query, offset: 0, limit: PAGE });
-      if (ask === asking) finding.value = { query, total, books, busy: false };
+      // and the bookmarks that say the words asked for
+      let q = query.q?.trim() ?? '';
+      let [{ total, books }, marked] = await Promise.all([
+        backend.books({ ...query, offset: 0, limit: PAGE }),
+        q ? backend.findBookmarks(q, 0, BOOKMARKS_FOUND.library) : null,
+      ]);
+      if (ask !== asking) return;
+      finding.value = { query, total, books, busy: false };
+      foundBookmarks.value = marked ? { q, total: marked.total, bookmarks: marked.bookmarks } : { q: '', total: 0, bookmarks: [] };
     }, wait);
   }
   // the next page of what was asked
@@ -244,6 +296,86 @@ export function createStore() {
   function refreshLibrary() {
     loadShelves();
     if (finding.value) find(finding.value.query);
+    if (allBookmarks.value) findAllBookmarks(allBookmarks.value.q);
+  }
+
+  // ---- bookmarks
+  // the paragraph a bookmark at `offset` would be of, as the server puts it: the first line with
+  // words in it, from the one `offset` is in
+  function paragraphAt(offset: number) {
+    let lines = chapter.value?.lines ?? [];
+    let at = Math.max(0, lines.findLastIndex(line => line.offset <= offset));
+    return (lines.slice(at).find(line => line.text.trim()) ?? lines[at])?.offset ?? offset;
+  }
+  async function loadBookmarks(bookId: string) {
+    let loaded = await backend.bookmarks(bookId);
+    if (book.value?.id === bookId) bookmarks.value = loaded;
+  }
+  // the paragraph at the top of the page bookmarked, and its note asked for; or, bookmarked
+  // already, no longer
+  async function toggleBookmark() {
+    let open = book.value;
+    let at = offsetAtTop() ?? readingAt.value ?? chapter.value?.offset;
+    if (!open || at == null) return;
+    readingAt.value = at;
+    let had = bookmarkHere.value;
+    if (had) return deleteBookmark(had);
+    let made = await backend.addBookmark(open.id, at);
+    if (!made || book.value?.id !== open.id) return;
+    bookmarks.value = [...bookmarks.value.filter(b => b.id !== made.id), made].sort((a, z) => a.offset - z.offset);
+    editNote(made.id);
+  }
+  // the note of a bookmark of the book open written (null: put away)
+  async function editNote(id: number | null) {
+    noting.value = id;
+    if (id == null) return;
+    await nextTick();
+    document.querySelector<HTMLInputElement>('#bookmark-note input')?.focus();
+  }
+  // a bookmark changed, wherever it is shown
+  function replaceBookmark(id: number, changed: Bookmark | null) {
+    let swap = (list: Bookmark[]) => list.flatMap(b => (b.id !== id ? [b] : changed ? [{ ...changed, missing: b.missing }] : []));
+    bookmarks.value = swap(bookmarks.value);
+    recentBookmarks.value = swap(recentBookmarks.value);
+    let found = foundBookmarks.value;
+    foundBookmarks.value = { ...found, bookmarks: swap(found.bookmarks), total: found.total - (changed || !found.bookmarks.some(b => b.id === id) ? 0 : 1) };
+    let all = allBookmarks.value;
+    if (all) allBookmarks.value = { ...all, bookmarks: swap(all.bookmarks), total: all.total - (changed || !all.bookmarks.some(b => b.id === id) ? 0 : 1) };
+    paletteBookmarks.value = { ...paletteBookmarks.value, bookmarks: swap(paletteBookmarks.value.bookmarks) };
+  }
+  async function saveNote(bookmark: Bookmark, note: string) {
+    noting.value = null;
+    if (note.trim() === bookmark.note) return;
+    replaceBookmark(bookmark.id, await backend.saveBookmarkNote(bookmark.id, note));
+  }
+  async function deleteBookmark(bookmark: Bookmark) {
+    if (noting.value === bookmark.id) noting.value = null;
+    await backend.deleteBookmark(bookmark.id);
+    replaceBookmark(bookmark.id, null);
+  }
+  // the list beside the page: the chapters, or the bookmarks (kept on this device)
+  const showSidebar = (which: Sidebar) => saveSettings({ sidebar: which });
+  // every book's bookmarks, as the library shows them all: those that say `q`, `wait` ms after it
+  // was last asked (as it is typed). Null: the library's front again
+  let bookmarksTimer: ReturnType<typeof setTimeout> | undefined;
+  let askingBookmarks = 0;
+  function findAllBookmarks(q: string | null, wait = 0) {
+    clearTimeout(bookmarksTimer);
+    let ask = ++askingBookmarks;
+    if (q == null) return void (allBookmarks.value = null);
+    allBookmarks.value = { q, total: allBookmarks.value?.total ?? 0, bookmarks: allBookmarks.value?.bookmarks ?? [], busy: true };
+    bookmarksTimer = setTimeout(async () => {
+      let { total, bookmarks: found } = await backend.findBookmarks(q.trim(), 0, PAGE);
+      if (ask === askingBookmarks) allBookmarks.value = { q, total, bookmarks: found, busy: false };
+    }, wait);
+  }
+  async function findMoreBookmarks() {
+    let now = allBookmarks.value;
+    if (!now || now.busy || now.bookmarks.length >= now.total) return;
+    let ask = askingBookmarks;
+    allBookmarks.value = { ...now, busy: true };
+    let { total, bookmarks: more } = await backend.findBookmarks(now.q.trim(), now.bookmarks.length, PAGE);
+    if (ask === askingBookmarks) allBookmarks.value = { ...now, total, bookmarks: [...now.bookmarks, ...more], busy: false };
   }
   async function loadProgress() {
     progress.value = await backend.progress();
@@ -324,14 +456,18 @@ export function createStore() {
     let position = Math.max(toOffset(offset) ?? 0, listed.offset ?? 0);
 
     let sameBook = book.value?.id === record.id;
+    if (!sameBook) bookmarks.value = [];
     book.value = record;
     chapter.value = found;
+    readingAt.value = position;
     edited.value = null;
     opening.value = null;
     chaptersOpen.value = false;
     paintShown();
     togglePalette(false);
     loadNames(record.id);
+    // (a book read again may have put its bookmarks elsewhere)
+    if (!sameBook || fresh) loadBookmarks(record.id);
     saveProgressLater(record, found, position, 10000);
 
     let route = bookRoute({ bookId: record.id, offset: position ?? found.offset, chapterId: found.id });
@@ -371,6 +507,7 @@ export function createStore() {
     if (!open || !at) return;
     // the page can still be showing the chapter we just left
     if (!(offset >= at.offset && offset <= at.offset + at.length)) return;
+    readingAt.value = offset;
     if (toOffset(router.current().offset) === offset) return;
     router.replace(bookRoute({ bookId: open.id, offset }));
     saveProgressLater(open, at, offset, 3000);
@@ -381,8 +518,11 @@ export function createStore() {
     asked++;
     opening.value = null;
     chaptersOpen.value = false;
+    noting.value = null;
     book.value = null;
     chapter.value = null;
+    bookmarks.value = [];
+    readingAt.value = null;
     router.push({});
     document.title = 'Text Reader';
     togglePalette(false);
@@ -568,6 +708,8 @@ export function createStore() {
         if (!q && !found.total) found = await backend.books({ sort: 'latest', limit: 50 });
         if (palette.value.q !== q || book.value) return;
         paletteBooks.value = found;
+        paletteBookmarks.value = { q, bookmarks: q ? (await backend.findBookmarks(q, 0, BOOKMARKS_FOUND.palette)).bookmarks : [] };
+        if (palette.value.q !== q || book.value) return;
         selectCommand(0);
         highlightMatches();
       }, q ? 150 : 0);
@@ -601,10 +743,10 @@ export function createStore() {
     let q = palette.value.q;
     let ranges = [];
     for (let link of document.querySelectorAll('#command-palette a')) {
-      let text = link.firstChild;
+      // the first of its own text that says it (not that of a label in it, a <small>)
+      let text = [...link.childNodes].find(node => node.nodeType === Node.TEXT_NODE && latinize(node.textContent || '').toLowerCase().includes(q));
       if (!text) continue;
       let match = latinize(text.textContent || '').toLowerCase();
-      if (!match.includes(q)) continue;
       let start = match.indexOf(q);
       let range = new Range();
       range.setStart(text, start);
@@ -683,6 +825,8 @@ export function createStore() {
     router,
     book, chapter, shown, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, chaptersOpen, addName,
     shelves, finding, shuffle, find, findMore,
+    bookmarks, noting, bookmarkAt, bookmarkHere, recentBookmarks, foundBookmarks, allBookmarks,
+    toggleBookmark, editNote, saveNote, deleteBookmark, showSidebar, findAllBookmarks, findMoreBookmarks,
     fixNames, commands, unlisted, selectedCommand, mentions, status, found,
     start, follow,
     applySettings, saveSettings, chooseColor,

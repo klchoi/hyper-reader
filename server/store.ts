@@ -24,6 +24,10 @@
 // reader.db:
 //   progress, settings, names   as the page sends them; progress and names outlive their book,
 //                so a file that comes back finds them again
+//   bookmarks    the paragraphs marked in the books, each with a note, and the first words of the
+//                paragraph (`quote`), which find it again where a newer parser put it elsewhere
+//                (see library.ts); `folded` is what a search looks through. They outlive their
+//                book too, and keep its name and the chapter's for when it is gone
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import type { StatementSync } from 'node:sqlite';
@@ -277,7 +281,34 @@ const READER_MIGRATIONS = [
   `create table progress (book_id text primary key, record text not null);
   create table settings (key text primary key, value text not null);
   create table names (book_id text primary key, text text not null);`,
+  `create table bookmarks (
+    id integer primary key autoincrement,
+    book_id text not null,
+    offset integer not null,
+    parser integer not null,
+    chapter_id text,
+    chapter_title text,
+    book_name text not null,
+    quote text not null,
+    note text not null default '',
+    folded text not null,
+    created_at text not null,
+    updated_at text not null
+  );
+  create index bookmarks_book on bookmarks(book_id, offset);
+  create index bookmarks_recent on bookmarks(updated_at);`,
 ];
+
+const BOOKMARK_COLUMNS = `id, book_id as bookId, offset, parser, chapter_id as chapterId, chapter_title as chapterTitle,
+  book_name as bookName, quote, note, created_at as createdAt, updated_at as updatedAt`;
+export type BookmarkRow = {
+  id: number; bookId: string; offset: number; parser: number; chapterId: string | null; chapterTitle: string | null;
+  bookName: string; quote: string; note: string; createdAt: string; updatedAt: string;
+};
+// what a search of the bookmarks looks through
+const foldedOf = (b: Pick<BookmarkRow, 'bookName' | 'chapterTitle' | 'quote' | 'note'>) => plain([b.bookName, b.chapterTitle ?? '', b.quote, b.note].join('\n'));
+// a word as a LIKE pattern finds it, its own % and _ taken as they are
+const likeOf = (word: string) => `%${word.replace(/[\\%_]/g, c => `\\${c}`)}%`;
 
 // What the reader keeps (see above). Kept in library.db until it was kept here: taken from there,
 // once, where `library` (library.db) has it still
@@ -289,6 +320,7 @@ export function createReaderStore(file: string, { library }: { library?: string 
   return {
     db,
     close: () => db.close(),
+    transaction: <T>(work: () => T) => transaction(db, work),
     progress() {
       let all: Record<string, unknown> = {};
       for(let { book_id, record } of sql('select book_id, record from progress').all() as { book_id: string; record: string }[]) all[book_id] = JSON.parse(record);
@@ -309,6 +341,35 @@ export function createReaderStore(file: string, { library }: { library?: string 
     names: (id: string) => sql('select text from names where book_id = ?').get(id)?.text as string | undefined,
     saveNames: (id: string, text: string) => { sql('insert into names values (?, ?) on conflict (book_id) do update set text = excluded.text').run(id, text); },
 
+    // ---- bookmarks
+    bookmark: (id: number) => (sql(`select ${BOOKMARK_COLUMNS} from bookmarks where id = ?`).get(id) ?? null) as BookmarkRow | null,
+    // a book's, in the order of its text
+    bookmarksOf: (bookId: string) => sql(`select ${BOOKMARK_COLUMNS} from bookmarks where book_id = ? order by offset, id`).all(bookId) as BookmarkRow[],
+    // every book's that say each of `words` (folded), the newest first, a page of them
+    findBookmarks(words: string[], offset = 0, limit = 50) {
+      let where = words.length ? `where ${words.map(() => "folded like ? escape '\\'").join(' and ')}` : '';
+      let likes = words.map(likeOf);
+      let total = (sql(`select count(*) as n from bookmarks ${where}`).get(...likes) as { n: number }).n;
+      let bookmarks = sql(`select ${BOOKMARK_COLUMNS} from bookmarks ${where} order by updated_at desc, id desc limit ? offset ?`).all(...likes, limit, offset) as BookmarkRow[];
+      return { total, bookmarks };
+    },
+    addBookmark(b: Omit<BookmarkRow, 'id' | 'createdAt' | 'updatedAt'>) {
+      let now = new Date().toISOString();
+      let { lastInsertRowid } = sql(`insert into bookmarks (book_id, offset, parser, chapter_id, chapter_title, book_name, quote, note, folded, created_at, updated_at)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(b.bookId, b.offset, b.parser, b.chapterId, b.chapterTitle, b.bookName, b.quote, b.note, foldedOf(b), now, now);
+      return Number(lastInsertRowid);
+    },
+    // its note, or where it is (a newer parser, the book renamed): only the note says it was changed
+    updateBookmark(id: number, changed: Partial<Pick<BookmarkRow, 'note' | 'offset' | 'parser' | 'chapterId' | 'chapterTitle' | 'bookName'>>) {
+      let was = sql(`select ${BOOKMARK_COLUMNS} from bookmarks where id = ?`).get(id) as BookmarkRow | undefined;
+      if(!was) return;
+      let b = { ...was, ...changed };
+      let updatedAt = changed.note !== undefined && changed.note !== was.note ? new Date().toISOString() : was.updatedAt;
+      sql(`update bookmarks set offset = ?, parser = ?, chapter_id = ?, chapter_title = ?, book_name = ?, note = ?, folded = ?, updated_at = ? where id = ?`)
+        .run(b.offset, b.parser, b.chapterId, b.chapterTitle, b.bookName, b.note, foldedOf(b), updatedAt, id);
+    },
+    deleteBookmark: (id: number) => { sql('delete from bookmarks where id = ?').run(id); },
   };
 }
 

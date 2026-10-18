@@ -23,6 +23,13 @@
 //   scan()                      a scan of the libraries, if none is going; the status
 //   search(q, id?)              the books that say `q`; in book `id`, every place it says it
 //   characters(q)               the characters named `q`, with the books they are in
+// and the paragraphs bookmarked in the books:
+//   bookmarks(id)               a book's, in the order of its text
+//   findBookmarks(q, from, n)   every book's that say `q`, the newest first: { total, offset, bookmarks }
+//   addBookmark(id, offset)     the paragraph at `offset` bookmarked; the bookmark (the one it had,
+//                               if it had one), or null for a book not kept
+//   saveBookmarkNote(n, note)
+//   deleteBookmark(n)
 import type { BookRecord } from './book.ts';
 import type { Listed } from './parser.ts';
 import { queryString } from './catalog.ts';
@@ -55,6 +62,11 @@ export interface Backend {
   search(q: string): Promise<BookSaying[]>;
   searchBook(q: string, id: string): Promise<{ indexed: boolean; total: number; mentions: Mention[] }>;
   characters(q: string): Promise<Person[]>;
+  bookmarks(id: string): Promise<Bookmark[]>;
+  findBookmarks(q: string, offset?: number, limit?: number): Promise<BookmarkListing>;
+  addBookmark(id: string, offset: number, note?: string): Promise<Bookmark | null>;
+  saveBookmarkNote(bookmarkId: number, note: string): Promise<Bookmark | null>;
+  deleteBookmark(bookmarkId: number): Promise<void>;
 }
 
 export type LibraryStatus = {
@@ -66,6 +78,14 @@ export type LibraryStatus = {
 export type BookSaying = { id: string; name: string; chapters: number };
 export type Mention = { chapterId: string; title: string; offset: number; before: string; match: string; after: string };
 export type Person = { name: string; mentions: number; books: { id: string; name: string; mentions: number }[] };
+// a paragraph bookmarked: where it is in its book (as `?at=` says it), the words it begins with,
+// as read (not corrected by the book's names), and the note it was given. `missing`: its book is
+// not in the library (gone, or not scanned yet)
+export type Bookmark = {
+  id: number; bookId: string; offset: number; parser: number; chapterId: string | null; chapterTitle: string | null;
+  bookName: string; quote: string; note: string; createdAt: string; updatedAt: string; missing?: boolean;
+};
+export type BookmarkListing = { total: number; offset: number; bookmarks: Bookmark[] };
 
 // the server's: it reads the books and keeps them (see server/server.ts for its answers)
 export function serverBackend(): Backend {
@@ -104,5 +124,10 @@ export function serverBackend(): Backend {
     search: (q) => call('GET', `search?q=${id(q)}`),
     searchBook: (q, bookId) => call('GET', `search?q=${id(q)}&book=${id(bookId)}`),
     characters: (q) => call('GET', `characters?q=${id(q)}`),
+    bookmarks: (bookId) => call('GET', `bookmarks?book=${id(bookId)}`),
+    findBookmarks: (q, offset = 0, limit = 50) => call('GET', `bookmarks?q=${id(q)}&offset=${offset}&limit=${limit}`),
+    addBookmark: (bookId, offset, note) => call('POST', 'bookmarks', { bookId, offset, note }),
+    saveBookmarkNote: (bookmarkId, note) => call('PATCH', `bookmarks/${bookmarkId}`, { note }),
+    deleteBookmark: (bookmarkId) => call('DELETE', `bookmarks/${bookmarkId}`),
   };
 }

@@ -11,6 +11,7 @@ import { Settings } from './Settings.tsrx';
 import { CommandPalette } from './CommandPalette.tsrx';
 import { NamesEditor } from './NamesEditor.tsrx';
 import { AddName } from './AddName.tsrx';
+import { BookmarkNote } from './BookmarkNote.tsrx';
 
 export function App() @{
   const store = createStore();
@@ -53,5 +54,6 @@ export function App() @{
     <CommandPalette />
     <NamesEditor />
     <AddName />
+    <BookmarkNote />
   </>
 }

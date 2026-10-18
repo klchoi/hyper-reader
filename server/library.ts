@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createReaderStore, createStore, plain } from './store.ts';
 import { createIndexStore, createSearch, prepareIndex } from './index-store.ts';
-import type { BookRow, ChapterRow } from './store.ts';
+import type { BookmarkRow, BookRow, ChapterRow } from './store.ts';
 import { createReaders } from './readers.ts';
 import type { ReadText } from './read-worker.ts';
 import { createIndexer } from './indexer.ts';
@@ -16,13 +16,23 @@ import { slug } from '../src/parser.ts';
 import { PARSER_VERSION } from '../src/book.ts';
 import type { BookRecord } from '../src/book.ts';
 import { entryOf, findBooks, topTags } from '../src/catalog.ts';
-import { markChapter } from '../src/marks.ts';
+import { linesOf, markChapter } from '../src/marks.ts';
 import type { Marked } from '../src/marks.ts';
 import type { Entry, Progress, Query } from '../src/catalog.ts';
 
 const UPLOADS = 'uploads';
 // characters of a file's text a chapter is taken to run over, before and after (see `search`)
 const SPARE = 1024;
+
+// how much of a paragraph a bookmark keeps (`quote`), and how much of that finds it again
+const QUOTE = 200;
+const ANCHOR = 60;
+const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
+// the lines of a chapter as the page is sent them (see src/marks.ts), uncorrected: the offsets a
+// bookmark is put at are those the page has on its paragraphs
+const linesIn = (text: string, chapter: Pick<ChapterRow, 'offset' | 'end'>) => linesOf({ content: text.slice(chapter.offset, chapter.end).trim(), offset: chapter.offset }, line => line);
+// the chapter an offset is in: the last one beginning at or before it
+const chapterOf = (chapters: ChapterRow[], offset: number) => chapters.findLast(c => c.offset <= offset) ?? chapters[0];
 
 // a book's id: its name, readable, and its place (library and path), which makes it its own;
 // two files may well give one name (`Đại dâm hiệp (1-2 bộ 183 chương ...)` and `... (1)`)
@@ -262,6 +272,71 @@ export function createLibrary({ data, libraries = [], sample = 0, indexDir = dat
       await fs.promises.rm(fileOf(row), { force: true });
       forget(id);
     },
+
+    // ---- bookmarks
+    // a book's, in the order of its text. Those a parser older than the book's put where they are
+    // are found again first, by the words their paragraph begins with: in their chapter, or
+    // anywhere in the book, the place nearest where they were. One not found stays where it was
+    async bookmarks(bookId: string) {
+      let row = store.book(bookId);
+      let all = reader.bookmarksOf(bookId);
+      let stale = row ? all.filter(b => b.parser !== row.parser) : [];
+      let text = stale.length ? await textOf(row!) : null;
+      if(!row || !text) return all;
+      let chapters = store.chapters(bookId);
+      let lines = new Map<ChapterRow, ReturnType<typeof linesIn>>();
+      let linesOfChapter = (chapter: ChapterRow) => lines.get(chapter) ?? lines.set(chapter, linesIn(text, chapter)).get(chapter)!;
+      let nearest = (b: BookmarkRow, among: ChapterRow[]) => {
+        let anchor = squash(b.quote).slice(0, ANCHOR);
+        let found = among.flatMap(chapter => linesOfChapter(chapter).filter(line => anchor && squash(line.text).startsWith(anchor)));
+        return found.sort((a, z) => Math.abs(a.offset - b.offset) - Math.abs(z.offset - b.offset))[0]?.offset;
+      };
+      reader.transaction(() => {
+        for(let b of stale) {
+          let offset = nearest(b, chapters.filter(c => c.id === b.chapterId)) ?? nearest(b, chapters) ?? b.offset;
+          let chapter = chapterOf(chapters, offset);
+          reader.updateBookmark(b.id, { offset, parser: row.parser, chapterId: chapter?.id ?? null, chapterTitle: chapter?.title ?? null, bookName: row.name });
+        }
+      });
+      return reader.bookmarksOf(bookId);
+    },
+    // every book's that say what `q` says, the newest first, a page of them; one whose book is not
+    // in the library (gone, or not scanned yet) says so
+    async findBookmarks(q: string, { offset = 0, limit = 50 } = {}) {
+      let words = plain(q).trim().split(/\s+/).filter(Boolean);
+      let found = reader.findBookmarks(words, offset, Math.min(Math.max(1, limit), 200));
+      return { total: found.total, offset, bookmarks: found.bookmarks.map(b => (store.book(b.bookId) ? b : { ...b, missing: true })) };
+    },
+    // the paragraph at `offset` bookmarked (the first with words in it from there, in its
+    // chapter), or the bookmark it has already
+    async addBookmark({ bookId, offset, note }: { bookId?: unknown; offset?: unknown; note?: unknown }) {
+      if(typeof bookId !== 'string' || typeof offset !== 'number' || !Number.isInteger(offset) || (note != null && typeof note !== 'string')) {
+        throw refusal('a bookmark is { bookId, offset, note? }', 400);
+      }
+      let row = store.book(bookId);
+      let text = row && await textOf(row);
+      if(!row || !text) return null;
+      let chapters = store.chapters(bookId);
+      let chapter = chapterOf(chapters, offset);
+      if(!chapter) return null;
+      let lines = linesIn(text, chapter);
+      let at = Math.max(0, lines.findLastIndex(line => line.offset <= offset));
+      let line = lines.slice(at).find(line => line.text.trim()) ?? lines[at];
+      let had = reader.bookmarksOf(bookId).find(b => b.offset === line.offset);
+      if(had) return had;
+      let id = reader.addBookmark({
+        bookId, offset: line.offset, parser: row.parser, chapterId: chapter.id, chapterTitle: chapter.title, bookName: row.name,
+        quote: squash(line.text).slice(0, QUOTE), note: squash(note ?? ''),
+      });
+      return reader.bookmark(id);
+    },
+    async updateBookmark(id: number, { note }: { note?: unknown }) {
+      if(typeof note !== 'string') throw refusal('a bookmark changes by its { note }', 400);
+      if(!reader.bookmark(id)) return null;
+      reader.updateBookmark(id, { note: note.trim() });
+      return reader.bookmark(id);
+    },
+    deleteBookmark: async (id: number) => { reader.deleteBookmark(id); },
 
     // ---- the libraries
     // a scan, if none is going; its state

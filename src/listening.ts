@@ -34,6 +34,18 @@ export function listen(store: Store) {
     if (event.key === 'ArrowRight') store.openNextChapter(+1);
     else if (event.key === 'ArrowLeft') store.openNextChapter(-1);
     else if (event.key === 'Backspace') store.showLibrary();
+    // the paragraph at the top of the page bookmarked, or no longer
+    else if (event.key.toLowerCase() === 'b' && !event.metaKey && !event.ctrlKey && !event.altKey && store.chapter.value) {
+      event.preventDefault();
+      store.toggleBookmark();
+    }
+  });
+  // the ribbon in the margin of a paragraph bookmarked (left of its text) opens its note
+  on(document, 'click', (event: MouseEvent) => {
+    let paragraph = (event.target as Element).closest?.('article p.bookmarked') as HTMLElement | null;
+    if (!paragraph || event.clientX >= paragraph.getBoundingClientRect().left) return;
+    let bookmark = store.bookmarks.value.find(b => b.offset === Number(paragraph.dataset.offset));
+    if (bookmark) store.editNote(bookmark.id);
   });
   stops.push(onKey('Cmd+K', () => store.togglePalette()));
   stops.push(onKey('Escape', () => store.togglePalette(false)));
@@ -42,6 +54,7 @@ export function listen(store: Store) {
   stops.push(onKey('Escape', () => store.toggleSettings(false)));
   // and so does the chapter list, where it is laid over the page
   stops.push(onKey('Escape', () => store.toggleChapters(false)));
+  stops.push(onKey('Escape', () => store.editNote(null)));
   on(document, 'pointerdown', (event: PointerEvent) => {
     if (!store.chaptersOpen.value || (event.target as Element).closest?.('nav, aside button.chapters')) return;
     store.toggleChapters(false);

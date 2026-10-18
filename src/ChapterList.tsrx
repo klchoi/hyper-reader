@@ -2,10 +2,13 @@
 // a chapter written in parts named once, over its parts. A chapter is shown by its number and
 // its name (`Chương 12: Tên` and `Hồi 12: Tên` as `12. Tên`), the numbers in a column of their
 // own; one that says nothing besides its number keeps its title whole (`5. Chương 5`). A part
-// is listed as it is written (`(thượng)`) under the chapters' names.
+// is listed as it is written (`(thượng)`) under the chapters' names. Its bookmarks are listed in
+// their place when asked for (see BookmarkList.tsrx): both are kept, so either is as it was left.
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
+import type { Sidebar } from './store.ts';
 import { bookRoute } from './places.ts';
+import { BookmarkList } from './BookmarkList.tsrx';
 
 // a row: a book's name, a chapter or one of its parts, or the name of a chapter in parts (with
 // the ids of its parts). `number` and `label` are what is shown, `tip` the title in full
@@ -60,7 +63,19 @@ export function ChapterList() @{
     store.openBook({ bookId: store.book.value!.id, offset });
   };
 
-  <nav class={{ open: store.chaptersOpen.value }}>
+  const sidebar = track<Sidebar>(() => (store.settings.value.sidebar === 'bookmarks' ? 'bookmarks' : 'chapters'));
+
+  <nav class={{ open: store.chaptersOpen.value, bookmarks: sidebar.value === 'bookmarks' }}>
+    <div class="sidebar" role="tablist">
+      <button role="tab" aria-selected={sidebar.value === 'chapters'} class={{ selected: sidebar.value === 'chapters' }} onClick={() => store.showSidebar('chapters')}>Chapters</button>
+      <button role="tab" aria-selected={sidebar.value === 'bookmarks'} class={{ selected: sidebar.value === 'bookmarks' }} onClick={() => store.showSidebar('bookmarks')}>
+        {'Bookmarks'}
+        @if (store.bookmarks.value.length > 0) {
+          <small>{` ${store.bookmarks.value.length}`}</small>
+        }
+      </button>
+    </div>
+    <BookmarkList />
     @if (rows.value.length > 0) {
       <ol start={0} style={`--digits: ${digits.value}`}>
         @for (const row of rows.value; key row.key) {

@@ -11,8 +11,8 @@ and the settings. The page is built from `src/` (see Building it); git keeps `sr
 `http://127.0.0.1:8080/`. The server serves the page, and keeps what it knows in three SQLite
 databases in `<data>` (`data/` by default):
 
-- `reader.db`: where each book was left, the settings, the names corrected. The one file to
-  keep a copy of;
+- `reader.db`: where each book was left, the settings, the names corrected, the bookmarks. The
+  one file to keep a copy of;
 - `library.db`: the books, their chapters and characters. Made again by a scan if deleted;
 - `index.db`: the full text, indexed for search. By far the biggest, and the most written
   to: made again from the files by the indexer if deleted, and it may be kept where writes cost
@@ -37,7 +37,10 @@ processes of their own, and their full text indexed behind them for search (`/ap
 `&book=` for every place in one book), a book opened first; the processes end when they have
 nothing left to do, and with them the memory a big book takes to read (a few hundred MB), so
 the server waits on little (~40-60 MB, and the text of the book being read). The characters a book names most
-are kept with it (`/api/characters?q=`). The library is asked of it a page at a time, the server
+are kept with it (`/api/characters?q=`). A paragraph is bookmarked (`B` while reading, with a
+note if wanted), and a bookmark kept with the words its paragraph begins with, so a newer parser
+that puts the paragraph elsewhere finds it again (`/api/bookmarks?book=` for a book's,
+`?q=&offset=&limit=` for every book's, newest first). The library is asked of it a page at a time, the server
 looking through all of its books (`/api/books?q=&tag=&size=min-max&chapters=min-max&sort=&offset=&limit=`,
 and `/api/tags` for the tags most books have; see `src/catalog.ts`), so the page holds only the
 few it shows, whatever the size of the library. Where a book was left and its names outlive it, so a

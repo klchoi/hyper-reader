@@ -85,6 +85,18 @@ function routes(library: Library): Route[] {
       return library.search(query.get('q') ?? '', book);
     }],
     ['GET', /^\/api\/characters$/, (_, __, query) => library.characters(query.get('q') ?? '')],
+    // ?book= a book's, in the order of its text; or ?q=&offset=&limit= every book's that say it,
+    // the newest first
+    ['GET', /^\/api\/bookmarks$/, (_, __, query) => {
+      let book = query.get('book');
+      if(book == null) return library.findBookmarks(query.get('q') ?? '', { offset: Number(query.get('offset')) || 0, limit: Number(query.get('limit')) || undefined });
+      if(!ID.test(book)) throw Object.assign(new Error('not an id'), { status: 400 });
+      return library.bookmarks(book);
+    }],
+    // { bookId, offset, note? }: the paragraph at offset, bookmarked
+    ['POST', /^\/api\/bookmarks$/, (_, body) => library.addBookmark(body ?? {})],
+    ['PATCH', /^\/api\/bookmarks\/(\d+)$/, ([id], body) => library.updateBookmark(Number(id), body ?? {})],
+    ['DELETE', /^\/api\/bookmarks\/(\d+)$/, ([id]) => library.deleteBookmark(Number(id))],
   ];
 }
 

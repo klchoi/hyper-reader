@@ -384,6 +384,73 @@ describe('the server', () => {
     await call('PUT', 'names/a-1', 'Lâm = Lam\n');
     assert.deepEqual(await call('GET', 'names/a-1'), { status: 200, answer: 'Lâm = Lam\n' });
   });
+  it('bookmarks a paragraph, once, with a note, and finds it in every book however it is accented', async () => {
+    let { id } = await bookNamed('Sách thử');
+    let { answer: record } = await call('GET', `books/${id}`);
+    let { answer: chapter } = await call('GET', `books/${id}/chapters/${record.chapters[2].id}`);
+    let line = chapter.lines.filter((l: Line) => l.text.trim())[3];
+    // an offset inside a paragraph is the paragraph's
+    let { status, answer: made } = await call('POST', 'bookmarks', { bookId: id, offset: line.offset + 5 });
+    assert.equal(status, 200);
+    assert.deepEqual([made.offset, made.chapterId, made.chapterTitle, made.bookName, made.note], [line.offset, chapter.id, 'Chương 2: Tiêu đề 2', 'Sách thử', '']);
+    assert.ok(line.text.startsWith(made.quote.slice(0, 40)));
+    assert.equal((await call('POST', 'bookmarks', { bookId: id, offset: line.offset })).answer.id, made.id);
+    let { answer: first } = await call('POST', 'bookmarks', { bookId: id, offset: chapter.offset, note: '  the  beginning ' });
+    assert.equal(first.note, 'the beginning');
+    assert.deepEqual((await call('GET', `bookmarks?book=${id}`)).answer.map((b: { id: number }) => b.id), [first.id, made.id]);
+    let { answer: noted } = await call('PATCH', `bookmarks/${made.id}`, { note: 'Nàng gặp lại người cũ' });
+    assert.equal(noted.note, 'Nàng gặp lại người cũ');
+    let found = async (q: string) => (await call('GET', `bookmarks?q=${encodeURIComponent(q)}`)).answer;
+    assert.deepEqual((await found('nang  GAP')).bookmarks.map((b: { id: number }) => b.id), [made.id]);
+    assert.equal((await found('hoang dung')).total, 1);
+    assert.equal((await found('tieu de 2')).total, 2);
+    assert.equal((await found('sach thu beginning')).bookmarks[0].id, first.id);
+    assert.equal((await found('50%')).total, 0);
+    // the newest first, a page at a time
+    assert.deepEqual((await found('')).bookmarks.slice(0, 2).map((b: { id: number }) => b.id), [made.id, first.id]);
+    assert.deepEqual((await call('GET', 'bookmarks?offset=1&limit=1')).answer.bookmarks.map((b: { id: number }) => b.id), [first.id]);
+    await call('DELETE', `bookmarks/${first.id}`);
+    await call('DELETE', `bookmarks/${made.id}`);
+    assert.deepEqual((await call('GET', `bookmarks?book=${id}`)).answer, []);
+  });
+  it('finds a bookmark again where a newer parser put its paragraph', async () => {
+    let { id } = await bookNamed('Sách thử');
+    let { answer: record } = await call('GET', `books/${id}`);
+    let { answer: chapter } = await call('GET', `books/${id}/chapters/${record.chapters[3].id}`);
+    let line = chapter.lines.filter((l: Line) => l.text.trim())[5];
+    let { answer: paragraph } = await call('POST', 'bookmarks', { bookId: id, offset: line.offset });
+    let { answer: title } = await call('POST', 'bookmarks', { bookId: id, offset: chapter.offset });
+    let db = new DatabaseSync(path.join(data, 'reader.db'));
+    // the paragraph a little further on, in its chapter; the title elsewhere, in a chapter no
+    // longer there
+    db.prepare('update bookmarks set parser = 1, offset = offset + 7 where id = ?').run(paragraph.id);
+    db.prepare("update bookmarks set parser = 1, offset = 3, chapter_id = 'gone' where id = ?").run(title.id);
+    db.close();
+    let again = (await call('GET', `bookmarks?book=${id}`)).answer;
+    assert.deepEqual(again.map((b: { offset: number; parser: number; chapterId: string }) => [b.offset, b.parser, b.chapterId]), [
+      [chapter.offset, PARSER_VERSION, chapter.id], [line.offset, PARSER_VERSION, chapter.id],
+    ]);
+    await call('DELETE', `bookmarks/${paragraph.id}`);
+    await call('DELETE', `bookmarks/${title.id}`);
+  });
+  it('keeps a bookmark when its book goes, and says the book is gone', async () => {
+    let { answer: record } = await call('POST', 'books', { ...upload, name: 'Đánh dấu (1-3 chương).txt' });
+    let { answer: made } = await call('POST', 'bookmarks', { bookId: record.id, offset: record.chapters[1].offset, note: 'sắp mất' });
+    await call('DELETE', `books/${record.id}`);
+    let [kept] = (await call('GET', 'bookmarks?q=sap mat')).answer.bookmarks;
+    assert.deepEqual([kept.id, kept.bookName, kept.missing], [made.id, 'Đánh dấu', true]);
+    await call('DELETE', `bookmarks/${made.id}`);
+  });
+  it('turns away a bookmark that is none', async () => {
+    let { id } = await bookNamed('Sách thử');
+    assert.equal((await call('POST', 'bookmarks', { bookId: id })).status, 400);
+    assert.equal((await call('POST', 'bookmarks', { bookId: id, offset: 1.5 })).status, 400);
+    assert.equal((await call('POST', 'bookmarks', { bookId: 'no-such-book', offset: 0 })).status, 404);
+    assert.equal((await call('PATCH', 'bookmarks/999999', { note: 'x' })).status, 404);
+    assert.equal((await call('PATCH', 'bookmarks/1', { note: 3 })).status, 400);
+    assert.equal((await call('DELETE', 'bookmarks/x')).status, 404);
+    assert.equal((await call('GET', 'bookmarks?book=../x')).status, 400);
+  });
   it('turns away what is no book, and an id that is no id', async () => {
     assert.equal((await call('POST', 'books', { name: 'notes.md', size: 1, text: 'x' })).status, 400);
     assert.equal((await call('POST', 'books', { name: '../escape.txt', size: 1, text: 'x' })).status, 400);

@@ -2,11 +2,14 @@
 // books have), and what it is asked for (words of a title, tags, a size, a length, an order), a
 // page at a time. The backend looks through the books (see catalog.ts): the page only ever holds
 // the few it shows. Kept by the server, the library can also be searched for what its books say
-// and the characters they name, and its libraries scanned again.
+// and the characters they name, and its libraries scanned again. The bookmarks of every book are
+// on its front too (the newest), above the books its search finds (those that say the words asked
+// for), and all of them, searched, where asked for.
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
 import { bookRoute, formatDate, formatSize } from './places.ts';
 import type { Query, Range, Shelved, Sort } from './catalog.ts';
+import type { Bookmark } from './backends.ts';
 
 // what the library can be narrowed to, and ordered by
 const SIZES: { label: string; range?: Range }[] = [
@@ -38,6 +41,35 @@ const dayOf = (ms: number) => (ms ? new Date(ms).toLocaleDateString('sv-SE') : '
 
 type Section = { key: string; title: string; books: Shelved[]; all?: Query; shuffle?: boolean; more?: boolean };
 
+// a bookmark as the library lists it: its book (unless it is listed under it), its chapter and
+// when it was made or its note written, the words its paragraph begins with, and its note. One
+// whose book is not in the library is only told of
+function BookmarkRow(props: { bookmark: Bookmark; withBook?: boolean }) @{
+  const store = StoreContext.get();
+  const open = (event: MouseEvent) => {
+    event.preventDefault();
+    store.findAllBookmarks(null);
+    store.openBook({ bookId: props.bookmark.bookId, offset: props.bookmark.offset });
+  };
+
+  <li class={{ bookmark: true, missing: !!props.bookmark.missing }}>
+    @if (props.withBook) {
+      <span class="title">{props.bookmark.bookName}</span>
+    }
+    <small class="facts">
+      {[props.bookmark.chapterTitle, formatDate(props.bookmark.updatedAt), props.bookmark.missing && 'not in the library'].filter(Boolean).join(' · ')}
+    </small>
+    @if (props.bookmark.missing) {
+      <span class="quote">{props.bookmark.quote}</span>
+    } @else {
+      <a class="quote" href={store.router.route(bookRoute({ bookId: props.bookmark.bookId, offset: props.bookmark.offset }))} onClick={open}>{props.bookmark.quote}</a>
+    }
+    @if (props.bookmark.note) {
+      <span class="note">{props.bookmark.note}</span>
+    }
+  </li>
+}
+
 export function Library() @{
   const store = StoreContext.get();
   const filtersOpen = track(false);
@@ -47,6 +79,7 @@ export function Library() @{
   const ask = (change: Query, wait = 0) => {
     let query = { ...asked.value, ...change };
     if ('q' in change) store.searchLibrary('');
+    store.findAllBookmarks(null);
     // the files of one book are left for anything else asked
     if (!('title' in change)) delete query.title;
     let something = query.q?.trim() || query.tags?.length || query.size || query.chapters || query.sort || query.title != null;
@@ -77,6 +110,16 @@ export function Library() @{
     formatSize(book.size), `${book.chapters.toLocaleString()} ${book.chapters === 1 ? 'chapter' : 'chapters'}`, dayOf(book.date), book.folder,
     store.finding.value?.query.title != null && book.note,
   ].filter(Boolean).join(' · ');
+  // every bookmark asked for, a group to each book, in the order they came (the newest first)
+  const bookmarkGroups = track(() => {
+    let groups: { key: string; bookName: string; bookmarks: Bookmark[] }[] = [];
+    for (let b of store.allBookmarks.value?.bookmarks ?? []) {
+      let last = groups.at(-1);
+      if (last && last.key.startsWith(`${b.bookId}:`)) last.bookmarks.push(b);
+      else groups.push({ key: `${b.bookId}:${b.id}`, bookName: b.bookName, bookmarks: [b] });
+    }
+    return groups;
+  });
   const readOf = (book: Shelved) => (book.read?.chapterCount ? `Chapter ${book.read.chapterIndex} of ${book.read.chapterCount}, ${formatDate(book.read.updatedAt) ?? ''}` : '');
   const open = (event: MouseEvent, book: Shelved) => {
     event.preventDefault();
@@ -126,6 +169,28 @@ export function Library() @{
       </div>
     }
 
+    @if (store.allBookmarks.value) {
+      <section class="all-bookmarks">
+        <h2>
+          <span>{store.allBookmarks.value.busy && !store.allBookmarks.value.bookmarks.length ? 'Looking…' : `${store.allBookmarks.value.total.toLocaleString()} ${store.allBookmarks.value.total === 1 ? 'bookmark' : 'bookmarks'}`}</span>
+          <button class="link" onClick={() => store.findAllBookmarks(null)}>Back</button>
+        </h2>
+        <input type="search" class="filter" placeholder="Find a bookmark: its note, its words, its book or chapter" value={store.allBookmarks.value.q} onInput={(event) => store.findAllBookmarks(event.currentTarget.value, 250)} />
+        @for (const group of bookmarkGroups.value; key group.key) {
+          <>
+            <h3>{group.bookName}</h3>
+            <ol class="books">
+              @for (const b of group.bookmarks; key b.id) {
+                <BookmarkRow bookmark={b} />
+              }
+            </ol>
+          </>
+        }
+        @if (store.allBookmarks.value.bookmarks.length < store.allBookmarks.value.total) {
+          <button class="more" disabled={store.allBookmarks.value.busy} onClick={() => store.findMoreBookmarks()}>Show more</button>
+        }
+      </section>
+    } @else {
     @if (store.found.value.q) {
       // what the books say, and the characters they name (the server's index)
       <section class="found">
@@ -164,6 +229,20 @@ export function Library() @{
       <>
         @if (store.shelves.value && !store.finding.value && store.shelves.value.latest.length === 0) {
           <p class="empty">No books yet: drop .txt files on the page to add them.</p>
+        }
+        // the bookmarks that say the words asked for, above the books
+        @if (store.finding.value && store.foundBookmarks.value.bookmarks.length > 0) {
+          <section>
+            <h2>
+              <span>{`In your bookmarks: ${store.foundBookmarks.value.total.toLocaleString()}`}</span>
+              <button class="link" onClick={() => store.findAllBookmarks(store.foundBookmarks.value.q)}>See all</button>
+            </h2>
+            <ol class="books">
+              @for (const b of store.foundBookmarks.value.bookmarks; key b.id) {
+                <BookmarkRow bookmark={b} withBook={true} />
+              }
+            </ol>
+          </section>
         }
         @for (const section of sections.value; key section.key) {
           <section>
@@ -216,6 +295,19 @@ export function Library() @{
             }
           </section>
         }
+        @if (!store.finding.value && store.recentBookmarks.value.length > 0) {
+          <section>
+            <h2>
+              <span>Bookmarks</span>
+              <button class="link" onClick={() => store.findAllBookmarks('')}>See all</button>
+            </h2>
+            <ol class="books">
+              @for (const b of store.recentBookmarks.value; key b.id) {
+                <BookmarkRow bookmark={b} withBook={true} />
+              }
+            </ol>
+          </section>
+        }
         @if (!store.finding.value && (store.shelves.value?.tags.length ?? 0) > 0) {
           <section>
             <h2><span>Tags</span></h2>
@@ -227,6 +319,7 @@ export function Library() @{
           </section>
         }
       </>
+    }
     }
 
     @if (said.value) {

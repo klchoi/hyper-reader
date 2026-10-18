@@ -1,5 +1,6 @@
 // The command palette (Cmd+K): the books, or the chapters of the one open, searched as typed;
-// and kept by the server, every place in the book open that says what was typed.
+// and kept by the server, every place in the book open that says what was typed, and the bookmarks
+// that say it (the book's, or with none open, every book's).
 import { StoreContext } from './store.ts';
 import type { Command } from './store.ts';
 import { bookRoute } from './places.ts';
@@ -28,19 +29,28 @@ export function CommandPalette() @{
     @if (store.palette.value.open && store.commands.value.length > 0) {
       <ul>
         @for (const command of store.commands.value; key command.key) {
-          @if (command.mention) {
-            <li class={{ mention: true, selected: command === store.selectedCommand.value }}>
-              <a href={store.router.route(bookRoute(command.open))} onClick={(event: MouseEvent) => choose(event, command)} title={command.mention.title}>
-                <small>{command.mention.title}</small>
-                {command.mention.before}
-                <mark>{command.mention.match}</mark>
-                {command.mention.after}
+          @if (command.bookmark) {
+            <li class={{ bookmark: true, selected: command === store.selectedCommand.value }}>
+              <a href={store.router.route(bookRoute(command.open))} onClick={(event: MouseEvent) => choose(event, command)} title={command.bookmark.quote}>
+                <small>{[store.book.value ? '' : command.bookmark.bookName, command.bookmark.chapterTitle].filter(Boolean).join(' · ')}</small>
+                {command.bookmark.note || command.bookmark.quote}
               </a>
             </li>
           } @else {
-            <li data-term={command.term} class={{ selected: command === store.selectedCommand.value }}>
-              <a href={store.router.route(bookRoute(command.open))} onClick={(event: MouseEvent) => choose(event, command)} title={command.label}>{command.label}</a>
-            </li>
+            @if (command.mention) {
+              <li class={{ mention: true, selected: command === store.selectedCommand.value }}>
+                <a href={store.router.route(bookRoute(command.open))} onClick={(event: MouseEvent) => choose(event, command)} title={command.mention.title}>
+                  <small>{command.mention.title}</small>
+                  {command.mention.before}
+                  <mark>{command.mention.match}</mark>
+                  {command.mention.after}
+                </a>
+              </li>
+            } @else {
+              <li data-term={command.term} class={{ selected: command === store.selectedCommand.value }}>
+                <a href={store.router.route(bookRoute(command.open))} onClick={(event: MouseEvent) => choose(event, command)} title={command.label}>{command.label}</a>
+              </li>
+            }
           }
         }
       </ul>

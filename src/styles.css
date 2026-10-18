@@ -695,6 +695,12 @@ aside button {
   &.names-editor::after {
     content: 'ℕ';
   }
+  &.chapters {
+    display: none;
+    &::after {
+      content: 'ℂ';
+    }
+  }
   /* (the text form of the cog, not the emoji) */
   &.cog::after {
     content: '\2699\FE0E';
@@ -933,7 +939,7 @@ main {
 
 /** command palette **/
 #command-palette[open] {
-  --width: calc(var(--paper-width) - 80px);
+  --width: min(calc(var(--paper-width) - 80px), calc(100vw - 2 * var(--gap)));
   width: var(--width);
   max-height: 70%;
   position: fixed;
@@ -1001,7 +1007,7 @@ main {
 
 /** names editor **/
 #names-editor[open] {
-  --width: calc(var(--paper-width) - 80px);
+  --width: min(calc(var(--paper-width) - 80px), calc(100vw - 2 * var(--gap)));
   width: var(--width);
   height: 80%;
   position: fixed;
@@ -1270,6 +1276,92 @@ main {
     & + button {
       border-top: 1px solid var(--horizontal-line-color);
     }
+  }
+}
+
+/** a narrow screen **/
+/* the page alone, the whole width of the window; the chapter list laid over it from the side when
+   asked for, and the rail a bar along the foot */
+@media (max-width: 760px) {
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    /* the bar along the foot is over the page, so the page ends above it */
+    padding-bottom: calc(var(--gap) * 2.75 + env(safe-area-inset-bottom));
+  }
+  .library {
+    grid-column: auto;
+  }
+  main {
+    padding: 1rem calc(var(--gap) * 0.75);
+  }
+
+  nav {
+    position: fixed;
+    z-index: 20;
+    inset: 0 auto 0 0;
+    width: min(85vw, var(--nav-width));
+    height: 100dvh;
+    padding-bottom: calc(var(--gap) * 3.5 + env(safe-area-inset-bottom));
+    background: var(--body-background-color);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, .2);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform .2s ease-in-out, visibility 0s .2s;
+    &.open {
+      transform: none;
+      visibility: visible;
+      transition: transform .2s ease-in-out;
+    }
+  }
+  /* zen hides the list beside the page, not the one asked for */
+  [data-zen=true] nav {
+    opacity: 1;
+  }
+
+  aside {
+    position: fixed;
+    z-index: 15;
+    inset: auto 0 0 0;
+    height: auto;
+    flex-direction: row;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--body-background-color);
+    border-top: 1px solid var(--horizontal-line-color);
+  }
+  aside > .foot {
+    margin-top: 0;
+    margin-left: auto;
+  }
+  aside > div {
+    flex-direction: row;
+    column-gap: calc(var(--gap) * .5);
+    padding: calc(var(--gap) * .4) calc(var(--gap) * .6);
+  }
+  /* the line between the groups stands up between them */
+  aside > div + div::before {
+    top: 50%;
+    left: 0;
+    transform: translate3d(0, -50%, 0);
+    width: 1px;
+    height: calc(var(--gap) * 1.5);
+  }
+  /* big enough for a finger */
+  aside a,
+  aside button {
+    width: 44px;
+  }
+  aside button.chapters {
+    display: grid;
+  }
+
+  /* the settings over the cog at the right end of the bar */
+  #settings[open] {
+    inset: auto calc(var(--gap) * .5) calc(var(--gap) * 3.25 + env(safe-area-inset-bottom)) auto;
+    max-height: calc(100dvh - var(--gap) * 5);
+  }
+  #names-editor[open] {
+    top: 5%;
+    height: calc(90% - var(--gap) * 2.75);
   }
 }
 

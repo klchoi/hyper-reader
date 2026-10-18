@@ -1,7 +1,8 @@
 // The fonts and sizes, for the reading and for everything else: the faces this page can name,
-// each written in itself, and the size and weight of the one chosen. A part of the settings.
+// each written in itself, and the size and weight of the one chosen. A part of the settings, kept
+// on this device (see store.ts).
 import { track } from 'ripple';
-import { cssFontFamily, fontSettings, readingFonts, StoreContext } from './store.ts';
+import { cssFontFamily, fontSettings, hasFont, readingFonts, StoreContext } from './store.ts';
 import type { FontTarget } from './store.ts';
 
 const targets: { target: FontTarget; label: string; title: string }[] = [
@@ -17,9 +18,11 @@ export function FontPicker() @{
   const pickedSize = track(() => store.settings.value[picked.value.size] || 18);
   const pickedWeight = track(() => store.settings.value[picked.value.weight] || 400);
   const installed = track<string[]>(() => store.settings.value.fonts ?? []);
+  // where the browser will not say what is installed, the ones worth reading in that are here
+  const suggested = readingFonts.filter(hasFont);
   const families = track(() => {
     let q = store.fontPicker.value.q.trim().toLowerCase();
-    return (installed.value.length > 0 ? installed.value : readingFonts).filter(family => family.toLowerCase().includes(q));
+    return (installed.value.length > 0 ? installed.value : suggested).filter(family => family.toLowerCase().includes(q));
   });
   const slid = (event: Event) => Number((event.currentTarget as HTMLInputElement).value);
 
@@ -37,7 +40,7 @@ export function FontPicker() @{
         <a onClick={() => store.loadFonts(true)}>Look again</a>
       </small>
     } @else {
-      <small>These are the fonts this page can name without asking: this browser does not say which are installed, or was not let to.</small>
+      <small>These are the fonts worth reading in that this device seems to have: this browser does not say which are installed, or was not let to.</small>
     }
     <ul>
       <li>

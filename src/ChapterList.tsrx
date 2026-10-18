@@ -56,10 +56,11 @@ export function ChapterList() @{
   const activeId = track(() => store.opening.value ?? store.chapter.value?.id);
   const open = (event: MouseEvent, offset: number) => {
     event.preventDefault();
+    store.toggleChapters(false);
     store.openBook({ bookId: store.book.value!.id, offset });
   };
 
-  <nav>
+  <nav class={{ open: store.chaptersOpen.value }}>
     @if (rows.value.length > 0) {
       <ol start={0} style={`--digits: ${digits.value}`}>
         @for (const row of rows.value; key row.key) {

@@ -40,6 +40,12 @@ export function listen(store: Store) {
   // a non-modal dialog is not dismissed for us: the settings go with Escape, or a click anywhere
   // but on them (or on the cog, which puts them away itself)
   stops.push(onKey('Escape', () => store.toggleSettings(false)));
+  // and so does the chapter list, where it is laid over the page
+  stops.push(onKey('Escape', () => store.toggleChapters(false)));
+  on(document, 'pointerdown', (event: PointerEvent) => {
+    if (!store.chaptersOpen.value || (event.target as Element).closest?.('nav, aside button.chapters')) return;
+    store.toggleChapters(false);
+  });
   on(document, 'pointerdown', (event: PointerEvent) => {
     if (!store.settingsOpen.value || (event.target as Element).closest?.('#settings, aside button.cog')) return;
     store.toggleSettings(false);

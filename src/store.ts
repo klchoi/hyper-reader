@@ -44,6 +44,33 @@ export const readingFonts = [
   'Hoefler Text', 'Georgia', 'Literata', 'Cambria', 'Constantia',
   'Times New Roman', 'system-ui',
 ];
+// whether a face is there to be named: text set in it comes out another width than in the generic
+// family it would otherwise fall back to. A guess, but the only one a page can make
+const probe = document.createElement('canvas').getContext('2d');
+export function hasFont(family: string) {
+  if (family === 'system-ui' || !probe) return true;
+  return ['serif', 'sans-serif', 'monospace'].some(generic => {
+    let text = 'mmmmmmmmmlli WwQq 0123456789';
+    probe.font = `72px ${generic}`;
+    let fallback = probe.measureText(text).width;
+    probe.font = `72px ${cssFontFamily(family)}, ${generic}`;
+    return probe.measureText(text).width !== fallback;
+  });
+}
+// the fonts are the device's: a phone has none of the ones a desktop has, and is read at another
+// size. The faces, sizes and weights, and the list of what is installed, are kept in this browser,
+// and the other settings with the backend, for every device alike
+const DEVICE_KEY = 'hyper-reader:device';
+const deviceKeys = new Set<string>(['fonts', ...Object.values(fontSettings).flatMap(Object.values)]);
+const keptOnDevice = (): Settings | null => {
+  try { return JSON.parse(localStorage.getItem(DEVICE_KEY) ?? 'null'); } catch { return null; }
+};
+// the settings of the one and of the other
+function splitSettings(all: Settings) {
+  let device: Settings = {}, shared: Settings = {};
+  for (let [key, value] of Object.entries(all)) (deviceKeys.has(key) ? device : shared)[key] = value;
+  return { device, shared };
+}
 
 // a setting css can select on goes on the element. A list or a shape is for the
 // app to read and only reads as junk in an attribute, so it stays out of one
@@ -85,6 +112,8 @@ export function createStore() {
   const fontPicker = track<{ q: string; target: FontTarget }>({ q: '', target: 'reading' });
   const names = track('');
   const namesEditorOpen = track(false);
+  // the chapter list, where the window is too narrow to keep it beside the page (see styles.css)
+  const chaptersOpen = track(false);
   const addName = track<AddNameOffer | null>(null);
   // the names as the list corrects them, made again only when the list changes
   const fixNames = track(() => nameFixer(names.value));
@@ -129,7 +158,9 @@ export function createStore() {
   }
   async function saveSettings(changed: Settings) {
     applySettings(changed);
-    await backend.saveSettings(changed);
+    let { device, shared } = splitSettings(changed);
+    if (Object.keys(device).length > 0) localStorage.setItem(DEVICE_KEY, JSON.stringify({ ...keptOnDevice(), ...device }));
+    if (Object.keys(shared).length > 0) await backend.saveSettings(shared);
   }
   async function chooseColor(color: string) {
     await saveSettings({ [`color:${getColorScheme()}`]: color });
@@ -297,6 +328,7 @@ export function createStore() {
     chapter.value = found;
     edited.value = null;
     opening.value = null;
+    chaptersOpen.value = false;
     paintShown();
     togglePalette(false);
     loadNames(record.id);
@@ -348,6 +380,7 @@ export function createStore() {
     // a chapter on its way is not opened after all
     asked++;
     opening.value = null;
+    chaptersOpen.value = false;
     book.value = null;
     chapter.value = null;
     router.push({});
@@ -456,6 +489,7 @@ export function createStore() {
     }, 300);
   }
   const toggleNamesEditor = (open: boolean) => { namesEditorOpen.value = open; };
+  const toggleChapters = (open = !chaptersOpen.value) => { chaptersOpen.value = open; };
   // the chapter as the backend marks it with the list saved
   async function markAgain(open: BookRecord) {
     clearTimeout(markTimer);
@@ -623,7 +657,14 @@ export function createStore() {
   // into a book opens it
   async function start() {
     applySettings({ 'color:dark': 'night', 'color:light': 'white' });
-    applySettings(await backend.settings());
+    let { device, shared } = splitSettings(await backend.settings());
+    applySettings(shared);
+    // the fonts the backend kept for every device, before they were each device's, are where a
+    // device starts from, for whatever it has not chosen itself. A face it does not have falls
+    // back to Reader in the stylesheet, so it is kept rather than guessed away. The list of what
+    // is installed is another device's, and not
+    let { fonts, ...before } = device;
+    applySettings({ ...before, ...keptOnDevice() });
     loadProgress();
     loadShelves();
     watchStatus();
@@ -640,7 +681,7 @@ export function createStore() {
 
   return {
     router,
-    book, chapter, shown, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, addName,
+    book, chapter, shown, opening, progress, settings, settingsOpen, palette, fontPicker, names, namesEditorOpen, chaptersOpen, addName,
     shelves, finding, shuffle, find, findMore,
     fixNames, commands, unlisted, selectedCommand, mentions, status, found,
     start, follow,
@@ -648,7 +689,7 @@ export function createStore() {
     loadFonts, toggleSettings, setFontTarget, setFontQuery, chooseFont,
     openBook, openNextChapter, trackReadingOffset, showLibrary,
     storeFiles, refreshBook, deleteBook,
-    setNames, toggleNamesEditor, saveNames, showAddName, addToNames,
+    setNames, toggleNamesEditor, toggleChapters, saveNames, showAddName, addToNames,
     togglePalette, selectCommand, searchCommands, runCommand,
     rescan, searchLibrary, openFound,
   };

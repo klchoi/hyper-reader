@@ -129,6 +129,8 @@ function nameColorOf(hue: number, paper: chromaJs.Color, prose: chromaJs.Color) 
 type Found = { range: Range; name: string; known: boolean };
 // scope -> (text node -> the names found in it still missing from the list), for the pointer
 const detectedNames: Record<string, Map<Node, Found[]>> = {};
+// and those the list has, for a selection of a part of one to be taken as all of it
+const listedNames: Record<string, Map<Node, Found[]>> = {};
 
 // the chapter, the chapter list and the palette are coloured apart, each with highlights (and a
 // stylesheet) of its own, so one can be painted again without the others
@@ -173,6 +175,7 @@ function paint(scope: Scope, found: (Found & { person: string })[], persons: Per
   }
   for (let el of holders[scope] ?? []) el.removeAttribute('data-names');
   detectedNames[scope] = new Map();
+  listedNames[scope] = new Map();
   let { paper, prose } = themeColors();
   let styles = new Map<string, { css: string; ranges: Range[] }>();
   let held = new Map<Element, Set<string>>();
@@ -190,11 +193,10 @@ function paint(scope: Scope, found: (Found & { person: string })[], persons: Per
     style.ranges.push(name.range);
     let holder = name.range.startContainer.parentElement;
     if (holder) (held.get(holder) ?? held.set(holder, new Set()).get(holder)!).add(styleId);
-    // only names still missing from the list are worth pointing at
-    if (!name.known) {
-      let node = name.range.startContainer;
-      (detectedNames[scope].get(node) ?? detectedNames[scope].set(node, []).get(node)!).push(name);
-    }
+    // names still missing from the list are pointed at, those it has kept for a selection
+    let node = name.range.startContainer;
+    let byNode = name.known ? listedNames[scope] : detectedNames[scope];
+    (byNode.get(node) ?? byNode.set(node, []).get(node)!).push(name);
   }
   for (let [el, styleIds] of held) el.setAttribute('data-names', [...styleIds].join(' '));
   holders[scope] = [...held.keys()];
@@ -308,6 +310,10 @@ export function asName(range: Range) {
 // lines has one rect per line, and their union spans the whole column, so
 // anchor to the line the pointer is on instead of to the union
 export function addNameAt(range: Range, name: string, x?: number, y?: number): AddNameAt | undefined {
+  // a word of a name the list has (`Quả` of `Tiểu Quả`, a double click) is that name: what is
+  // offered is to say what its person is
+  let listed = listedNameAround(range);
+  if (listed) ({ range, name } = listed);
   let rects = [...range.getClientRects()].filter(rect => rect.width || rect.height);
   if (!rects.length) return;
   // vertical distance first: the pointer sits between two lines far more often
@@ -337,6 +343,15 @@ export function offerFor(names: string, at: AddNameAt): AddNameOffer {
     // come from the text: whoever was last named before it was said
     aliases: relationship ? kinCandidates(names, at.before) : aliasCandidates(names, at.name),
   };
+}
+function listedNameAround(range: Range) {
+  for (let byNode of Object.values(listedNames)) {
+    let found = (byNode.get(range.startContainer) || []).find(({ range: name }) => (
+      name.startContainer === range.startContainer && name.endContainer === range.endContainer
+      && name.startOffset <= range.startOffset && range.endOffset <= name.endOffset
+    ));
+    if (found) return found;
+  }
 }
 function caretAt(x: number, y: number) {
   let position = document.caretPositionFromPoint?.(x, y);

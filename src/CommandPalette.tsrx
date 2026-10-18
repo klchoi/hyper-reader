@@ -3,12 +3,12 @@
 // that say it (the book's, or with none open, every book's).
 import { StoreContext } from './store.ts';
 import type { Command } from './store.ts';
-import { bookRoute } from './places.ts';
+import { bookRoute, followedHere } from './places.ts';
 
 export function CommandPalette() @{
   const store = StoreContext.get();
   const choose = (event: MouseEvent, command: Command) => {
-    event.preventDefault();
+    if (!followedHere(event)) return;
     store.selectCommand(store.commands.value.indexOf(command));
     store.runCommand(command);
   };

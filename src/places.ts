@@ -111,6 +111,15 @@ export function offsetAtTop() {
   return Number(paragraphs[low].dataset.offset);
 }
 
+// a click on one of the page's links, which the page follows itself (and says so) when it is a
+// plain one: with a modifier (a new tab, a new window, a download), the browser follows it as it
+// would any link
+export function followedHere(event: MouseEvent) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
+  event.preventDefault();
+  return true;
+}
+
 // where in a book to reopen: its offset, or - for a bookmark or a progress record
 // written before offsets - the chapter id it still names
 export function bookRoute({ bookId, offset, chapterId }: { bookId: string; offset?: unknown; chapterId?: string | null }): Route {

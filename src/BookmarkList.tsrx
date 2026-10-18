@@ -5,7 +5,7 @@
 import { track } from 'ripple';
 import { bookmarkSays, StoreContext } from './store.ts';
 import type { Bookmark } from './backends.ts';
-import { bookRoute } from './places.ts';
+import { bookRoute, followedHere } from './places.ts';
 
 // a book with more bookmarks than this has a box to narrow them down
 const FILTERED = 10;
@@ -26,7 +26,7 @@ export function BookmarkList() @{
     return groups;
   });
   const open = (event: MouseEvent, b: Bookmark) => {
-    event.preventDefault();
+    if (!followedHere(event)) return;
     store.toggleChapters(false);
     store.openBook({ bookId: b.bookId, offset: b.offset });
   };

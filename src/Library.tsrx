@@ -7,7 +7,7 @@
 // for), and all of them, searched, where asked for.
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
-import { bookRoute, formatDate, formatSize } from './places.ts';
+import { bookRoute, followedHere, formatDate, formatSize } from './places.ts';
 import type { Query, Range, Shelved, Sort } from './catalog.ts';
 import type { Bookmark } from './backends.ts';
 
@@ -47,7 +47,7 @@ type Section = { key: string; title: string; books: Shelved[]; all?: Query; shuf
 function BookmarkRow(props: { bookmark: Bookmark; withBook?: boolean }) @{
   const store = StoreContext.get();
   const open = (event: MouseEvent) => {
-    event.preventDefault();
+    if (!followedHere(event)) return;
     store.findAllBookmarks(null);
     store.openBook({ bookId: props.bookmark.bookId, offset: props.bookmark.offset });
   };
@@ -122,7 +122,7 @@ export function Library() @{
   });
   const readOf = (book: Shelved) => (book.read?.chapterCount ? `Chapter ${book.read.chapterIndex} of ${book.read.chapterCount}, ${formatDate(book.read.updatedAt) ?? ''}` : '');
   const open = (event: MouseEvent, book: Shelved) => {
-    event.preventDefault();
+    if (!followedHere(event)) return;
     store.openBook(placeOf(book));
   };
 
@@ -208,7 +208,7 @@ export function Library() @{
                 <ul>
                   @for (const named of person.books; key named.id) {
                     <li>
-                      <a href={store.router.route({ book: named.id })} onClick={(event: MouseEvent) => { event.preventDefault(); store.openFound(named.id, person.name); }}>{named.name}</a>
+                      <a href={store.router.route({ book: named.id })} onClick={(event: MouseEvent) => { if (followedHere(event)) store.openFound(named.id, person.name); }}>{named.name}</a>
                       <small>{` ${named.mentions}`}</small>
                     </li>
                   }
@@ -220,7 +220,7 @@ export function Library() @{
         <h3>{store.found.value.books.length > 0 ? `Said in ${store.found.value.books.length} ${store.found.value.books.length === 1 ? 'book' : 'books'}` : 'Said in no book indexed'}</h3>
         @for (const saying of store.found.value.books; key saying.id) {
           <p>
-            <a class="title" href={store.router.route({ book: saying.id })} onClick={(event: MouseEvent) => { event.preventDefault(); store.openFound(saying.id, store.found.value.q); }}>{saying.name}</a>
+            <a class="title" href={store.router.route({ book: saying.id })} onClick={(event: MouseEvent) => { if (followedHere(event)) store.openFound(saying.id, store.found.value.q); }}>{saying.name}</a>
             <small>{` ${saying.chapters} ${saying.chapters === 1 ? 'chapter' : 'chapters'}`}</small>
           </p>
         }

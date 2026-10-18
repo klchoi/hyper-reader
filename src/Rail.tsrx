@@ -2,6 +2,7 @@
 // again, zen, and its names (and its chapters, on a narrow screen), and the paragraph at the top of
 // the page bookmarked (or no longer); and at the foot, the cog that opens the settings.
 import { StoreContext } from './store.ts';
+import { followedHere } from './places.ts';
 
 export function Rail() @{
   const store = StoreContext.get();
@@ -13,7 +14,7 @@ export function Rail() @{
           <a
             class="close"
             href={store.router.route({})}
-            onClick={(event: MouseEvent) => { event.preventDefault(); store.showLibrary(); }}
+            onClick={(event: MouseEvent) => { if (followedHere(event)) store.showLibrary(); }}
             title="Back to bookshelf"
           />
         </div>

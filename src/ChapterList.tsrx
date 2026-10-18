@@ -7,7 +7,7 @@
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
 import type { Sidebar } from './store.ts';
-import { bookRoute } from './places.ts';
+import { bookRoute, followedHere } from './places.ts';
 import { BookmarkList } from './BookmarkList.tsrx';
 
 // a row: a book's name, a chapter or one of its parts, or the name of a chapter in parts (with
@@ -58,7 +58,7 @@ export function ChapterList() @{
   // the chapter asked for is the one read, the moment it is asked for
   const activeId = track(() => store.opening.value ?? store.chapter.value?.id);
   const open = (event: MouseEvent, offset: number) => {
-    event.preventDefault();
+    if (!followedHere(event)) return;
     store.toggleChapters(false);
     store.openBook({ bookId: store.book.value!.id, offset });
   };

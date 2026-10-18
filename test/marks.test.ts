@@ -77,13 +77,13 @@ describe('what a person is', () => {
     assert.equal(namesWith(names, { name: 'Dung nhi' }), null);
     assert.equal(namesWith(names, { name: 'Tiểu Dung', alias: 'Hoàng Dung' }), 'Hoàng Dung, Dung Nhi [f], Tiểu Dung\nLâm Phong [m -> f]\nQuách Tĩnh\n');
   });
-  it('goes beside the first of their names in a chapter, cut into the line', () => {
+  it('goes beside each of their names in a chapter, cut into the line', () => {
     let chapter = markChapter({ content: 'Lâm Phong cười.\nDung Nhi, xem https://x.vn của Lâm Phong.', offset: 0 }, names);
     let said = genderSaid(chapter);
     assert.deepEqual([...said.keys()], [0, 1]);
     assert.deepEqual(piecesSaying(['Lâm Phong cười.'], said.get(0)!), ['Lâm Phong', said.get(0)![0], ' cười.']);
     assert.deepEqual(piecesSaying(['Dung Nhi, xem ', { href: 'https://x.vn' }, ' của Lâm Phong.'], said.get(1)!), [
-      'Dung Nhi', said.get(1)![0], ', xem ', { href: 'https://x.vn' }, ' của Lâm Phong.',
+      'Dung Nhi', said.get(1)![0], ', xem ', { href: 'https://x.vn' }, ' của Lâm Phong', said.get(1)![1], '.',
     ]);
   });
 });

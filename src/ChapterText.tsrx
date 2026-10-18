@@ -1,6 +1,6 @@
 // The chapter open, a paragraph to a line, each marked with the offset it starts at in the book
 // (the backend's lines, see marks.ts): a rule, a line of marks set apart, or prose with its links,
-// and what the list says a person is beside the first of their names (no part of the text).
+// and what the list says a person is beside each of their names (no part of the text).
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
 import { lineKind, linePieces } from './places.ts';

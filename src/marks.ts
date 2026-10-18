@@ -458,17 +458,15 @@ export function markChapter(chapter: { content: string; offset: number }, names:
   return { lines, ...findMarks(lines.map(line => line.text), names) };
 }
 
-// what the list says a person is, put beside the first of their names in the chapter: where in
-// which line (the index of its lines), the first place in it first
+// what the list says a person is, put beside each of their names in the chapter: where in which
+// line (the index of its lines), the first place in it first
 export type Said = { end: number; gender: Gender; person: string };
 export function genderSaid(chapter: Marked | null | undefined) {
   let said = new Map<number, Said[]>();
   if (!chapter) return said;
-  let shown = new Set<string>();
   for (let mark of [...chapter.marks].sort((a, z) => (a.at - z.at) || (a.start - z.start))) {
     let gender = chapter.persons[mark.person]?.gender;
-    if (!gender || shown.has(mark.person)) continue;
-    shown.add(mark.person);
+    if (!gender) continue;
     (said.get(mark.at) ?? said.set(mark.at, []).get(mark.at)!).push({ end: mark.end, gender, person: mark.person });
   }
   return said;

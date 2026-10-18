@@ -105,6 +105,23 @@ function followCase(src: string, dst: string) {
   if (found === 'title') return dst[0].toUpperCase() + dst.slice(1).toLowerCase();
   return dst.toLowerCase();
 }
+// what a person is, said on their line: `[m]`, `[f]`, or `[m→f]` and `[f→m]` for somebody living
+// as the other (`->` will do for the arrow), anywhere on it. Only shown beside their name: nothing
+// of the text is changed by it, and no name is made of it
+export type Gender = 'm' | 'f' | 'm→f' | 'f→m';
+export const GENDERS: Gender[] = ['m', 'f', 'm→f', 'f→m'];
+export const genderSymbols: Record<Gender, string> = { 'm': '♂', 'f': '♀', 'm→f': '♂→♀', 'f→m': '♀→♂' };
+export const genderNames: Record<Gender, string> = { 'm': 'male', 'f': 'female', 'm→f': 'trans woman (m→f)', 'f→m': 'trans man (f→m)' };
+const genderTag = /\s*\[\s*([mf])\s*(?:(?:->|→)\s*([mf])\s*)?\]/giu;
+// the line's tag, the last where it gives two
+function genderOf(line: string): Gender | undefined {
+  let tag = [...line.matchAll(genderTag)].at(-1);
+  if (!tag) return;
+  let from = tag[1].toLowerCase(), to = tag[2]?.toLowerCase();
+  return (to && to !== from ? `${from}→${to}` : from) as Gender;
+}
+export const withoutGender = (text: string) => text.replace(genderTag, '');
+
 // the name a `from -> to` entry ends up written as in the text, which is what
 // the highlighter has to look for: anything else and the edit reads as detected
 function editedName(entry: string) {
@@ -132,7 +149,7 @@ let fixer = { names: null as string | null, fix: (text: string) => text };
 export function nameFixer(names: string | undefined): (text: string) => string {
   if (!names) return text => text;
   if (fixer.names === names) return fixer.fix;
-  let entries = names.split(/[\n,]/).flatMap(entry => {
+  let entries = withoutGender(names).split(/[\n,]/).flatMap(entry => {
     let { name, relationship } = splitRelationship(entry);
     return [
       name && { text: name, relationship: false },
@@ -174,7 +191,7 @@ export const shortNameId = (nameId: string) => {
   if (words.length === 3 || words.length === 4) return words.slice(-2).join(' ');
 };
 // every name the editor already knows about, one id per entry
-const nameIdsOf = (names: string) => (names || '').split(/[\n,]/)
+const nameIdsOf = (names: string) => withoutGender(names || '').split(/[\n,]/)
   .flatMap(entry => Object.values(splitRelationship(entry)) as string[])
   .map(entry => entryTarget(entry).toLowerCase())
   .filter(Boolean);
@@ -182,12 +199,13 @@ const nameIdsOf = (names: string) => (names || '').split(/[\n,]/)
 // again by what it holds. Every name on a line is the same person and the first
 // one names them; the auto short name rides along with the name it comes from.
 // A `(relationship)` on the line is theirs too, kept apart from their names
-// because it is not one: nothing is derived from it and nothing binds to it
+// because it is not one: nothing is derived from it and nothing binds to it. So is
+// what they are (`[f]`), which is no name either
 export function listedNames(names: string) {
   return (names || '').split('\n').map(line => {
     let lineNames: string[] = [];
     let relationships: string[] = [];
-    for (let entry of line.split(',')) {
+    for (let entry of withoutGender(line).split(',')) {
       let { name, relationship } = splitRelationship(entry);
       if (relationship) relationships.push(entryTarget(relationship));
       if (!name) continue;
@@ -200,7 +218,7 @@ export function listedNames(names: string) {
       let shortName = hasArrow ? undefined : shortNameId(to);
       if (shortName) lineNames.push(shortName);
     }
-    return { names: lineNames, relationships };
+    return { names: lineNames, relationships, gender: genderOf(line) };
   });
 }
 const nameWordsOf = (name: string) => name.toLowerCase().split(/\s+/).filter(Boolean);
@@ -284,6 +302,24 @@ export function namesWith(names: string, { name, alias, relationship }: { name: 
   return `${lines.join('\n')}\n`;
 }
 
+// The list with what `person` (the first name of their line) is said to be, or no longer said to
+// be; null when their line is gone
+export function namesWithGender(names: string, person: string, gender?: Gender) {
+  names = (names || '').trim();
+  let lines = names.split('\n');
+  let line = listedNames(names).findIndex(({ names: lineNames }) => lineNames[0] === person);
+  if (line < 0) return null;
+  lines[line] = `${withoutGender(lines[line]).trimEnd()}${gender ? ` [${gender}]` : ''}`;
+  return `${lines.join('\n')}\n`;
+}
+
+// the person of the list a name is one of the names of, and what they are said to be
+export function listedPerson(names: string, name: string) {
+  let id = name.toLowerCase();
+  let found = listedNames(names).find(({ names: lineNames }) => lineNames.some(listed => listed.toLowerCase() === id));
+  return found && { name: found.names[0], gender: found.gender };
+}
+
 // ---- a chapter as the page shows it -----------------------------------------------------------
 // a line of a chapter: its text, and the offset it begins at in the book (in the text as read, so a
 // place in it is the same whatever the list corrects)
@@ -306,25 +342,29 @@ export function linesOf({ content, offset }: { content: string; offset: number }
 // A name found in one of some texts (`at`), from `start` to `end`: the person it is of, and whether
 // the list has it (one that it has not is offered to be added). A person is known by the first name
 // the list gives them, or by the longest name they were found by; `persons` gives every name each
-// goes by here, and the short names (the last two words of three or four) they would go by
+// goes by here, the short names (the last two words of three or four) they would go by, and what
+// the list says they are
 export type Mark = { at: number; start: number; end: number; person: string; known: boolean };
-export type Persons = Record<string, { ids: string[]; short: string[] }>;
+export type Persons = Record<string, { ids: string[]; short: string[]; gender?: Gender }>;
 export type Marked = { lines: Line[]; marks: Mark[]; persons: Persons };
 
-// the people of the list: every name and relationship it gives, and the person each points back to
+// the people of the list: every name and relationship it gives, the person each points back to,
+// and what each person is said to be
 export function listedPeople(names: string) {
   let known: string[] = [];
   let aliasOf = new Map<string, string>();
-  for (let { names: lineNames, relationships } of listedNames(names)) {
+  let genders = new Map<string, Gender>();
+  for (let { names: lineNames, relationships, gender } of listedNames(names)) {
     known.push(...lineNames, ...relationships);
     // the first name on the line names the person, the rest point back to it - a relationship
     // never names them, it only ever points back
     let [canonicalId, ...aliasIds] = [...lineNames, ...relationships].map(name => name.toLowerCase());
+    if (canonicalId && gender && !genders.has(canonicalId)) genders.set(canonicalId, gender);
     for (let aliasId of aliasIds) {
       if (aliasId !== canonicalId && !aliasOf.has(aliasId)) aliasOf.set(aliasId, canonicalId);
     }
   }
-  return { known, aliasOf };
+  return { known, aliasOf, genders };
 }
 
 const wordBound = { wb: /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/u };
@@ -332,7 +372,7 @@ const wordBound = { wb: /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/u };
 export const anyOf = (names: string[]) => buildRegex([`{wb}(${[...names].sort((a, z) => z.length - a.length).map(escapeRegExp).join('|')}){wb}`], wordBound, 'gui');
 
 export function findMarks(texts: string[], names: string): { marks: Mark[]; persons: Persons } {
-  let { known, aliasOf } = listedPeople(names);
+  let { known, aliasOf, genders } = listedPeople(names);
   let knownIds = new Set(known.map(name => name.toLowerCase()));
   // collect names, by descending confidence: what the list says, then the patterns (see
   // name-patterns.ts), each tier scanned apart. The list's own names need no collecting, they are
@@ -406,6 +446,8 @@ export function findMarks(texts: string[], names: string): { marks: Mark[]; pers
   // a short name the list gave to somebody else is not this person's
   for (let [person, { ids: names, short }] of Object.entries(persons)) {
     short.push(...names.map(shortNameId).filter((id): id is string => !!id && !names.includes(id) && (aliasOf.get(id) || person) === person));
+    let gender = genders.get(person);
+    if (gender) persons[person].gender = gender;
   }
   return { marks: found.map(({ at, start, end, nameId, known: isKnown }) => ({ at, start, end, person: personOf(nameId), known: isKnown })), persons };
 }
@@ -414,4 +456,44 @@ export function findMarks(texts: string[], names: string): { marks: Mark[]; pers
 export function markChapter(chapter: { content: string; offset: number }, names: string): Marked {
   let lines = linesOf(chapter, nameFixer(names));
   return { lines, ...findMarks(lines.map(line => line.text), names) };
+}
+
+// what the list says a person is, put beside the first of their names in the chapter: where in
+// which line (the index of its lines), the first place in it first
+export type Said = { end: number; gender: Gender; person: string };
+export function genderSaid(chapter: Marked | null | undefined) {
+  let said = new Map<number, Said[]>();
+  if (!chapter) return said;
+  let shown = new Set<string>();
+  for (let mark of [...chapter.marks].sort((a, z) => (a.at - z.at) || (a.start - z.start))) {
+    let gender = chapter.persons[mark.person]?.gender;
+    if (!gender || shown.has(mark.person)) continue;
+    shown.add(mark.person);
+    (said.get(mark.at) ?? said.set(mark.at, []).get(mark.at)!).push({ end: mark.end, gender, person: mark.person });
+  }
+  return said;
+}
+// a line's pieces (see places.ts) cut where what a person is goes in
+type Piece = string | { href: string };
+export function piecesSaying(pieces: Piece[], said: Said[]): (Piece | Said)[] {
+  let shown: (Piece | Said)[] = [];
+  let left = [...said];
+  let at = 0;
+  for (let piece of pieces) {
+    if (typeof piece !== 'string') {
+      shown.push(piece);
+      at += piece.href.length;
+      continue;
+    }
+    let from = 0;
+    while (left.length && left[0].end <= at + piece.length) {
+      let cut = Math.max(left[0].end - at, from);
+      if (cut > from) shown.push(piece.slice(from, cut));
+      shown.push(left.shift()!);
+      from = cut;
+    }
+    if (from < piece.length) shown.push(piece.slice(from));
+    at += piece.length;
+  }
+  return [...shown, ...left];
 }

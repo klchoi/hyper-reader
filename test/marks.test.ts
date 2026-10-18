@@ -2,7 +2,7 @@
 // names in them are, those of the list and those the text gives, each the name of somebody.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { aliasCandidates, anyOf, findMarks, linesOf, markChapter, nameFixer } from '../src/marks.ts';
+import { aliasCandidates, anyOf, findMarks, genderSaid, linesOf, listedPerson, markChapter, nameFixer, namesWith, namesWithGender, piecesSaying } from '../src/marks.ts';
 
 // what is marked in `texts`, as [text, name, person, in the list]
 const marked = (texts: string[], names: string) => findMarks(texts, names).marks
@@ -52,6 +52,39 @@ describe('who a name could be', () => {
     assert.deepEqual(aliasCandidates(names, 'Liễu di'), ['Liễu Khánh Hà']);
     assert.deepEqual(aliasCandidates(names, 'Liễu tỷ tỷ'), ['Liễu Khánh Hà']);
     assert.deepEqual(marked(['Nàng gặp Liễu di.'], names), [[0, 'Liễu di', 'liễu di', false]]);
+  });
+});
+
+describe('what a person is', () => {
+  let names = 'Hoàng Dung, Dung Nhi [f]\nLâm Phong [m -> f]\nQuách Tĩnh';
+  it('is said on their line, and is none of their names nor changes the text', () => {
+    let { lines, marks, persons } = markChapter({ content: 'Dung Nhi gặp lâm phong và Quách Tĩnh.', offset: 0 }, names);
+    assert.equal(lines[0].text, 'Dung Nhi gặp Lâm Phong và Quách Tĩnh.');
+    assert.deepEqual(marks.toSorted((a, z) => a.start - z.start).map(({ start, end, person }) => [lines[0].text.slice(start, end), person]), [
+      ['Dung Nhi', 'hoàng dung'], ['Lâm Phong', 'lâm phong'], ['Quách Tĩnh', 'quách tĩnh'],
+    ]);
+    assert.deepEqual(Object.fromEntries(Object.entries(persons).map(([person, { gender }]) => [person, gender])), {
+      'hoàng dung': 'f', 'lâm phong': 'm→f', 'quách tĩnh': undefined,
+    });
+    assert.deepEqual(listedPerson(names, 'dung nhi'), { name: 'Hoàng Dung', gender: 'f' });
+    assert.equal(listedPerson(names, 'Hoàng Thường'), undefined);
+  });
+  it('is put on their line, or taken off it, the rest of the list as it was', () => {
+    assert.equal(namesWithGender(names, 'Quách Tĩnh', 'm'), 'Hoàng Dung, Dung Nhi [f]\nLâm Phong [m -> f]\nQuách Tĩnh [m]\n');
+    assert.equal(namesWithGender(names, 'Lâm Phong', 'f→m'), 'Hoàng Dung, Dung Nhi [f]\nLâm Phong [f→m]\nQuách Tĩnh\n');
+    assert.equal(namesWithGender(names, 'Hoàng Dung'), 'Hoàng Dung, Dung Nhi\nLâm Phong [m -> f]\nQuách Tĩnh\n');
+    assert.equal(namesWithGender(names, 'Hoàng Thường', 'm'), null);
+    assert.equal(namesWith(names, { name: 'Dung nhi' }), null);
+    assert.equal(namesWith(names, { name: 'Tiểu Dung', alias: 'Hoàng Dung' }), 'Hoàng Dung, Dung Nhi [f], Tiểu Dung\nLâm Phong [m -> f]\nQuách Tĩnh\n');
+  });
+  it('goes beside the first of their names in a chapter, cut into the line', () => {
+    let chapter = markChapter({ content: 'Lâm Phong cười.\nDung Nhi, xem https://x.vn của Lâm Phong.', offset: 0 }, names);
+    let said = genderSaid(chapter);
+    assert.deepEqual([...said.keys()], [0, 1]);
+    assert.deepEqual(piecesSaying(['Lâm Phong cười.'], said.get(0)!), ['Lâm Phong', said.get(0)![0], ' cười.']);
+    assert.deepEqual(piecesSaying(['Dung Nhi, xem ', { href: 'https://x.vn' }, ' của Lâm Phong.'], said.get(1)!), [
+      'Dung Nhi', said.get(1)![0], ', xem ', { href: 'https://x.vn' }, ' của Lâm Phong.',
+    ]);
   });
 });
 

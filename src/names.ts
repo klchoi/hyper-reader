@@ -4,8 +4,8 @@
 import chromaJs from 'chroma-js';
 import { tick } from 'ripple';
 import { getColorScheme, nextTick } from './places.ts';
-import { aliasCandidates, anyOf, hashCode, isRelationship, kinCandidates, listedPeople } from './marks.ts';
-import type { Marked, Persons } from './marks.ts';
+import { aliasCandidates, anyOf, hashCode, isRelationship, kinCandidates, listedPeople, listedPerson } from './marks.ts';
+import type { Gender, Marked, Persons } from './marks.ts';
 
 // ---- colours ----------------------------------------------------------------------------
 // hue per name id, kept for the whole session: the same character can show up
@@ -203,12 +203,14 @@ function paint(scope: Scope, found: (Found & { person: string })[], persons: Per
 }
 
 // a stretch of an element's text, from `start` to `end` in it, across the text nodes it is made
-// of (a line with a link in it is a few); null when it runs out of them
+// of (a line with a link in it is a few); null when it runs out of them. What a person is, put
+// beside their name (`.gender`, see ChapterText.tsrx), is none of the text
+const ofText = { acceptNode: (node: Node) => node.parentElement?.closest('.gender') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT };
 function rangeIn(el: Element, start: number, end: number) {
   let range = new Range();
   let at = 0;
   let started = false;
-  let walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, ofText);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     let length = node.textContent!.length;
     if (!started && start < at + length) {
@@ -271,7 +273,8 @@ export async function paintTitles(scope: Scope, selector: string, names: string,
 
 // ---- adding a name from the page ----------------------------------------------------------
 export type AddNameAt = { name: string; before: string; top: number; left: number };
-export type AddNameOffer = AddNameAt & { relationship: boolean; aliases: string[] };
+// a name the list has already offers to say what its person is instead
+export type AddNameOffer = AddNameAt & { relationship: boolean; aliases: string[]; person?: { name: string; gender?: Gender } };
 
 const isWordChar = (char: string | undefined) => char !== undefined && /[\p{L}\p{N}]/u.test(char);
 // a partially selected word counts as the whole word
@@ -328,6 +331,8 @@ export function offerFor(names: string, at: AddNameAt): AddNameOffer {
   return {
     ...at,
     relationship,
+    // a relationship is said of anybody, so it says nothing of who
+    person: relationship ? undefined : listedPerson(names, at.name),
     // a relationship shares no word with a name, so who it belongs to can only
     // come from the text: whoever was last named before it was said
     aliases: relationship ? kinCandidates(names, at.before) : aliasCandidates(names, at.name),

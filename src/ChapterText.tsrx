@@ -1,12 +1,18 @@
 // The chapter open, a paragraph to a line, each marked with the offset it starts at in the book
-// (the backend's lines, see marks.ts): a rule, a line of marks set apart, or prose with its links.
+// (the backend's lines, see marks.ts): a rule, a line of marks set apart, or prose with its links,
+// and what the list says a person is beside the first of their names (no part of the text).
 import { track } from 'ripple';
 import { StoreContext } from './store.ts';
 import { lineKind, linePieces } from './places.ts';
+import { genderNames, genderSaid, genderSymbols, piecesSaying } from './marks.ts';
 
 export function ChapterText() @{
   const store = StoreContext.get();
-  const lines = track(() => (store.shown.value?.lines ?? []).map(line => ({ ...line, kind: lineKind(line.text), pieces: linePieces(line.text) })));
+  const lines = track(() => {
+    let shown = store.shown.value;
+    let said = genderSaid(shown);
+    return (shown?.lines ?? []).map((line, i) => ({ ...line, kind: lineKind(line.text), pieces: piecesSaying(linePieces(line.text), said.get(i) ?? []) }));
+  });
 
   <main>
     <article>
@@ -25,7 +31,16 @@ export function ChapterText() @{
                   @if (typeof piece === 'string') {
                     <>{piece}</>
                   } @else {
-                    <a href={piece.href} target="_blank">{piece.href}</a>
+                    @if ('href' in piece) {
+                      <a href={piece.href} target="_blank">{piece.href}</a>
+                    } @else {
+                      <sup
+                        class="gender"
+                        title={genderNames[piece.gender]}
+                        aria-label={genderNames[piece.gender]}
+                        style="font-size: 0.55em; opacity: 0.6; margin-inline-start: 0.15em; user-select: none"
+                      >{genderSymbols[piece.gender]}</sup>
+                    }
                   }
                 }
               </p>

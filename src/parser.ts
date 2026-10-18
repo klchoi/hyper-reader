@@ -202,6 +202,15 @@ export function finishChapters(drafts: Draft[], text: string): Chapter[] {
       part: part?.of != null ? { of: part.of, text: part.text ?? '' } : undefined,
     });
   });
+  // a chapter that is nothing but a short line of its own is an entry of a list (the contents, or
+  // the chapters a note names) the book gives in the middle of the one before it: it stays there
+  let lineOnly = (k: number) => {
+    let lines = text.slice(kept[k].offset, kept[k + 1]?.offset ?? text.length).split('\n').filter(line => line.trim());
+    return lines.length <= 1 && (lines[0]?.trim().length ?? 0) <= TUNING.drafts.lineOnlyMax;
+  };
+  // (told apart as they were found: a run of them is a list, each entry of one line)
+  let listed = new Set(kept.map((_, k) => k).filter(k => k > 0 && lineOnly(k)));
+  kept = kept.filter((_, k) => !listed.has(k));
   return kept.map(({ offset, group, heading, part }, i) => {
     let title = chapterTitle(heading, i);
     let end = kept[i + 1]?.offset ?? text.length;
@@ -282,6 +291,14 @@ const TUNING = {
     seriesOver: 1.2,     // ...and more than the numbered headings by this factor
     pageParagraphs: 60,  // paragraphs to a page, when a book has no headings
     headingLines: 2,     // lines of a chapter that holds nothing but its heading (of its parts)
+    lineOnlyMax: 120,    // characters of a chapter of one line, which is an entry of a list
+  },
+  // 5. a chapter far longer than the others, which holds more than one
+  split: {
+    long: 1.8,           // this many times as long as a chapter usually is
+    pieceMin: 0.4,       // ...and each piece it is cut into at least this much of a chapter
+    chaptersMin: 5,      // a book of fewer chapters has no usual length
+    missingMax: 30,      // the most chapters a gap in the numbers is taken to have left out
   },
 };
 
@@ -1310,8 +1327,104 @@ function pagesOf(text: string, paragraphsPerPage = TUNING.drafts.pageParagraphs)
   return [...text.matchAll(new RegExp(pattern, 'gimu'))].map(m => ({ offset: m.index, heading: { text: m[0] } }));
 }
 
+// a line that sets two parts of a text apart: `***`, `* * *`, `===`, `———` (which
+// normalizeFileContent has made one `—`)
+const SEPARATOR = /^\s*(?:[-–—_=*~#+•·×☆★◆◇■□○●✿❀]\s*)+$/u;
+
+// the number a piece of a chapter opens with, where no heading was read: `#9 tại yên hoa ...`
+const PIECE_NUMBER = /^\s*[#＃№]\s*(\d{1,5})(?!\d)/u;
+
+// A chapter far longer than a chapter of its book usually is, which holds others the path found
+// no heading for, cut where they begin:
+// - at the books in it, numbered on from one to the next (`cuốn năm mươi mốt`, `Cuốn 61`), whose
+//   chapters were never headed: each book is a chapter of its own;
+// - or, where the numbers after it jump (`160`, then `165`), or it is the last and the file's name
+//   says the book goes further (`1-200 chương`), at the lines that set parts of it apart
+//   (`***`), as many as are missing and as evenly as they fall: the pieces take the numbers left
+//   out. Fewer lines than that cut as many pieces as they can
+function splitLong(drafts: Draft[], nodes: Candidate[], text: string, last?: number) {
+  if(drafts.length < TUNING.split.chaptersMin) return drafts;
+  let ends = (k: number) => drafts[k + 1]?.offset ?? text.length;
+  let sizes = drafts.map((d, k) => ends(k) - d.offset);
+  let typical = [...sizes].sort((a, z) => a - z)[Math.floor(sizes.length / 2)];
+  let numberOf = (d?: Draft) => (d && /^\d+$/.test(d.heading.number ?? '') ? Number(d.heading.number) : null);
+  let main = (d?: Draft) => !!d && (d.heading.type ?? 'Chương') === 'Chương';
+  let lastMain = drafts.findLastIndex(d => main(d) && numberOf(d) != null);
+  // where a piece may begin: far enough into the chapter, and from the one before, to be one
+  let fits = (cuts: number[], from: number, to: number) => [from, ...cuts, to].every((at, j, all) => j === 0 || at - all[j - 1] >= typical * TUNING.split.pieceMin);
+  let out: Draft[] = [];
+  drafts.forEach((d, k) => {
+    out.push(d);
+    let [from, to] = [d.offset, ends(k)];
+    if(sizes[k] < typical * TUNING.split.long) return;
+    let inside = (at: number) => at > from && at < to;
+    // the books in it, their numbers going on
+    let books: Candidate[] = [];
+    for(let node of nodes) {
+      if(node.kind !== 'book' || node.bookNum == null || node.inline || !inside(node.index) || node.base < TUNING.path.threshold) continue;
+      if(node.bookNum > (books.at(-1)?.bookNum ?? -Infinity)) books.push(node);
+    }
+    if(books.length && fits(books.map(b => b.index), from, to)) {
+      for(let b of books) out.push({ offset: b.index, group: d.group, heading: { type: b.bookType ?? 'Quyển', number: String(b.bookNum), title: b.title || undefined, text: b.text } });
+      return;
+    }
+    // the chapters missing after it
+    let n = numberOf(d);
+    let next = drafts[k + 1];
+    let missing = n == null || !main(d) ? 0
+      : numberOf(next) != null && main(next) && next!.group === d.group ? numberOf(next)! - n - 1
+      : k === lastMain && last != null ? last - n : 0;
+    if(missing < 1 || missing > TUNING.split.missingMax) return;
+    // (a piece begins after its line, which closes the chapter before it)
+    let lines: number[] = [];
+    for(let at = text.indexOf('\n', from) + 1; at > 0 && at < to; at = text.indexOf('\n', at) + 1) {
+      let end = text.indexOf('\n', at);
+      if(!SEPARATOR.test(text.slice(at, end < 0 ? text.length : end))) continue;
+      let next = end < 0 ? -1 : text.slice(end).search(/\S/);
+      if(next >= 0 && end + next < to) lines.push(end + next);
+    }
+    // the ones nearest where the pieces would be even, in order
+    let cuts: number[] = [];
+    if(lines.length <= missing) cuts = lines;
+    else for(let j = 1; j <= missing; j++) {
+      let target = from + (to - from) * j / (missing + 1);
+      let left = lines.filter(at => at > (cuts.at(-1) ?? from));
+      // (as many as are still wanted must be left after it)
+      let usable = left.slice(0, left.length - (missing - j));
+      cuts.push(usable.reduce((best, at) => Math.abs(at - target) < Math.abs(best - target) ? at : best));
+    }
+    // a piece too short to be a chapter is no cut
+    cuts = cuts.filter((at, j) => fits([at], j ? cuts[j - 1] : from, cuts[j + 1] ?? to));
+    // a piece that opens with a heading the path left out is what it says: the next part of this
+    // chapter (`Chương 223 (3)`), which is no cut, or one of the chapters missing (`#9 ...`), which
+    // takes its number. Any other takes the next number
+    let upTo = n! + missing;
+    let at = n!;
+    for(let cut of cuts) {
+      let first = text.slice(cut, ends(k)).split('\n')[0];
+      let node = nodes.find(node => node.kind === 'chap' && node.n != null && node.index >= cut && node.index < cut + first.length);
+      let hashed = PIECE_NUMBER.exec(first);
+      let said = node ? { n: node.n!, title: node.title } : hashed ? { n: Number(hashed[1]), title: cleanTitle(first.slice(hashed[0].length)) } : null;
+      if(said && said.n <= at) continue;
+      let number = said && said.n <= upTo ? said.n : at + 1;
+      if(number > upTo) break;
+      at = number;
+      out.push({ offset: cut, group: d.group, heading: { type: d.heading.type, number: String(number), title: number === said?.n ? said.title || undefined : undefined, text: first } });
+    }
+  });
+  return out;
+}
+
+// the last chapter a file's name says its book runs to: `(1-200 chương)`, `(1-200 chương kết thúc +
+// phiên ngoại 1-5)`. Only a run of chapters says it: `1-51 tập 9 chương` counts something else
+export function lastChapterOf(fileName: string) {
+  let said = /[(（]\s*[01]\s*[-~–]\s*(\d{1,5})\s*chương(?![\p{L}\p{N}])/iu.exec(fileName.normalize());
+  return said ? Number(said[1]) : undefined;
+}
+
 // ==== 6. extractChapters =====================================================================
-export function extractChapters(filename: string, text: string, { name }: { name: string }) {
+// `last`: the last chapter the file's name says the book runs to (see lastChapterOf)
+export function extractChapters(filename: string, text: string, { name, last }: { name: string; last?: number }) {
   let nodes = findCandidates(text, name);
   // first take every node, to see which shapes the book writes its headings in
   let first = chooseHeadings(nodes);
@@ -1320,7 +1433,7 @@ export function extractChapters(filename: string, text: string, { name }: { name
   path = fillGaps(nodes, path, credit);
   let listed = frontContents(nodes, path);
   path = path.filter(({ i }) => !listed.has(i));
-  let drafts = buildChapters(nodes, path);
+  let drafts = splitLong(buildChapters(nodes, path), nodes, text, last);
   // no numbers to follow, but the same words begin every heading
   let series = seriesChapters(text, { name });
   if(series.length >= TUNING.drafts.seriesMin && series.length > drafts.length * TUNING.drafts.seriesOver) drafts = series;

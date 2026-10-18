@@ -2,7 +2,7 @@
 // parser reads it, and what the parser makes of it, the chapters and the names it gives most.
 import fs from 'node:fs';
 import path from 'node:path';
-import { extractChapters, normalizeFileContent } from '../src/parser.ts';
+import { extractChapters, lastChapterOf, normalizeFileContent } from '../src/parser.ts';
 import { Book, PARSER_VERSION } from '../src/book.ts';
 import { findNames } from '../src/name-patterns.ts';
 import type { BookRead } from './store.ts';
@@ -26,7 +26,7 @@ const jobs = {
     let source = fs.readFileSync(file, 'utf8');
     let text = normalizeFileContent(source);
     let { name, description } = Book({ name: path.basename(file) });
-    let chapters = extractChapters(name, text, { name });
+    let chapters = extractChapters(name, text, { name, last: lastChapterOf(path.basename(file)) });
     let raw = rawOffsets(rawText(source), text, chapters.map(c => c.offset));
     return {
       name, description, size, mtime, parser: PARSER_VERSION,

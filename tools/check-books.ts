@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { extractChapters, normalizeFileContent } from '../src/parser.ts';
+import { extractChapters, lastChapterOf, normalizeFileContent } from '../src/parser.ts';
 import { Book } from '../src/book.ts';
 
 // a book as the snapshot keeps it: each chapter's title, group, offset and the hash of its text
@@ -21,7 +21,7 @@ type Books = Record<string, Digest | { error: string }>;
 function digestOf(folder: string, file: string): Digest {
   let { name } = Book({ name: file });
   let text = normalizeFileContent(fs.readFileSync(path.join(folder, file), 'utf8'));
-  return extractChapters(name, text, { name }).map(c => [
+  return extractChapters(name, text, { name, last: lastChapterOf(path.basename(file)) }).map(c => [
     c.title, c.group ?? null, c.offset, crypto.createHash('md5').update(c.content).digest('hex').slice(0, 8),
   ]);
 }

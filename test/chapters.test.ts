@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractChapters, finishChapters, normalizeFileContent, readNumberWords, cleanTitle, chapterTitle } from '../src/parser.ts';
+import { extractChapters, finishChapters, normalizeFileContent, readNumberWords, cleanTitle, chapterTitle, lastChapterOf } from '../src/parser.ts';
 import type { Chapter } from '../src/parser.ts';
 import { Book } from '../src/book.ts';
 
@@ -132,6 +132,60 @@ describe('the last chapter', () => {
   });
 });
 
+describe('a chapter of a line, and a chapter that holds several', () => {
+  const chapter = (n: number, paragraphs = 12, title = '') => `Chương ${n}${title && `: ${title}`}\n\n${story(paragraphs, n)}`;
+  it('keeps an entry of a list of chapters in the chapter it stands in', () => {
+    let list = 'Chương 4: Tên bốn';
+    let chapters = real(parse(book([1, 2, 3, 4, 5].map(n => n === 5 ? `${chapter(n)}\n\n${list}` : chapter(n)), chapter(6), chapter(7))));
+    assert.deepEqual(titles(chapters), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4', 'Chương 5', 'Chương 6', 'Chương 7']);
+    assert.ok(chapters[4].content.includes('Chương 4: Tên bốn'));
+  });
+  it('keeps a chapter of a line that runs on, and the title page', () => {
+    let long = `Chương 3: ${story(3, 3).replace(/\n+/g, ' ')}`;
+    let chapters = parse(book(chapter(1), chapter(2), long, chapter(4), chapter(5)));
+    assert.deepEqual(titles(real(chapters)).map(t => t.split(':')[0]), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4', 'Chương 5']);
+    assert.equal(chapters[0].title, 'Sách thử');
+  });
+  it('cuts the books in a chapter far longer than the others, when no chapter of theirs is headed', () => {
+    let books = [51, 52, 53].map(n => `【Sách thử】 cuốn ${['năm mươi mốt', 'năm mươi hai', 'năm mươi ba'][n - 51]}\n\n${story(30, n)}`);
+    let chapters = real(parse(book([1, 2, 3, 4, 5].map(n => chapter(n)), books)));
+    assert.deepEqual(titles(chapters), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4', 'Chương 5', 'Cuốn 51', 'Cuốn 52', 'Cuốn 53']);
+    assert.ok(chapters[4].content.length < chapters[5].content.length / 2);
+  });
+  it('cuts the chapters a jump in the numbers left out where the lines set them apart', () => {
+    let long = [chapter(3), story(12, 4), story(12, 5)].join('\n\n* * *\n\n');
+    let chapters = real(parse(book(chapter(1), chapter(2), long, chapter(6), chapter(7), chapter(8))));
+    assert.deepEqual(titles(chapters), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4', 'Chương 5', 'Chương 6', 'Chương 7', 'Chương 8']);
+    assert.ok(chapters[3].content.startsWith('Nàng') && chapters[2].content.endsWith('* * *'));
+  });
+  it('takes the number a piece says, and makes no piece of a chapter\'s own next part', () => {
+    let long = [chapter(3), `#5 Tên năm\n\n${story(12, 5)}`].join('\n\n* * *\n\n');
+    let chapters = real(parse(book(chapter(1), chapter(2), long, chapter(6), chapter(7), chapter(8))));
+    assert.deepEqual(titles(chapters), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 5: Tên năm', 'Chương 6', 'Chương 7', 'Chương 8']);
+    let parted = [chapter(3), `#3 tiếp theo\n\n${story(12, 5)}`].join('\n\n* * *\n\n');
+    assert.equal(real(parse(book(chapter(1), chapter(2), parted, chapter(6), chapter(7), chapter(8)))).length, 6);
+  });
+  it('cuts the last chapter where the file\'s name says the book goes further', () => {
+    let text = book([1, 2, 3, 4, 5].map(n => chapter(n)), [chapter(6), story(12, 7)].join('\n\n———\n\n'));
+    let name = 'Sách thử';
+    let read = (last?: number) => titles(real(extractChapters(name, prepare(text, name), { name, last })));
+    assert.deepEqual(read(7), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4', 'Chương 5', 'Chương 6', 'Chương 7']);
+    assert.deepEqual(read(), ['Chương 1', 'Chương 2', 'Chương 3', 'Chương 4', 'Chương 5', 'Chương 6']);
+  });
+  it('leaves a long chapter with nothing missing after it whole', () => {
+    let long = [chapter(3), story(12, 4)].join('\n\n* * *\n\n');
+    assert.equal(real(parse(book(chapter(1), chapter(2), long, chapter(4), chapter(5), chapter(6)))).length, 6);
+  });
+  it('reads the last chapter of a file\'s name, only of a run of chapters', () => {
+    assert.equal(lastChapterOf('Sách (1-200 chương).txt'), 200);
+    assert.equal(lastChapterOf('Sách (1-60 chương kết thúc + ngoại truyện 1-42 chương).txt'), 60);
+    assert.equal(lastChapterOf('Sách (0-65 chương).txt'), 65);
+    assert.equal(lastChapterOf('Sách (1-51 tập 9 chương).txt'), undefined);
+    assert.equal(lastChapterOf('Sách (1-2 bộ 65 cuốn + phiên ngoại 1-4).txt'), undefined);
+    assert.equal(lastChapterOf('Sách (12-30 chương).txt'), undefined);
+  });
+});
+
 describe('parts, ranges and extras', () => {
   const parts = (chapters: Chapter[]) => chapters.map(c => c.part && `${c.part.of} > ${c.part.text}`);
   it('shows the parts of a chapter one by one, under the chapter named once', () => {
@@ -194,13 +248,14 @@ describe('parts, ranges and extras', () => {
     assert.ok(chapters[1].content.startsWith('Thứ 13 chương tam đối'));
   });
   it('keeps a part the book repeats among the others, and takes one repeated alone for none', () => {
-    let drafts = (headings: string[][]) => headings.map(([number, title], k) => ({ offset: k * 10, heading: { number, title, text: title } }));
+    // (each a few lines long: a chapter of one is an entry of a list)
+    let drafts = (headings: string[][]) => headings.map(([number, title], k) => ({ offset: k * 300, heading: { number, title, text: title } }));
     let repeated = drafts([['119', 'Hành động (1)'], ['119', 'Hành động (1)'], ['119', 'Hành động (2)']]);
-    assert.deepEqual(parts(finishChapters(repeated, story(3))), ['Chương 119: Hành động > (1/2)', 'Chương 119: Hành động > (1/2)', 'Chương 119: Hành động > (2/2)']);
+    assert.deepEqual(parts(finishChapters(repeated, story(20))), ['Chương 119: Hành động > (1/2)', 'Chương 119: Hành động > (1/2)', 'Chương 119: Hành động > (2/2)']);
     let over = drafts([['119', 'Hành động (1)'], ['119', 'Hành động (1)'], ['120', 'Hành động (2)']]);
-    assert.deepEqual(parts(finishChapters(over, story(3))), ['Chương 119-120: Hành động > (1/2)', 'Chương 119-120: Hành động > (1/2)', 'Chương 119-120: Hành động > (2/2)']);
+    assert.deepEqual(parts(finishChapters(over, story(20))), ['Chương 119-120: Hành động > (1/2)', 'Chương 119-120: Hành động > (1/2)', 'Chương 119-120: Hành động > (2/2)']);
     let alone = drafts([['119', 'Hành động (1)'], ['119', 'Hành động (1)']]);
-    assert.deepEqual(parts(finishChapters(alone, story(3))), [undefined, undefined]);
+    assert.deepEqual(parts(finishChapters(alone, story(20))), [undefined, undefined]);
   });
   it('starts the parts over with the next chapter, and takes a note in brackets for none', () => {
     let text = book(['27', '28'].flatMap(n => ['thượng', 'hạ'].map(p => `Chương ${n}: (${p})\n\n${story(6)}`)), `Chương 29: Thu hoạch\n\n${story(6)}`, `Chương 30: Thu hoạch (tu)\n\n${story(6)}`);

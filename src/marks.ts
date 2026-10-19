@@ -3,7 +3,7 @@
 // patterns find (name-patterns.ts), each with the person it is of. Nothing of the page: the
 // server marks a chapter before it sends it, so the page only colours where it is told
 // (names.ts), and marks one itself only while the list is edited.
-import { addressedBy, buildRegex, nameRegexes, namePatterns, standaloneRelationships } from './name-patterns.ts';
+import { addressedBy, buildRegex, nameRegexes, namePatterns, openingNames, standaloneRelationships } from './name-patterns.ts';
 
 // ---- words and their case -----------------------------------------------------------
 export function titleCase(s: string) {
@@ -396,6 +396,8 @@ export function findMarks(texts: string[], names: string): { marks: Mark[]; pers
       }
     });
   }
+  // and those the sentences open with, as sure of as the general patterns
+  for (let [name] of openingNames(texts)) collect(1, name);
   // an empty alternation below would match the empty string everywhere
   if (!tiers.some(tier => tier.length)) return { marks: [], persons: {} };
   let tierRegexes = tiers.map(tier => tier.length > 0 && anyOf(tier));

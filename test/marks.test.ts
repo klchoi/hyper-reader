@@ -40,6 +40,12 @@ describe('the names in a chapter', () => {
   it('lets a name of the list win over a longer one the text gives around it', () => {
     assert.deepEqual(marked(['Hôm qua gặp Lý Tiêu Dao.'], 'Tiêu Dao'), [[0, 'Tiêu Dao', 'tiêu dao', true]]);
   });
+  it('finds a name the sentences open with, when they open with it more than once', () => {
+    assert.deepEqual(marked(['Lâm Phong cười. Lâm Phong đi.'], ''), [
+      [0, 'Lâm Phong', 'lâm phong', false], [0, 'Lâm Phong', 'lâm phong', false],
+    ]);
+    assert.deepEqual(marked(['Thấy Phong cười.', 'Rồi nói: Lâm Phong.'], ''), []);
+  });
   it('finds nothing with nothing to find', () => {
     assert.deepEqual(findMarks(['một ngày dài.'], ''), { marks: [], persons: {} });
   });

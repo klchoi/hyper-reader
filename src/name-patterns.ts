@@ -54,13 +54,29 @@ export const namePatterns = [
 ];
 export const nameRegexes = () => namePatterns.map(patterns => buildRegex(patterns, namePlaceholders, 'gu'));
 
+// A sentence's first word is capitalized whatever it is, so the patterns above take nothing from
+// where one opens. Two capitalized words there and then a lowercase one (`Lâm Phong cười`) are
+// still a name, when the text opens with them again and again: once may be a capitalized word
+// and whatever follows it, `least` times is somebody the sentences are about
+const OPENING = /(?:^|[.:"'!?()[\]“”…]\s*)(\p{Lu}\p{Ll}* \p{Lu}\p{Ll}*)(?= \p{Ll})/gu;
+export function openingNames(texts: string[], least = 2) {
+  let found = new Map<string, string[]>();   // lowercased -> each time it opens a sentence, as written
+  for(let text of texts) {
+    for(let match of text.matchAll(OPENING)) {
+      let key = match[1].toLowerCase();
+      (found.get(key) ?? found.set(key, []).get(key)!).push(match[1]);
+    }
+  }
+  return [...found.values()].filter(times => times.length >= least);
+}
+
 // The names a text gives, and how often, for the server to keep of each book: what the
 // patterns above take for a name, told by a faster way, since it reads whole libraries. Two to
 // four capitalized words that do not open a sentence (a sentence's first word is capitalized
-// whatever it is), or a single one behind `a`, `tiểu` or `lão`. Each is written the way it is
-// written most, counted however it is cased, and a name of three or four words also counts as
-// its last two, the way it is usually shortened. Only what is said `least` times or more, the
-// `most` said first
+// whatever it is) unless the text opens with them often (see openingNames), or a single one
+// behind `a`, `tiểu` or `lão`. Each is written the way it is written most, counted however it
+// is cased, and a name of three or four words also counts as its last two, the way it is usually
+// shortened. Only what is said `least` times or more, the `most` said first
 const CAPITALIZED = /(?<![\p{L}\p{N}])\p{Lu}\p{Ll}*(?: \p{Lu}\p{Ll}*){1,3}(?![\p{L}\p{N}])/gu;
 const ADDRESSED = /(?<![\p{L}\p{N}])(?:a|tiểu|lão) \p{Lu}\p{Ll}*(?![\p{L}\p{N}]| \p{Lu})/gu;
 const OPENS_SENTENCE = /(?:^|[.:"'!?()[\]“”…])\s*$/u;
@@ -81,6 +97,7 @@ export function findNames(text: string, { least = 3, most = 200 } = {}) {
     }
     for(let match of line.matchAll(ADDRESSED)) count(match[0]);
   }
+  for(let times of openingNames(text.split('\n'))) times.forEach(count);
   return [...found.values()]
     .filter(entry => entry.count >= least)
     .sort((a, z) => z.count - a.count)

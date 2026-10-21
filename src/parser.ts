@@ -567,8 +567,8 @@ const HEADING_RULES = ([
   { kind: 'chap', base: 9, re: `^${DECOR}(?<cm>p)[LS]+(?<cn>N)R?` },
   // Thứ 7-10 chương: several chapters under one heading
   { kind: 'chap', base: 9, re: `^${DECOR}(?<tt>t)?(?<cn>N)S(?<cn3>N)(?<cm2>c)` },
-  // 【NAME】9 | NAME #3 | NAME (5) | 《NAME》2
-  { kind: 'chap', base: 7, re: `^${DECOR}nR?S?${DECOR}(?<cn>N)R?` },
+  // 【NAME】9 | NAME #3 | NAME (5) | 《NAME》2 | 《NAME》 tiếp theo nhị (a sequel's second part)
+  { kind: 'chap', base: 7, re: `^${DECOR}nR?S?${DECOR}(?<nx>xx)?(?<cn>N)R?` },
   // Quyển thứ ba 3: the chapter's number follows its book's
   { kind: 'chap', base: 7, re: `^${DECOR}${NAME_PART}${DECOR}${BOOK_PART}${DECOR}(?<cn>N)` },
   // Quyển thứ hai | Bộ 2 | Thứ 4 cuốn
@@ -765,10 +765,15 @@ function readHeading(line: string, lower: string, names: string[], cut = false):
     // `một hồi` (a while) and `chín thiên` are not chapters: only `chương` follows a number alone
     if(at('cm2') && at('cm2')?.word !== 'Chương' && !at('tt')) continue;
     if(rule.sino && (!at('cn')?.sino || at('sep')?.text !== ',')) continue;
+    // between the book's name and its number, only `tiếp theo` (continued): `《NAME》 tiếp theo nhị`
+    let sequel = spanOf(m, 'nx');
+    if(sequel && lower.slice(tokens[sequel[0]].s, tokens[sequel[1] - 1].e) !== 'tiếp theo') continue;
     let last = tokens[m[0].length - 1];
     let rest = line.slice(last.e);
     let whole = !/\S/.test(rest);
     let read = readRoles(rule, at);
+    // (it is an extra, after the book is done)
+    if(sequel) Object.assign(read.roles, { extra: true, chapType: 'Tiếp theo' });
     // `Thứ 6 chương Chương 6: Cao trào...` and `Thứ 8 chương thật · Chương 8:: Đại tỷ...`
     // say the chapter twice; the title is what follows the second
     let title = leadingTitle(m, tokens, line, rest) ?? cleanTitle(rest);

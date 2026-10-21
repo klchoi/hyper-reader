@@ -359,6 +359,12 @@ describe('headings of other shapes', () => {
     let text = book(['Quyển thứ nhất', `Chương 1\n\n${story(8)}`, `Chương 2\n\n${story(8)}`, 'Quyển thứ hai', `Thứ 0 chương tự\n\n${story(8)}`, `Chương 1\n\n${story(8)}`, `Chương 2\n\n${story(8)}`]);
     assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Tự', 'Chương 1', 'Chương 2']);
   });
+  it('reads the sequels after a book, its name and `tiếp theo` with their numbers, as extras', () => {
+    let text = book([1, 2, 3].map(n => `Chương ${n}\n\n${story(8, n)}`), ['nhất', 'nhị', 'tam'].map((p, k) => `《 Sách thử 》 tiếp theo ${p}\n\n${story(8, k)}`));
+    assert.deepEqual(titles(real(parse(text))), ['Chương 1', 'Chương 2', 'Chương 3', 'Tiếp theo 1', 'Tiếp theo 2', 'Tiếp theo 3']);
+    let prose = book([1, 2, 3].map(n => `Chương ${n}\n\n${story(8, n)}\n\n《 Sách thử 》 bán được hai vạn bản.\n\n${story(4, n)}`));
+    assert.deepEqual(titles(real(parse(prose))), ['Chương 1', 'Chương 2', 'Chương 3']);
+  });
   it('finds a heading that follows its book words on the same line', () => {
     let text = book([1, 2, 3].map(n => `Chương ${n}\n\n${story(8, n)}`), `Quyển thứ ba con rối thánh nữ thiên Chương 4: Thất thân cảnh\n\n${story(8)}`, `Chương 5\n\n${story(8)}`);
     assert.equal(real(parse(text))[3].title, 'Chương 4: Thất thân cảnh');

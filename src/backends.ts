@@ -36,8 +36,9 @@ import { queryString } from './catalog.ts';
 import type { Listing, Progress, Query, TagCount } from './catalog.ts';
 import type { Marked } from './marks.ts';
 
-// a chapter as the page shows it: `length` is that of its text as read
-export type Shown = Listed & Marked & { length: number; content?: string };
+// a chapter as the page shows it: `length` is that of its text as read; `content` and `bookNames`
+// (the names the book gives) only when asked for raw
+export type Shown = Listed & Marked & { length: number; content?: string; bookNames?: string[] };
 
 // a file dropped on the page: `date` its time (ms)
 export type FileInfo = { name: string; size: number; date?: number };

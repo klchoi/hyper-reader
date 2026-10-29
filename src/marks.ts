@@ -368,10 +368,12 @@ export function listedPeople(names: string) {
 }
 
 const wordBound = { wb: /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/u };
-// the regex that finds any of `names`, the longer first
-export const anyOf = (names: string[]) => buildRegex([`{wb}(${[...names].sort((a, z) => z.length - a.length).map(escapeRegExp).join('|')}){wb}`], wordBound, 'gui');
+// the regex that finds any of `names`, the longer first, however cased unless `flags` say
+export const anyOf = (names: string[], flags = 'gui') => buildRegex([`{wb}(${[...names].sort((a, z) => z.length - a.length).map(escapeRegExp).join('|')}){wb}`], wordBound, flags);
 
-export function findMarks(texts: string[], names: string): { marks: Mark[]; persons: Persons } {
+// `bookNames` are the names the whole book gives (see findNames in name-patterns.ts), for the
+// sentences of these texts that open with one of them
+export function findMarks(texts: string[], names: string, bookNames: string[] = []): { marks: Mark[]; persons: Persons } {
   let { known, aliasOf, genders } = listedPeople(names);
   let knownIds = new Set(known.map(name => name.toLowerCase()));
   // collect names, by descending confidence: what the list says, then the patterns (see
@@ -398,6 +400,13 @@ export function findMarks(texts: string[], names: string): { marks: Mark[]; pers
   }
   // and those the sentences open with, as sure of as the general patterns
   for (let [name] of openingNames(texts)) collect(1, name);
+  // and those the book names elsewhere: a sentence opening with `Lâm Phong Vũ` is somebody when
+  // the book says so in the middle of another. Only where written as the book writes them, or a
+  // word the book capitalizes would be marked everywhere it is not
+  if (bookNames.length) {
+    let bookRegex = anyOf(bookNames, 'gu');
+    for (let text of texts) for (let match of text.matchAll(bookRegex)) collect(1, match[0]);
+  }
   // an empty alternation below would match the empty string everywhere
   if (!tiers.some(tier => tier.length)) return { marks: [], persons: {} };
   let tierRegexes = tiers.map(tier => tier.length > 0 && anyOf(tier));
@@ -455,9 +464,10 @@ export function findMarks(texts: string[], names: string): { marks: Mark[]; pers
 }
 
 // a chapter as the page shows it: its lines as the list corrects them, and the names in them
-export function markChapter(chapter: { content: string; offset: number }, names: string): Marked {
+// (`bookNames` those the book gives, see findMarks)
+export function markChapter(chapter: { content: string; offset: number }, names: string, bookNames: string[] = []): Marked {
   let lines = linesOf(chapter, nameFixer(names));
-  return { lines, ...findMarks(lines.map(line => line.text), names) };
+  return { lines, ...findMarks(lines.map(line => line.text), names, bookNames) };
 }
 
 // what the list says a person is, put beside each of their names in the chapter: where in which

@@ -32,7 +32,7 @@ export function buildRegex(patterns: (RegExp | string | false | null | undefined
 }
 
 export const namePlaceholders = {
-  wb: /$|(?<=[^\p{L}])|(?=[^\p{L}])/u,
+  wb: /^|$|(?<=[^\p{L}])|(?=[^\p{L}])/u,
   Upper: /\p{Lu}/u,
   Lower: /\p{Ll}/u,
   Word: /{wb}{Upper}{Lower}*{wb}/,
@@ -73,10 +73,12 @@ export function openingNames(texts: string[], least = 2) {
 // The names a text gives, and how often, for the server to keep of each book: what the
 // patterns above take for a name, told by a faster way, since it reads whole libraries. Two to
 // four capitalized words that do not open a sentence (a sentence's first word is capitalized
-// whatever it is) unless the text opens with them often (see openingNames), or a single one
-// behind `a`, `tiểu` or `lão`. Each is written the way it is written most, counted however it
-// is cased, and a name of three or four words also counts as its last two, the way it is usually
-// shortened. Only what is said `least` times or more, the `most` said first
+// whatever it is), or a single one behind `a`, `tiểu` or `lão`. Not those the text opens with
+// often (see openingNames): the page marks these names in every chapter of the book (see
+// findMarks in marks.ts), and across a whole book they are mostly a word and a name, `Mà Lạc`.
+// Each is written the way it is written most, counted however it is cased, and a name of three
+// or four words also counts as its last two, the way it is usually shortened. Only what is said
+// `least` times or more, the `most` said first
 const CAPITALIZED = /(?<![\p{L}\p{N}])\p{Lu}\p{Ll}*(?: \p{Lu}\p{Ll}*){1,3}(?![\p{L}\p{N}])/gu;
 const ADDRESSED = /(?<![\p{L}\p{N}])(?:a|tiểu|lão) \p{Lu}\p{Ll}*(?![\p{L}\p{N}]| \p{Lu})/gu;
 const OPENS_SENTENCE = /(?:^|[.:"'!?()[\]“”…])\s*$/u;
@@ -97,7 +99,6 @@ export function findNames(text: string, { least = 3, most = 200 } = {}) {
     }
     for(let match of line.matchAll(ADDRESSED)) count(match[0]);
   }
-  for(let times of openingNames(text.split('\n'))) times.forEach(count);
   return [...found.values()]
     .filter(entry => entry.count >= least)
     .sort((a, z) => z.count - a.count)

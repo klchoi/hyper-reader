@@ -609,7 +609,7 @@ export function createStore() {
   }
   // the list as it is typed: the chapter is marked here, from its text as stored (asked of the
   // backend the first time), a moment after the typing stops
-  let stored: { key: string; content: string; offset: number } | null = null;
+  let stored: { key: string; content: string; offset: number; bookNames: string[] } | null = null;
   let markTimer: ReturnType<typeof setTimeout> | undefined;
   function setNames(text: string) {
     names.value = text;
@@ -622,9 +622,9 @@ export function createStore() {
       if (stored?.key !== key) {
         let found = await backend.chapter(open.id, at, true);
         if (found?.content == null || chapter.value !== at) return;
-        stored = { key, content: found.content, offset: found.offset };
+        stored = { key, content: found.content, offset: found.offset, bookNames: found.bookNames ?? [] };
       }
-      edited.value = markChapter(stored, names.value);
+      edited.value = markChapter(stored, names.value, stored.bookNames);
       highlight();
     }, 300);
   }

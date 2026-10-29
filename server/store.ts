@@ -221,6 +221,8 @@ export function createStore(file: string) {
     booksIn: (root: string) => sql(`select ${BOOK_COLUMNS} from books where root = ?`).all(root) as BookRow[],
     book: (id: string) => (sql(`select ${BOOK_COLUMNS} from books where id = ?`).get(id) ?? null) as BookRow | null,
     chapters: (id: string) => sql('select rowid, n, id, title, offset, "end", raw_offset, grp, part_of, part_text from chapters where book_id = ? order by n').all(id) as ChapterRow[],
+    // the names the book gives most (see findNames in src/name-patterns.ts), as written most
+    characterNames: (id: string) => (sql('select name from characters where book_id = ?').all(id) as { name: string }[]).map(row => row.name),
     // a book read: its row, and its chapters and characters in place of what it had, only what is
     // not as it was written (a book read again is mostly the same). Its index is the indexer's
     // (see index-store.ts): kept as long as its file is the one indexed, whatever the parser made

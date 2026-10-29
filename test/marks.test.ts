@@ -2,10 +2,11 @@
 // names in them are, those of the list and those the text gives, each the name of somebody.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { findNames } from '../src/name-patterns.ts';
 import { aliasCandidates, anyOf, findMarks, genderSaid, linesOf, listedPerson, markChapter, nameFixer, namesWith, namesWithGender, piecesSaying } from '../src/marks.ts';
 
 // what is marked in `texts`, as [text, name, person, in the list]
-const marked = (texts: string[], names: string) => findMarks(texts, names).marks
+const marked = (texts: string[], names: string, bookNames?: string[]) => findMarks(texts, names, bookNames).marks
   .map(({ at, start, end, person, known }) => [at, texts[at].slice(start, end), person, known]);
 
 describe('a chapter in lines', () => {
@@ -46,8 +47,27 @@ describe('the names in a chapter', () => {
     ]);
     assert.deepEqual(marked(['Thấy Phong cười.', 'Rồi nói: Lâm Phong.'], ''), []);
   });
+  it('takes no name from inside the one a line opens with', () => {
+    assert.deepEqual(marked(['Lâm Phong Vũ cười.'], ''), []);
+    assert.deepEqual(marked(['Lâm Phong Vũ cười.', 'Hôm nay Lâm Phong Vũ đi.'], ''), [
+      [0, 'Lâm Phong Vũ', 'lâm phong vũ', false], [1, 'Lâm Phong Vũ', 'lâm phong vũ', false],
+    ]);
+  });
+  it('finds a name the book gives where a sentence opens with it, only as the book writes it', () => {
+    assert.deepEqual(marked(['Lâm Phong Vũ cười. Thấy vậy, Phong Vũ đi.'], '', ['Lâm Phong Vũ', 'Phong Vũ']), [
+      [0, 'Lâm Phong Vũ', 'lâm phong vũ', false], [0, 'Phong Vũ', 'lâm phong vũ', false],
+    ]);
+    assert.deepEqual(marked(['Trời có thiên đạo.'], '', ['Thiên Đạo']), []);
+  });
   it('finds nothing with nothing to find', () => {
     assert.deepEqual(findMarks(['một ngày dài.'], ''), { marks: [], persons: {} });
+  });
+});
+
+describe('the names a book gives', () => {
+  it('takes none from where sentences open, however often', () => {
+    let text = 'Mà Lạc vũ cười. Mà Lạc vũ đi. Mà Lạc vũ nói.\nHôm nay Lâm Phong gặp Lâm Phong, rồi Lâm Phong đi.';
+    assert.deepEqual(findNames(text), [{ name: 'Lâm Phong', mentions: 3 }]);
   });
 });
 

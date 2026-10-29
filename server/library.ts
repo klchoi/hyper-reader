@@ -97,12 +97,13 @@ export function createLibrary({ data, libraries = [], sample = 0, indexDir = dat
   indexer.nudge();
   let fileOf = (row: BookRow) => path.join(roots.get(row.root) ?? '', row.path);
   // the chapters marked last (see src/marks.ts), with the names list they were marked by: a
-  // chapter read on, or gone back to, is not marked again
+  // chapter read on, or gone back to, is not marked again. The names the book gives change only
+  // with its file, which the key is of
   let marked = new Map<string, { names: string; at: Marked }>();
-  let markedOf = (key: string, content: string, offset: number, names: string) => {
+  let markedOf = (key: string, content: string, offset: number, names: string, bookNames: string[]) => {
     let kept = marked.get(key);
     if(kept?.names === names) return kept.at;
-    let at = markChapter({ content, offset }, names);
+    let at = markChapter({ content, offset }, names, bookNames);
     marked.delete(key);
     marked.set(key, { names, at });
     if(marked.size > 16) marked.delete(marked.keys().next().value!);
@@ -243,9 +244,9 @@ export function createLibrary({ data, libraries = [], sample = 0, indexDir = dat
       return recordOf(row);
     },
     // a chapter as the page shows it: its lines corrected by the book's names list, and the names
-    // in them (see src/marks.ts), and how long its text is; `raw`, with the text as read too (for
-    // the names to be marked as they are edited)
-    async chapter(id: string, chapterId: string, { raw = false, again = true } = {}): Promise<(ReturnType<typeof listedOf> & Marked & { length: number; content?: string }) | null> {
+    // in them (see src/marks.ts), and how long its text is; `raw`, with the text as read and the
+    // names the book gives too (for the names to be marked as they are edited)
+    async chapter(id: string, chapterId: string, { raw = false, again = true } = {}): Promise<(ReturnType<typeof listedOf> & Marked & { length: number; content?: string; bookNames?: string[] }) | null> {
       let row = store.book(id);
       let chapter = row && store.chapters(id).find(c => c.id === chapterId);
       if(!row || !chapter) return null;
@@ -253,8 +254,9 @@ export function createLibrary({ data, libraries = [], sample = 0, indexDir = dat
       // the file changed since it was read: read again, and the chapter asked of that
       if(text == null) return again && await library.rereadBook(id) ? library.chapter(id, chapterId, { raw, again: false }) : null;
       let content = text.slice(chapter.offset, chapter.end).trim();
-      let at = markedOf(`${id}/${row.size}/${row.mtime}/${chapterId}`, content, chapter.offset, reader.names(id) ?? '');
-      return { ...listedOf(chapter), length: content.length, ...at, ...(raw && { content }) };
+      let bookNames = store.characterNames(id);
+      let at = markedOf(`${id}/${row.size}/${row.mtime}/${chapterId}`, content, chapter.offset, reader.names(id) ?? '', bookNames);
+      return { ...listedOf(chapter), length: content.length, ...at, ...(raw && { content, bookNames }) };
     },
     async rereadBook(id: string): Promise<BookRecord | null> {
       let row = store.book(id);
